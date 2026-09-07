@@ -405,6 +405,21 @@ mod tests {
         out
     }
 
+    /// Deterministic low-level noise at a chosen amplitude, no carrier
+    /// anywhere. Shared by every noise-rejection test in this file so they
+    /// all draw from the same generator.
+    fn noise_buf(amplitude: f32, n: usize, seed: u64) -> Vec<f32> {
+        let mut state = seed;
+        (0..n)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                ((state >> 40) as f32 / 8_388_608.0 - 1.0) * amplitude
+            })
+            .collect()
+    }
+
     /// Byte-exact comparison with a failure message you can read.
     /// `assert_eq!` on a 2100-byte payload prints both vectors in full and
     /// buries the one fact that matters, which is where they first parted.
@@ -898,17 +913,20 @@ mod tests {
     }
 
     /// The reason this task exists, measured across a range rather than at
-    /// one point. A single amplitude cannot show where the detector's
-    /// noise-rejection ceiling actually sits, and Task 6's fix round 1
-    /// shipped with that ceiling far too low - genuine microphone
-    /// self-noise (about -38 dBFS, amplitude 0.0126) falsely asserted
-    /// carrier and, because the floor could never move once detected,
-    /// never released it. Swapping to a floor that freezes on detection
-    /// instead of merely decaying slowly moved the measured ceiling from
-    /// about 0.012 to about 0.02-0.03: every amplitude here still passes,
-    /// and 0.03 is documented in `carrier.rs` as the current point where
-    /// it does not, which is a real, accepted limit of any single
-    /// energy-ratio threshold - not a defect this sweep is hiding.
+    /// one point, from a cold start (no prior idle time - see
+    /// `noise_rejection_at_reference_amplitude_holds_across_idle_
+    /// durations` for the same property across idle durations). A single
+    /// amplitude cannot show where the detector's noise-rejection ceiling
+    /// actually sits, and Task 6's fix round 1 shipped with that ceiling
+    /// far too low - genuine microphone self-noise (about -38 dBFS,
+    /// amplitude 0.0126) falsely asserted carrier and, because the floor
+    /// could never move once detected, held that lock for as long as the
+    /// noise itself continued. Swapping to a floor that freezes on
+    /// detection instead of merely decaying slowly moved the measured
+    /// cold-start ceiling from about 0.012 to precisely between 0.0205
+    /// (passes) and 0.021 (fails) - documented as a measured pair of
+    /// numbers in `carrier.rs`'s `INITIAL_FLOOR` comment, not the "0.02 to
+    /// 0.03" range an earlier report gave from testing only the endpoints.
     #[test]
     fn noise_on_a_dead_line_produces_no_bytes() {
         for amplitude in [1e-4f32, 1e-3, 5e-3, 1e-2, 0.0126, 0.02] {
@@ -917,15 +935,7 @@ mod tests {
 
             // Deterministic noise, no carrier anywhere, scaled per sweep
             // point.
-            let mut state = 0x2545F491_4F6CDD1Du64;
-            let noise: Vec<f32> = (0..40_000)
-                .map(|_| {
-                    state ^= state << 13;
-                    state ^= state >> 7;
-                    state ^= state << 17;
-                    ((state >> 40) as f32 / 8_388_608.0 - 1.0) * amplitude
-                })
-                .collect();
+            let noise = noise_buf(amplitude, 40_000, 0x2545F491_4F6CDD1D);
 
             let mut got = [0u8; 256];
             let mut total = 0;
@@ -945,23 +955,29 @@ mod tests {
         }
     }
 
-    /// Task 6's fix round 1 quietly cost most of the receiver's dynamic
-    /// range: the previous commit decoded this same payload at amplitude
-    /// 1e-6, and after gating on a fixed-constant floor, the usable window
-    /// between "too quiet to raise carrier" and "loud enough to be
-    /// mistaken for noise" (see `noise_on_a_dead_line_produces_no_bytes`)
-    /// narrowed to about 1.6x. Freezing the floor on detection instead of
-    /// merely decaying it slowly widens that window to roughly 2.67x
-    /// (0.0075 to 0.02) by raising the noise ceiling, but does not recover
-    /// the low end - 0.0075 today, same order as before this round's
-    /// fix. That remains a real, documented limit: `INITIAL_FLOOR` has to
-    /// clear ordinary ambient noise (see `carrier.rs`), and a weak but
-    /// genuine carrier below about `RISE_RATIO * INITIAL_FLOOR` in energy
-    /// cannot be told apart from that same ambient in the one attack time
-    /// constant before the initial rise-or-not decision is made. This
-    /// pins the current measured boundary so a future change to these
-    /// constants has to look at it rather than silently narrow it
-    /// further.
+    /// This is the **cold-start** figure specifically - no prior idle
+    /// time. Task 6's own first submission (before any fix round) decoded
+    /// the previous commit's amplitude 1e-6 before carrier gating existed
+    /// at all; gating on a fixed-constant floor cut that to 0.0075. This
+    /// particular number has not moved since across any later fix -
+    /// freezing the floor on detection and, later, clamping how far it can
+    /// decay both leave it untouched, because the cold-start race is
+    /// decided by `level` against `INITIAL_FLOOR` in the first attack time
+    /// constant, milliseconds, which is over long before `FLOOR_ADAPT`
+    /// (1.25 s) can matter either way. (The cold-start noise *ceiling* did
+    /// move across fix rounds, from about 0.012 to about 0.0205 - see
+    /// `noise_on_a_dead_line_produces_no_bytes` - but that is a different
+    /// number from this test's sensitivity figure, decided by a different
+    /// side of the same race.)
+    ///
+    /// Sensitivity **does** improve with idle time - see `floor_adapts_
+    /// downward_during_a_quiet_settle_period`, which is the other half of
+    /// this property and was previously, wrongly, presented as
+    /// contradicting this one. Both are true simultaneously: 0.0075 at a
+    /// cold start, and about 0.0006 after 10 s or more of idle line - see
+    /// `carrier.rs`'s module doc for the full settle-time table. Neither
+    /// is "the" structural sensitivity floor; both are readings of the
+    /// same mechanism at different idle durations.
     #[test]
     fn carrier_detection_sensitivity_window() {
         fn clean_loopback_detects(amplitude: f32) -> bool {
@@ -1008,6 +1024,13 @@ mod tests {
     /// `INITIAL_FLOOR`'s starting guess - amplitude 0.003 is below this
     /// crate's measured 0.0075 sensitivity floor from a cold start, but
     /// clears it after two seconds of quiet.
+    ///
+    /// The same downward adaptation this test wants is exactly what let
+    /// fix round 1's floor decay towards zero given enough quiet, with
+    /// nothing to stop it - the fix for that (`FLOOR_MIN_FRACTION`, see
+    /// `carrier.rs`) is a lower clamp, not a removal of this behaviour,
+    /// so this test and `quiet_then_noise_does_not_fabricate_bytes` are
+    /// two sides of the same mechanism and both have to keep passing.
     #[test]
     fn floor_adapts_downward_during_a_quiet_settle_period() {
         let c = cfg(Role::Originate, 8000);
@@ -1040,6 +1063,120 @@ mod tests {
             rx.carrier_detected(),
             "a signal too weak for a cold start must still raise carrier \
              after the floor has had time to settle on a quiet line"
+        );
+    }
+
+    /// The combination nothing before this test covered, and the one that
+    /// would have caught fix round 1's regression: `noise_on_a_dead_line_
+    /// produces_no_bytes` starts noise immediately on a fresh `Rx`, where
+    /// the floor is still at `INITIAL_FLOOR`, and `floor_adapts_downward_
+    /// during_a_quiet_settle_period` follows quiet with a weak *signal*,
+    /// never with noise. With no lower bound on the floor, a few seconds
+    /// of quiet let it decay far enough that noise more than a decade
+    /// quieter than this crate's -38 dBFS mic-noise reference asserted
+    /// carrier and stayed locked for as long as that noise continued.
+    /// This is a half-duplex modem: a gap of a few seconds between
+    /// transmissions is the ordinary operating condition, not an edge
+    /// case.
+    #[test]
+    fn quiet_then_noise_does_not_fabricate_bytes() {
+        let c = cfg(Role::Originate, 8000);
+        let mut rx = Rx::new(c);
+        let quiet = vec![0.0f32; 733];
+        let mut sent = 0;
+        while sent < 80_000 {
+            // 10 s settle - the regression measured about 5 s.
+            rx.write(&quiet);
+            sent += 733;
+        }
+        let noise = noise_buf(1e-3, 40_000, 0x2545F491_4F6CDD1D);
+        let mut got = [0u8; 256];
+        let mut total = 0;
+        for chunk in noise.chunks(733) {
+            rx.write(chunk);
+            total += rx.read(&mut got);
+        }
+        assert_eq!(
+            total, 0,
+            "fabricated {total} bytes from amplitude 1e-3 noise after a 10 s quiet settle"
+        );
+        assert_eq!(
+            rx.framing_errors(),
+            0,
+            "fabricated framing errors from amplitude 1e-3 noise after a 10 s quiet settle"
+        );
+    }
+
+    /// Pins noise rejection at this crate's 1e-3 reference amplitude
+    /// across a range of idle durations rather than at one point - the
+    /// floor's lower clamp has to hold regardless of how long the line
+    /// sat quiet first, which is exactly the property a single settle
+    /// duration cannot demonstrate.
+    #[test]
+    fn noise_rejection_at_reference_amplitude_holds_across_idle_durations() {
+        for settle_secs in [0.0f64, 1.0, 5.0, 10.0, 60.0] {
+            let c = cfg(Role::Originate, 8000);
+            let mut rx = Rx::new(c);
+            let quiet = vec![0.0f32; 733];
+            let settle_samples = (settle_secs * 8000.0) as usize;
+            let mut sent = 0;
+            while sent < settle_samples {
+                rx.write(&quiet);
+                sent += 733;
+            }
+            let noise = noise_buf(1e-3, 40_000, 0x2545F491_4F6CDD1D);
+            let mut got = [0u8; 256];
+            let mut total = 0;
+            for chunk in noise.chunks(733) {
+                rx.write(chunk);
+                total += rx.read(&mut got);
+            }
+            assert_eq!(
+                total, 0,
+                "settle {settle_secs}s: fabricated {total} bytes from amplitude 1e-3 noise"
+            );
+            assert_eq!(
+                rx.framing_errors(),
+                0,
+                "settle {settle_secs}s: fabricated framing errors from amplitude 1e-3 noise"
+            );
+        }
+    }
+
+    /// Corrects a claim from this crate's own history. A false lock from
+    /// noise is not permanent - it clears once the noise that caused it
+    /// actually stops, in about the hold-off period. "Never recovers" (an
+    /// earlier report's wording) meant "while the same noise continues",
+    /// which is materially more benign than it reads.
+    #[test]
+    fn a_false_lock_clears_once_the_noise_actually_stops() {
+        let c = cfg(Role::Originate, 8000);
+        let mut rx = Rx::new(c);
+        // Loud enough to falsely lock on immediately from a cold start.
+        let noise = noise_buf(0.03, 80_000, 0x2545F491_4F6CDD1D);
+        for chunk in noise.chunks(733) {
+            rx.write(chunk);
+        }
+        assert!(
+            rx.carrier_detected(),
+            "amplitude 0.03 should falsely lock on for this test to mean anything"
+        );
+
+        // Real silence, not noise: the false lock must clear within a
+        // couple of hold-off periods once its cause is actually gone.
+        let quiet = vec![0.0f32; 733];
+        let mut cleared = false;
+        for _ in 0..20 {
+            // ~1.8 s, well over one 0.5 s hold-off.
+            rx.write(&quiet);
+            if !rx.carrier_detected() {
+                cleared = true;
+                break;
+            }
+        }
+        assert!(
+            cleared,
+            "false lock did not clear within 1.8 s of real silence"
         );
     }
 }

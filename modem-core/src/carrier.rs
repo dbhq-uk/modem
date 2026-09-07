@@ -11,20 +11,57 @@
 //! designs that got this wrong first, both found by running the code for
 //! long enough, not by inspection. Tracking while undetected is what lets
 //! the detector calibrate to whatever room it is actually in, rather than
-//! to whatever the very first samples happened to look like.
+//! to whatever the very first samples happened to look like, and
+//! `FLOOR_MIN_FRACTION` bounds how far down that tracking can go - see its
+//! own comment for why the bound exists and is a measured trade-off, not a
+//! safety margin picked for comfort.
+//!
+//! Sensitivity and noise rejection are therefore both functions of how
+//! long the line has been idle, converging to a stable pair of values by
+//! about 10 s (eight `FLOOR_ADAPT` time constants) and staying there
+//! indefinitely - the clamp means they do not keep drifting after that.
+//! Measured at `FLOOR_MIN_FRACTION = 1/10`: a cold start (no prior idle)
+//! rejects noise up to amplitude 0.0205 and detects a clean signal down to
+//! about 0.0075; after 10 s or more of idle line, rejection tightens to
+//! about 0.002-0.0025 and sensitivity improves to about 0.0005-0.0007.
+//! Both numbers move in the *same* direction with idle time (more
+//! sensitive, less tolerant of loud ambient) because they are two readings
+//! of the one mechanism - the floor decaying towards whatever it is
+//! actually fed - not two independent properties.
 //!
 //! This does not make the detector immune to loud ambient noise. A
 //! receiver that powers up straight into a noise floor loud enough to
-//! itself clear RISE_RATIO against the starting guess locks onto it as
-//! carrier inside the first attack time constant - milliseconds - before
-//! FLOOR_ADAPT has had any chance to react, and then holds that lock
-//! indefinitely, because holding is exactly what correctly protects a real
-//! carrier from a burst of noise. No single energy-ratio threshold can
-//! tell those two cases apart from a cold start; the only real answer
-//! generally is comparing against known tone frequencies (a Goertzel bank)
-//! rather than raw in-band energy, which is a larger change than this
-//! task, and not one made here. `rx.rs`'s dead-line noise sweep measures
-//! where that ceiling currently sits.
+//! itself clear RISE_RATIO against the floor's current value - the
+//! starting guess at a cold start, or the clamped minimum after an idle
+//! spell - locks onto it as carrier inside the first attack time constant,
+//! milliseconds, before FLOOR_ADAPT has had any chance to react. It then
+//! holds that lock for as long as the noise continues, because holding is
+//! exactly what correctly protects a real carrier from a burst of noise -
+//! but it is not permanent: once the noise actually stops, the lock clears
+//! within about one hold-off period, the same as it would for a real
+//! carrier's ordinary gaps running out. No single energy-ratio threshold
+//! can tell loud-ambient-noise-from-the-first-sample apart from
+//! genuine-carrier-from-the-first-sample; the only real answer generally
+//! is comparing against known tone frequencies (a Goertzel bank) rather
+//! than raw in-band energy, which is a larger change than this task, and
+//! not one made here. `rx.rs`'s noise-rejection tests measure where the
+//! ceiling currently sits, at a cold start and across idle durations.
+//!
+//! The correlators do already provide real frequency selectivity, which is
+//! why any of this works at all: a matched tone accumulates coherently
+//! across the correlator's window while broadband noise accumulates
+//! incoherently, so equal-amplitude tone and noise are not read as equal
+//! energy. Measured directly for this correlator's 27-sample window: a
+//! pure tone reads about 7.1x louder than noise of the same amplitude on
+//! a single band, close to the sqrt(27) ~ 5.2x an incoherent-sum argument
+//! predicts. The *energy* metric this detector actually uses sums both
+//! bands, which roughly halves that margin for noise specifically (noise
+//! excites both bands independently; a clean tone excites essentially
+//! only one) - measured at about 3.55x for equal-amplitude tone versus
+//! noise through the real `(m + s) / win` calculation. That discrimination
+//! is what makes a bounded floor useful instead of merely safe: without
+//! it, no fixed ratio threshold would ever separate a weak signal from
+//! noise loud enough to match its amplitude.
 
 use crate::DSP_RATE;
 
@@ -53,7 +90,8 @@ const ATTACK: f64 = 0.01;
 /// mark at a "far slower" 1e-7 was still enough); or slow enough to survive
 /// a sustained carrier, and it can no longer track a noisy room's real
 /// level, which is what let noise above roughly -38 dBFS assert carrier
-/// and never release it. Splitting the two states removes the trade-off:
+/// and hold that lock for as long as the noise itself continued. Splitting
+/// the two states removes the trade-off:
 /// FLOOR_ADAPT only has to be fast enough to be useful, because freezing -
 /// not slowness - is what protects it once carrier is up.
 const FLOOR_ADAPT: f64 = 1e-4;
@@ -61,13 +99,14 @@ const FLOOR_ADAPT: f64 = 1e-4;
 /// it, and the effective ceiling on how loud an ambient a cold start can
 /// reject: energy above `RISE_RATIO * INITIAL_FLOOR` clears the threshold
 /// in the first attack time constant, before FLOOR_ADAPT has moved this at
-/// all, and then freezes there the moment it does. Measured against this
-/// crate's noise sweep: 1e-3 clears -38 dBFS (amplitude 0.0126, "ordinary
-/// microphone noise floor" - measured correlator energy 3.8e-3, ratio 3.8,
-/// under RISE_RATIO) but not -33 dBFS and louder (amplitude 0.02 and
-/// above). That is the real, current ceiling; see `rx.rs`'s sweep test for
-/// the measured numbers and the module doc above for why no choice of
-/// constant removes it, only moves it.
+/// all, and then freezes there the moment it does. Measured precisely
+/// against this crate's noise sweep (`rx.rs`'s
+/// `noise_on_a_dead_line_produces_no_bytes`): passes at amplitude 0.0205,
+/// fails at 0.021 - comfortably past -38 dBFS (amplitude 0.0126, "ordinary
+/// microphone noise floor"), which is the reference point this constant is
+/// tuned to clear. A cold start cannot reject anything above about 0.0205;
+/// see the module doc for why, and `FLOOR_MIN_FRACTION` for the equivalent
+/// number once the line has been idle for a while.
 const INITIAL_FLOOR: f64 = 1e-3;
 /// How long the energy must stay low before carrier drops. Longer than any
 /// inter-character gap at 300 baud, which is at most a few symbol times.
@@ -78,6 +117,33 @@ const HOLDOFF_SECONDS: f64 = 0.5;
 /// and every real energy value in this module's tests, so it never
 /// perturbs a real ratio - it only guards the one degenerate case.
 const FLOOR_EPSILON: f64 = 1e-12;
+/// Lower bound on the floor, as a fraction of INITIAL_FLOOR.
+///
+/// FLOOR_ADAPT has no bottom of its own: while undetected it tracks
+/// whatever it is fed, including genuine near-silence, and a few seconds
+/// is enough for it to decay a long way down (see `update`'s comment).
+/// Once it has, ordinary ambient noise far below any documented ceiling
+/// reads as a large ratio spike and locks in as carrier, frozen, for as
+/// long as that noise continues.
+///
+/// Measured, not picked, after 10 s of prior quiet (the boundary is stable
+/// from there on - confirmed unchanged at 90 s), noise ceiling and
+/// clean-signal sensitivity, both amplitude:
+///
+/// | fraction | floor min | noise ceiling | sensitivity |
+/// |---|---|---|---|
+/// | 1/3   | 3.3e-4 | 0.005 - 0.007   | 0.001 - 0.003    |
+/// | 1/10  | 1e-4   | 0.002 - 0.0025  | 0.0005 - 0.0007  |
+/// | 1/100 | 1e-5   | < 0.0001        | 0.00001 - 0.0001 |
+/// | 1/1000| 1e-6   | < 0.0001        | 0.000001 - 0.00001 |
+///
+/// The requirement is rejecting this crate's 1e-3 noise reference after
+/// any idle duration. Only 1/3 and 1/10 clear it - 1/100 and 1/1000 both
+/// fail open well below 1e-3. 1/10 is the smaller of the two, so the most
+/// downward adaptation - and hence the best sensitivity - available
+/// without giving up that requirement: it holds 1e-3 with roughly 2x
+/// margin against its measured 0.002-0.0025 ceiling.
+const FLOOR_MIN_FRACTION: f64 = 1.0 / 10.0;
 
 pub struct CarrierDetector {
     level: f64,
@@ -141,6 +207,10 @@ impl CarrierDetector {
         // stays up.
         if !self.detected {
             self.floor += FLOOR_ADAPT * (energy - self.floor);
+            let floor_min = INITIAL_FLOOR * FLOOR_MIN_FRACTION;
+            if self.floor < floor_min {
+                self.floor = floor_min;
+            }
         }
 
         let ratio = self.level / (self.floor + FLOOR_EPSILON);
