@@ -16,6 +16,8 @@
 
 extern crate alloc;
 
+pub mod nco;
+
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(test)]
