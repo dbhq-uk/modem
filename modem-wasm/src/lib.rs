@@ -7,10 +7,13 @@
 //! The two surfaces cannot ship in the same compiled artifact. Discovered
 //! while building the worklet spike: any `#[wasm_bindgen]` item, even one
 //! that never touches a string or an externref, makes wasm-bindgen 0.2.128
-//! emit an `__wbindgen_init_externref_table` import, and `fill_tone`'s
-//! `&mut [f32]` parameter adds a `copy_to_typed_array` import on top. Both
-//! resolve against `wasm-bindgen`'s generated `./modem_wasm_bg.js` glue,
-//! which does not exist inside `AudioWorkletGlobalScope` - so a worklet
+//! emit `__wbindgen_describe`, `__wbindgen_object_drop_ref`,
+//! `__wbindgen_externref_table_set_null` and
+//! `__wbindgen_externref_table_grow` imports, and `fill_tone`'s
+//! `&mut [f32]` parameter adds a `__wbg___wbindgen_copy_to_typed_array_...`
+//! import on top. Both resolve against `wasm-bindgen`'s generated
+//! `./modem_wasm_bg.js` glue, which does not exist inside
+//! `AudioWorkletGlobalScope` - so a worklet
 //! calling `WebAssembly.instantiate(module, {})` on a build that contains
 //! both surfaces fails immediately, whether or not it ever calls the
 //! bindgen-wrapped functions. WASM resolves every declared import at
