@@ -25,18 +25,39 @@
 //! The alternating part is what the timing loop acquires on. A Gardner
 //! detector measures transitions, so idle mark carries no timing
 //! information at all and the loop sits wherever it started, however long
-//! the idle runs. Measured over all 54 sub-symbol starting offsets on a
-//! 1050-byte payload: with idle mark alone, 3 offsets slice at the shut
-//! part of the eye and mis-decode, and extending the idle from 100 ms to a
-//! full second does not move that.
+//! the idle runs. Measured over all 54 sub-symbol starting offsets: with
+//! idle mark alone, 4 to 5 of them slice at the shut part of the eye and
+//! mis-decode, and extending the idle from 100 ms to a full second does
+//! not fix it.
+//!
+//! Do not read that as "a longer lead never helps" - it is a lottery, not
+//! a monotone. Sweeping the lead one sample at a time, lead lengths 1627
+//! to 1653 all score 54 of 54 and the next band scores 49. The winning
+//! band is one symbol period wide because the phase a free-running
+//! counter arrives at is the lead length modulo the symbol period, and
+//! nothing else. A fixture that happens to land in a winning band proves
+//! nothing about the next one.
 //!
 //! The idle mark after it is what puts the deframer back in a known state.
 //! 8-N-1 characters sent back to back give it no other way home: a wrong
 //! byte alignment that happens to read mark at the stop-bit position is
 //! self-consistent and survives indefinitely. Measured: training with no
 //! idle after it still loses 4 of 54 offsets to a wrong alignment held for
-//! the whole stream. With both halves, all 54 offsets decode byte-exact
-//! with zero framing errors.
+//! the whole stream. One character time is the figure to quote and to
+//! build to; the measured floor is under two symbols, and the margin is
+//! not worth spending.
+//!
+//! One training character is enough, and more does not improve on it.
+//!
+//! What the preamble guarantees is the **payload**, not the preamble.
+//! With both halves in place all 54 offsets deliver the data after the
+//! preamble byte-exact with zero framing errors, but the training
+//! characters themselves come back altered at 4 of those offsets - 0x55
+//! decoding as 0xD5 - because the loop is still pulling in while they go
+//! past. **Training must not carry information.** Task 11's overture
+//! builds on this: its training stage is there to be locked onto and
+//! thrown away, and anything it needs to communicate belongs after the
+//! idle mark.
 //!
 //! Task 11's overture ends in exactly this shape, and Task 9's WAV
 //! fixtures and Task 17's half-duplex turnaround both need it.
@@ -375,52 +396,64 @@ mod tests {
     /// other loopback in this file runs both ends off one clock, where a
     /// free-running symbol counter is already exact, so all of them pass
     /// with the timing correction deleted outright.
+    ///
+    /// It is also the only place the timing loop's scale invariance is
+    /// visible, which is why the input level is swept over a factor of a
+    /// hundred. `e` is a product of two signal-amplitude terms, so the
+    /// level has to divide out of it twice; dividing once leaves the
+    /// effective loop gain riding on the input level, and the microphone
+    /// and the room set that, not this code. A single-level test cannot
+    /// see the difference - `e /= mag` with a correspondingly smaller
+    /// GARDNER_GAIN decodes this payload perfectly at amplitude 1.0 and
+    /// loses a third of it at 0.1.
     #[test]
     fn loopback_tracks_a_two_percent_sample_clock_offset() {
         let mut payload = Vec::new();
         for _ in 0..100 {
             payload.extend_from_slice(b"The quick brown fox. ");
         }
-        for tx_rate in [8160u32, 7840] {
-            let mut tx = Tx::new(cfg(Role::Originate, tx_rate));
-            let mut rx = Rx::new(cfg(Role::Originate, 8000));
+        for amplitude in [1.0f32, 0.1, 10.0] {
+            for tx_rate in [8160u32, 7840] {
+                let mut tx = Tx::new(cfg(Role::Originate, tx_rate));
+                let mut rx = Rx::new(cfg(Role::Originate, 8000));
 
-            let mut out = Vec::new();
-            let mut buf = vec![0.0f32; 733];
-            let mut got = [0u8; 256];
+                let mut out = Vec::new();
+                let mut buf = vec![0.0f32; 733];
+                let mut got = [0u8; 256];
 
-            let mut sent = 0;
-            while sent < tx_rate as usize / 10 {
-                tx.read(&mut buf);
-                rx.write(&buf);
-                rx.read(&mut got);
-                sent += 733;
+                let mut sent = 0;
+                while sent < tx_rate as usize / 10 {
+                    tx.read(&mut buf);
+                    for v in buf.iter_mut() {
+                        *v *= amplitude;
+                    }
+                    rx.write(&buf);
+                    rx.read(&mut got);
+                    sent += 733;
+                }
+
+                tx.write(&payload);
+                let total = tx_rate as usize * 2 + (payload.len() * 10) * tx_rate as usize / 300;
+                let mut sent = 0;
+                while sent < total {
+                    tx.read(&mut buf);
+                    for v in buf.iter_mut() {
+                        *v *= amplitude;
+                    }
+                    rx.write(&buf);
+                    let n = rx.read(&mut got);
+                    out.extend_from_slice(&got[..n]);
+                    sent += 733;
+                }
+                let ctx = alloc::format!("tx rate {tx_rate}, amplitude {amplitude}");
+                // Content, not a byte count. A slipped symbol that happens
+                // to stay frame-aligned yields exactly 2100 bytes and zero
+                // framing errors while every one of them is wrong, so
+                // neither aggregate can stand in for comparing what
+                // actually came back.
+                assert_same(&out, &payload, &ctx);
+                assert_eq!(rx.framing_errors(), 0, "{ctx} produced framing errors");
             }
-
-            tx.write(&payload);
-            let total = tx_rate as usize * 2 + (payload.len() * 10) * tx_rate as usize / 300;
-            let mut sent = 0;
-            while sent < total {
-                tx.read(&mut buf);
-                rx.write(&buf);
-                let n = rx.read(&mut got);
-                out.extend_from_slice(&got[..n]);
-                sent += 733;
-            }
-            // Content, not a byte count. A slipped symbol that happens to
-            // stay frame-aligned yields exactly 2100 bytes and zero framing
-            // errors while every one of them is wrong, so neither aggregate
-            // can stand in for comparing what actually came back.
-            assert_same(
-                &out,
-                &payload,
-                &alloc::format!("clock offset via tx rate {tx_rate}"),
-            );
-            assert_eq!(
-                rx.framing_errors(),
-                0,
-                "clock offset via tx rate {tx_rate} produced framing errors"
-            );
         }
     }
 
@@ -432,14 +465,14 @@ mod tests {
     ///
     /// The preamble here is the one the module doc states as a
     /// precondition, and both halves of it are load-bearing. Measured over
-    /// these 54 offsets: drop the training characters and 3 offsets slice
-    /// at the shut part of the eye and mis-decode, with no amount of extra
-    /// idle mark fixing it, because a Gardner detector cannot acquire on a
-    /// tone that never changes. Drop the idle mark after the training and 4
-    /// offsets latch a wrong byte alignment while the loop is still pulling
-    /// in and hold it for the whole stream, because back-to-back 8-N-1
-    /// characters give the deframer no way home once a wrong alignment
-    /// reads mark at the stop-bit position.
+    /// these 54 offsets at this lead length: drop the training characters
+    /// and 4 offsets slice at the shut part of the eye and mis-decode,
+    /// because a Gardner detector cannot acquire on a tone that never
+    /// changes. Drop the idle mark after the training and 4 offsets latch a
+    /// wrong byte alignment while the loop is still pulling in and hold it
+    /// for the whole stream, because back-to-back 8-N-1 characters give the
+    /// deframer no way home once a wrong alignment reads mark at the
+    /// stop-bit position.
     ///
     /// 54 offsets is two whole symbols, so the sweep cannot sit on one
     /// phase of the symbol clock and call it coverage.
@@ -474,16 +507,28 @@ mod tests {
                 out.extend_from_slice(&got[..n]);
                 i += 733;
             }
-            // ends_with, not equality: the training characters are part of
-            // the stream and legitimately come back too. What must hold is
-            // that everything after them is the payload exactly, with
-            // nothing lost, inserted or shifted.
+            // ends_with, not equality: the two training characters are part
+            // of the stream and legitimately come back too, and at 4 of
+            // these 54 offsets the second one arrives as 0xD5 rather than
+            // 0x55 because the loop is still pulling in while it goes past.
+            // What must hold is that everything after them is the payload
+            // exactly, with nothing lost, inserted or shifted.
             assert!(
                 out.ends_with(payload),
                 "joined {skip} samples in: {} bytes, {} framing errors, got {:?}",
                 out.len(),
                 rx.framing_errors(),
                 core::str::from_utf8(&out)
+            );
+            // ends_with on its own constrains nothing ahead of the payload,
+            // and a zero error count does not bound it either: a deframer
+            // that opens mid-frame delivers a spurious byte with no framing
+            // error at all and still satisfies the assertion above. The
+            // length is invariant where equality is not, so pin it.
+            assert_eq!(
+                out.len(),
+                2 + payload.len(),
+                "joined {skip} samples in and delivered bytes outside the two training characters"
             );
             assert_eq!(
                 rx.framing_errors(),
