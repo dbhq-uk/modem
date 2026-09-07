@@ -130,7 +130,12 @@ mod tests {
         for _ in 0..8 {
             d.push_bit(true);
         }
-        d.push_bit(false); // stop bit is space - a framing error
+        // The erroring push must return None, not the accumulated byte.
+        // Without this assertion, a future edit that hands back self.acc
+        // alongside the error count would deliver a corrupted byte to the
+        // application looking like legitimate data, and every test here
+        // would still pass.
+        assert_eq!(d.push_bit(false), None); // stop bit is space - a framing error
         assert_eq!(d.framing_errors(), 1);
     }
 
@@ -171,6 +176,16 @@ mod tests {
             got,
             Some(0x42),
             "did not resynchronise after a framing error"
+        );
+        // Still 1. A successful decode must not touch the counter, and
+        // nothing else in this file checks the count after a good frame -
+        // a stray increment on the success path would otherwise pass the
+        // whole suite while quietly turning a clean link's error count
+        // into a lie. Tasks 6 and 12 surface this number as link quality.
+        assert_eq!(
+            d.framing_errors(),
+            1,
+            "a successful decode changed the error count"
         );
     }
 }
