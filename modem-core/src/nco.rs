@@ -103,6 +103,37 @@ mod tests {
         assert!((second - first).abs() <= step_bound(2225.0, FS) + 1e-9);
     }
 
+    /// set_freq must actually retune. The continuity test above only bounds
+    /// the maximum step, which a too-small increment satisfies trivially,
+    /// so without this a set_freq using the wrong sample rate passes every
+    /// other test in the file.
+    #[test]
+    fn set_freq_retunes_to_the_new_frequency() {
+        const FS: f64 = 8000.0;
+        let mut n = Nco::new(1070.0, FS);
+        for _ in 0..100 {
+            n.next();
+        }
+        n.set_freq(2225.0);
+        let buf: alloc::vec::Vec<f64> = (0..8000).map(|_| n.next()).collect();
+        assert!(
+            goertzel(&buf, 2225.0, FS) >= 0.9,
+            "did not retune to 2225 Hz"
+        );
+        assert!(goertzel(&buf, 1070.0, FS) <= 0.05, "still emitting 1070 Hz");
+    }
+
+    #[test]
+    fn reset_returns_phase_to_zero() {
+        let mut n = Nco::new(1270.0, 8000.0);
+        for _ in 0..37 {
+            n.next();
+        }
+        n.reset();
+        // next() samples before advancing, so a zeroed phase gives sin(0).
+        assert_eq!(n.next(), 0.0);
+    }
+
     /// The regression the bounded-step test cannot catch alone. A set_freq
     /// that zeroed phase would leave the next sample at exactly sin(0).
     #[test]
