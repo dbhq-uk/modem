@@ -65,12 +65,21 @@
 //! # Carrier gates the slicer, and gating is not locking
 //!
 //! The correlator's soft decision differences the mark and space
-//! magnitudes, so it throws level away entirely: a tie between two noise
-//! floors and a tie between two strong tones look identical to it. Left
-//! ungated, that slicer fabricates bytes and framing errors from a dead
-//! line's noise. [`carrier::CarrierDetector`] watches the *sum* of the two
-//! magnitudes instead, and `symbol_boundary` only pushes a bit into the
-//! deframer while it reports carrier present.
+//! magnitudes, so a signal that drives both bands equally is heavily
+//! suppressed in it - measured at 62x for mark and space present together,
+//! 86x for a tone centred on the answer band - regardless of how strong
+//! that signal actually is. This is not a property of the correlator's
+//! window length or the 200 Hz mark/space spacing; a full-amplitude tied
+//! signal still clears a threshold pinned to a constant, because 1/62 of a
+//! loud enough signal is still loud. It only reads as an absence of
+//! evidence once the signal is quiet enough that the suppressed residual
+//! itself falls under the threshold - see this module's own
+//! `two_tones_at_equal_strength_raise_carrier` test, which reproduces the
+//! amplitude that does through the real correlator. Left ungated, that
+//! suppression is exactly what lets the slicer fabricate bytes and framing
+//! errors from a dead line's noise. [`carrier::CarrierDetector`] watches
+//! the *sum* of the two magnitudes instead, and `symbol_boundary` only
+//! pushes a bit into the deframer while it reports carrier present.
 //!
 //! Carrier present is not the same claim as "the timing loop is locked".
 //! A Gardner detector measures transitions, and idle mark alone raises
@@ -102,6 +111,11 @@ use crate::{samples_per_symbol, tones, Config, DSP_RATE};
 /// SNR, where the matched filter's own processing gain is what is doing
 /// the work.
 const GARDNER_GAIN: f64 = 0.15;
+
+/// Bound on the carrier event queue. Was two unrelated literal `64`s (the
+/// preallocation and the drop-oldest check) that could silently drift
+/// apart; one constant makes that impossible.
+const EVENT_QUEUE_CAP: usize = 64;
 
 pub struct Rx {
     cfg: Config,
@@ -166,7 +180,7 @@ impl Rx {
             // Capacity matches the cap enforced in push_sample, so the
             // bounded queue never reallocates once running: the only
             // allocation is this one, at construction.
-            events: VecDeque::with_capacity(64),
+            events: VecDeque::with_capacity(EVENT_QUEUE_CAP),
         }
     }
 
@@ -221,7 +235,7 @@ impl Rx {
 
         let (soft, energy) = self.correlate();
         if let Some(ev) = self.carrier.update(energy) {
-            if self.events.len() >= 64 {
+            if self.events.len() >= EVENT_QUEUE_CAP {
                 self.events.pop_front();
             }
             self.events.push_back(ev);
@@ -782,43 +796,6 @@ mod tests {
         assert_eq!(rx.events(), None);
     }
 
-    /// The reason this task exists. Before the carrier gate, low-level
-    /// noise on a dead line produced dozens of spurious bytes and framing
-    /// errors, because the soft decision differences the magnitudes and so
-    /// cannot tell a weak signal from a strong one.
-    #[test]
-    fn noise_on_a_dead_line_produces_no_bytes() {
-        let c = cfg(Role::Originate, 8000);
-        let mut rx = Rx::new(c);
-
-        // Deterministic low-level noise, no carrier anywhere.
-        let mut state = 0x2545F491_4F6CDD1Du64;
-        let noise: Vec<f32> = (0..40_000)
-            .map(|_| {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                ((state >> 40) as f32 / 8_388_608.0 - 1.0) * 1e-3
-            })
-            .collect();
-
-        let mut got = [0u8; 256];
-        let mut total = 0;
-        for chunk in noise.chunks(733) {
-            rx.write(chunk);
-            total += rx.read(&mut got);
-        }
-        assert_eq!(
-            total, 0,
-            "fabricated {total} bytes from noise on a dead line"
-        );
-        assert_eq!(
-            rx.framing_errors(),
-            0,
-            "fabricated framing errors from noise"
-        );
-    }
-
     /// Carrier being up must not be read as the timing loop being locked.
     /// A Gardner detector cannot acquire on a constant tone, so idle mark
     /// raises carrier while the loop is still free-running.
@@ -885,6 +862,184 @@ mod tests {
             drained.last(),
             Some(&Event::CarrierUp),
             "the newest event was evicted instead of the oldest"
+        );
+    }
+
+    /// Task 5's central finding, proven through the real wiring rather than
+    /// asserted. Fed the difference (`soft.abs()`, with or without the
+    /// `/win` normalisation `energy` applies), two equal-strength tones
+    /// read as heavily suppressed rather than absent - the earlier attempt
+    /// at this test used full amplitude, where even a suppressed residual
+    /// still clears a threshold pinned to a constant, and wrongly
+    /// concluded the failure was unreachable. It is reachable; it just
+    /// needs a quiet enough signal. Measured through this correlator: two
+    /// 0.006-amplitude tones, mark and space together, hold a sum-based
+    /// energy level of about 6e-3 (ratio 6 against `INITIAL_FLOOR`,
+    /// clearing `RISE_RATIO`) but a difference-based level under 3e-4
+    /// either way `/win` is or is not applied - below `INITIAL_FLOOR`
+    /// itself, so neither difference-fed variant ever asserts carrier.
+    #[test]
+    fn two_tones_at_equal_strength_raise_carrier() {
+        let c = cfg(Role::Originate, 8000);
+        let mut rx = Rx::new(c);
+        let (mark, space) = tones(Role::Originate);
+        let buf: Vec<f32> = (0..16_000)
+            .map(|i| {
+                let t = i as f64 / DSP_RATE;
+                (0.006 * sin(core::f64::consts::TAU * mark * t)
+                    + 0.006 * sin(core::f64::consts::TAU * space * t)) as f32
+            })
+            .collect();
+        rx.write(&buf);
+        assert!(
+            rx.carrier_detected(),
+            "two tones at equal strength must raise carrier"
+        );
+    }
+
+    /// The reason this task exists, measured across a range rather than at
+    /// one point. A single amplitude cannot show where the detector's
+    /// noise-rejection ceiling actually sits, and Task 6's fix round 1
+    /// shipped with that ceiling far too low - genuine microphone
+    /// self-noise (about -38 dBFS, amplitude 0.0126) falsely asserted
+    /// carrier and, because the floor could never move once detected,
+    /// never released it. Swapping to a floor that freezes on detection
+    /// instead of merely decaying slowly moved the measured ceiling from
+    /// about 0.012 to about 0.02-0.03: every amplitude here still passes,
+    /// and 0.03 is documented in `carrier.rs` as the current point where
+    /// it does not, which is a real, accepted limit of any single
+    /// energy-ratio threshold - not a defect this sweep is hiding.
+    #[test]
+    fn noise_on_a_dead_line_produces_no_bytes() {
+        for amplitude in [1e-4f32, 1e-3, 5e-3, 1e-2, 0.0126, 0.02] {
+            let c = cfg(Role::Originate, 8000);
+            let mut rx = Rx::new(c);
+
+            // Deterministic noise, no carrier anywhere, scaled per sweep
+            // point.
+            let mut state = 0x2545F491_4F6CDD1Du64;
+            let noise: Vec<f32> = (0..40_000)
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    ((state >> 40) as f32 / 8_388_608.0 - 1.0) * amplitude
+                })
+                .collect();
+
+            let mut got = [0u8; 256];
+            let mut total = 0;
+            for chunk in noise.chunks(733) {
+                rx.write(chunk);
+                total += rx.read(&mut got);
+            }
+            assert_eq!(
+                total, 0,
+                "amplitude {amplitude}: fabricated {total} bytes from noise on a dead line"
+            );
+            assert_eq!(
+                rx.framing_errors(),
+                0,
+                "amplitude {amplitude}: fabricated framing errors from noise"
+            );
+        }
+    }
+
+    /// Task 6's fix round 1 quietly cost most of the receiver's dynamic
+    /// range: the previous commit decoded this same payload at amplitude
+    /// 1e-6, and after gating on a fixed-constant floor, the usable window
+    /// between "too quiet to raise carrier" and "loud enough to be
+    /// mistaken for noise" (see `noise_on_a_dead_line_produces_no_bytes`)
+    /// narrowed to about 1.6x. Freezing the floor on detection instead of
+    /// merely decaying it slowly widens that window to roughly 2.67x
+    /// (0.0075 to 0.02) by raising the noise ceiling, but does not recover
+    /// the low end - 0.0075 today, same order as before this round's
+    /// fix. That remains a real, documented limit: `INITIAL_FLOOR` has to
+    /// clear ordinary ambient noise (see `carrier.rs`), and a weak but
+    /// genuine carrier below about `RISE_RATIO * INITIAL_FLOOR` in energy
+    /// cannot be told apart from that same ambient in the one attack time
+    /// constant before the initial rise-or-not decision is made. This
+    /// pins the current measured boundary so a future change to these
+    /// constants has to look at it rather than silently narrow it
+    /// further.
+    #[test]
+    fn carrier_detection_sensitivity_window() {
+        fn clean_loopback_detects(amplitude: f32) -> bool {
+            let c = cfg(Role::Originate, 8000);
+            let mut tx = Tx::new(c);
+            let mut rx = Rx::new(c);
+            tx.write(b"CONNECT 300");
+            let mut buf = vec![0.0f32; 733];
+            let mut got = [0u8; 256];
+            let mut sent = 0usize;
+            let total = 8000usize + 11 * 10 * 8000 / 300;
+            while sent < total {
+                tx.read(&mut buf);
+                for v in buf.iter_mut() {
+                    *v *= amplitude;
+                }
+                rx.write(&buf);
+                rx.read(&mut got);
+                sent += 733;
+            }
+            rx.carrier_detected()
+        }
+
+        assert!(
+            clean_loopback_detects(0.0075),
+            "amplitude 0.0075 must still raise carrier - sensitivity regressed"
+        );
+        assert!(
+            !clean_loopback_detects(0.005),
+            "amplitude 0.005 unexpectedly raised carrier - update the documented \
+             boundary in this test and in carrier.rs if this is an intentional improvement"
+        );
+    }
+
+    /// Proves the floor actually adapts while undetected, rather than
+    /// sitting at `INITIAL_FLOOR` forever. Mutation-proven against
+    /// `FLOOR_ADAPT = 0.0`: Task 6's fix round 1 shipped a floor that
+    /// only ever moved by an amount so small none of that round's tests
+    /// noticed, and the reviewer proved it by setting its equivalent
+    /// constant to zero and watching the full suite pass unchanged. A
+    /// receiver on a genuinely quiet line for a couple of seconds should
+    /// become *more* sensitive to a weak signal than a receiver that has
+    /// only just started, because the floor has had time to settle below
+    /// `INITIAL_FLOOR`'s starting guess - amplitude 0.003 is below this
+    /// crate's measured 0.0075 sensitivity floor from a cold start, but
+    /// clears it after two seconds of quiet.
+    #[test]
+    fn floor_adapts_downward_during_a_quiet_settle_period() {
+        let c = cfg(Role::Originate, 8000);
+        let mut rx = Rx::new(c);
+
+        let quiet = vec![0.0f32; 733];
+        let mut sent = 0;
+        while sent < 16_000 {
+            // 2 s settle, well clear of FLOOR_ADAPT's 1.25 s time constant.
+            rx.write(&quiet);
+            sent += 733;
+        }
+
+        let mut tx = Tx::new(c);
+        tx.write(b"CONNECT 300");
+        let mut buf = vec![0.0f32; 733];
+        let mut got = [0u8; 256];
+        let mut sent = 0usize;
+        let total = 8000usize + 11 * 10 * 8000 / 300;
+        while sent < total {
+            tx.read(&mut buf);
+            for v in buf.iter_mut() {
+                *v *= 0.003; // below the cold-start sensitivity floor
+            }
+            rx.write(&buf);
+            rx.read(&mut got);
+            sent += 733;
+        }
+        assert!(
+            rx.carrier_detected(),
+            "a signal too weak for a cold start must still raise carrier \
+             after the floor has had time to settle on a quiet line"
         );
     }
 }
