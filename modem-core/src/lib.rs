@@ -16,6 +16,7 @@
 
 extern crate alloc;
 
+pub mod carrier;
 pub mod frame;
 pub mod nco;
 pub mod resample;

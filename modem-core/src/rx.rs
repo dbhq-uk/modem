@@ -62,14 +62,31 @@
 //! Task 11's overture ends in exactly this shape, and Task 9's WAV
 //! fixtures and Task 17's half-duplex turnaround both need it.
 //!
+//! # Carrier gates the slicer, and gating is not locking
+//!
+//! The correlator's soft decision differences the mark and space
+//! magnitudes, so it throws level away entirely: a tie between two noise
+//! floors and a tie between two strong tones look identical to it. Left
+//! ungated, that slicer fabricates bytes and framing errors from a dead
+//! line's noise. [`carrier::CarrierDetector`] watches the *sum* of the two
+//! magnitudes instead, and `symbol_boundary` only pushes a bit into the
+//! deframer while it reports carrier present.
+//!
+//! Carrier present is not the same claim as "the timing loop is locked".
+//! A Gardner detector measures transitions, and idle mark alone raises
+//! carrier well before - or entirely without - the loop ever seeing one.
+//! Do not read `carrier_detected()` as a proxy for acquisition.
+//!
 //! Nothing here allocates per block. The ring buffers and the scratch are
-//! sized at construction.
+//! sized at construction, and the event queue is preallocated to its cap.
 
+use alloc::collections::VecDeque;
 use alloc::vec;
 use alloc::vec::Vec;
 
 use libm::{cos, hypot, round, sin};
 
+use crate::carrier::{CarrierDetector, Event};
 use crate::frame::Deframer;
 use crate::{samples_per_symbol, tones, Config, DSP_RATE};
 
@@ -113,6 +130,9 @@ pub struct Rx {
     deframer: Deframer,
     out: Vec<u8>,
     scratch: Vec<f64>,
+
+    carrier: CarrierDetector,
+    events: VecDeque<Event>,
 }
 
 impl Rx {
@@ -141,6 +161,12 @@ impl Rx {
             deframer: Deframer::new(),
             out: Vec::new(),
             scratch: Vec::new(),
+
+            carrier: CarrierDetector::new(),
+            // Capacity matches the cap enforced in push_sample, so the
+            // bounded queue never reallocates once running: the only
+            // allocation is this one, at construction.
+            events: VecDeque::with_capacity(64),
         }
     }
 
@@ -193,7 +219,13 @@ impl Rx {
             return;
         }
 
-        let soft = self.soft_decision();
+        let (soft, energy) = self.correlate();
+        if let Some(ev) = self.carrier.update(energy) {
+            if self.events.len() >= 64 {
+                self.events.pop_front();
+            }
+            self.events.push_back(ev);
+        }
 
         let prev = self.sym_phase;
         self.sym_phase += self.sym_inc;
@@ -207,9 +239,11 @@ impl Rx {
         }
     }
 
-    /// Mark magnitude minus space magnitude over the current window.
-    /// Positive means mark.
-    fn soft_decision(&self) -> f64 {
+    /// Returns (soft decision, total energy). The soft decision is mark
+    /// magnitude minus space magnitude - positive means mark. The energy is
+    /// their sum, which the carrier detector needs and which the difference
+    /// throws away.
+    fn correlate(&self) -> (f64, f64) {
         let mut mi = 0.0;
         let mut mq = 0.0;
         let mut si = 0.0;
@@ -220,7 +254,9 @@ impl Rx {
             si += self.space_i[i];
             sq += self.space_q[i];
         }
-        hypot(mi, mq) - hypot(si, sq)
+        let m = hypot(mi, mq);
+        let s = hypot(si, sq);
+        (m - s, (m + s) / self.win as f64)
     }
 
     fn symbol_boundary(&mut self, soft: f64) {
@@ -261,8 +297,15 @@ impl Rx {
         // is an absence of evidence, and the idle line state is mark.
         // Slicing ties as space turns digital silence into an endless run
         // of start bits and one framing error every ten symbols.
-        if let Some(b) = self.deframer.push_bit(soft >= 0.0) {
-            self.out.push(b);
+        //
+        // Gated on carrier: without a signal above the noise floor, this
+        // slicer has nothing to slice, and pushing its tie-break into the
+        // deframer regardless is exactly what turns line noise into
+        // fabricated bytes and framing errors.
+        if self.carrier.detected() {
+            if let Some(b) = self.deframer.push_bit(soft >= 0.0) {
+                self.out.push(b);
+            }
         }
     }
 
@@ -272,6 +315,20 @@ impl Rx {
         buf[..n].copy_from_slice(&self.out[..n]);
         self.out.drain(..n);
         n
+    }
+
+    /// Whether in-band energy is currently above the noise floor by enough
+    /// to call it carrier. Says nothing about whether the timing loop is
+    /// locked - a Gardner detector cannot acquire on a constant tone, so
+    /// idle mark alone raises this while the loop stays free-running.
+    pub fn carrier_detected(&self) -> bool {
+        self.carrier.detected()
+    }
+
+    /// Drains one carrier transition event. Returns None when the queue is
+    /// empty.
+    pub fn events(&mut self) -> Option<Event> {
+        self.events.pop_front()
     }
 }
 
@@ -663,6 +720,171 @@ mod tests {
             rx.framing_errors(),
             0,
             "clean loopback produced framing errors"
+        );
+    }
+
+    #[test]
+    fn carrier_rises_on_signal_and_falls_on_silence() {
+        let c = cfg(Role::Originate, 8000);
+        let mut tx = Tx::new(c);
+        let mut rx = Rx::new(c);
+
+        let mut buf = vec![0.0f32; 8000];
+        tx.read(&mut buf);
+        rx.write(&buf);
+        assert!(
+            rx.carrier_detected(),
+            "no carrier on a strong idle mark tone"
+        );
+
+        rx.write(&vec![0.0f32; 8000]);
+        assert!(
+            !rx.carrier_detected(),
+            "carrier held through a second of silence"
+        );
+    }
+
+    /// A brief pause in traffic must not report NO CARRIER. Real modems
+    /// hold through gaps and so must this.
+    #[test]
+    fn carrier_holds_through_a_short_gap() {
+        let c = cfg(Role::Originate, 8000);
+        let mut tx = Tx::new(c);
+        let mut rx = Rx::new(c);
+
+        let mut buf = vec![0.0f32; 8000];
+        tx.read(&mut buf);
+        rx.write(&buf);
+        assert!(rx.carrier_detected());
+
+        rx.write(&vec![0.0f32; 800]); // 100 ms, well inside the hold-off
+        assert!(rx.carrier_detected(), "carrier dropped during a 100 ms gap");
+    }
+
+    #[test]
+    fn carrier_emits_events_in_order() {
+        let c = cfg(Role::Originate, 8000);
+        let mut tx = Tx::new(c);
+        let mut rx = Rx::new(c);
+
+        let mut buf = vec![0.0f32; 8000];
+        tx.read(&mut buf);
+        rx.write(&buf);
+        assert_eq!(rx.events(), Some(Event::CarrierUp));
+        assert_eq!(
+            rx.events(),
+            None,
+            "queued more than one event on a single rise"
+        );
+
+        rx.write(&vec![0.0f32; 8000]);
+        assert_eq!(rx.events(), Some(Event::CarrierDown));
+        assert_eq!(rx.events(), None);
+    }
+
+    /// The reason this task exists. Before the carrier gate, low-level
+    /// noise on a dead line produced dozens of spurious bytes and framing
+    /// errors, because the soft decision differences the magnitudes and so
+    /// cannot tell a weak signal from a strong one.
+    #[test]
+    fn noise_on_a_dead_line_produces_no_bytes() {
+        let c = cfg(Role::Originate, 8000);
+        let mut rx = Rx::new(c);
+
+        // Deterministic low-level noise, no carrier anywhere.
+        let mut state = 0x2545F491_4F6CDD1Du64;
+        let noise: Vec<f32> = (0..40_000)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                ((state >> 40) as f32 / 8_388_608.0 - 1.0) * 1e-3
+            })
+            .collect();
+
+        let mut got = [0u8; 256];
+        let mut total = 0;
+        for chunk in noise.chunks(733) {
+            rx.write(chunk);
+            total += rx.read(&mut got);
+        }
+        assert_eq!(
+            total, 0,
+            "fabricated {total} bytes from noise on a dead line"
+        );
+        assert_eq!(
+            rx.framing_errors(),
+            0,
+            "fabricated framing errors from noise"
+        );
+    }
+
+    /// Carrier being up must not be read as the timing loop being locked.
+    /// A Gardner detector cannot acquire on a constant tone, so idle mark
+    /// raises carrier while the loop is still free-running.
+    #[test]
+    fn carrier_up_does_not_imply_symbol_lock() {
+        let c = cfg(Role::Originate, 8000);
+        let mut tx = Tx::new(c);
+        let mut rx = Rx::new(c);
+        let mut buf = vec![0.0f32; 8000];
+        tx.read(&mut buf); // idle mark only, no transitions
+        rx.write(&buf);
+        assert!(rx.carrier_detected());
+        let mut got = [0u8; 256];
+        assert_eq!(rx.read(&mut got), 0, "idle mark alone produced bytes");
+    }
+
+    /// A count is not enough here: a bounded queue that drops the *newest*
+    /// event on overflow, or that drops from the middle, or that simply
+    /// never grows past the cap by silently discarding the arrival
+    /// instead, all leave the same drained length as the correct
+    /// drop-the-oldest behaviour, so a length assertion alone would pass
+    /// under any of them. This drives 65 events through a 64-slot queue
+    /// without draining it and checks which specific event survived at
+    /// each end.
+    ///
+    /// 33 rises and 32 completed drops strictly alternate CarrierUp and
+    /// CarrierDown starting from Up, so the correct result - the oldest
+    /// event, the very first CarrierUp, evicted - leaves a drained
+    /// sequence that starts on a CarrierDown and ends on a CarrierUp.
+    /// That is a real signature: a trace beginning on Down is exactly
+    /// what "the earliest Up fell off the front" looks like, and no
+    /// wrong eviction policy of the same final length reproduces it.
+    #[test]
+    fn events_queue_drops_the_oldest_not_the_newest_when_full() {
+        let c = cfg(Role::Originate, 8000);
+        let mut tx = Tx::new(c);
+        let mut rx = Rx::new(c);
+
+        let mut carrier_buf = vec![0.0f32; 800]; // 100 ms, ample to rise
+        let silence_buf = vec![0.0f32; 4800]; // 600 ms, clears the 500 ms hold-off
+
+        // 33 rises, 32 completed drops: 65 events into a 64-slot queue,
+        // never drained in between.
+        for cycle in 0..33 {
+            tx.read(&mut carrier_buf);
+            rx.write(&carrier_buf);
+            if cycle < 32 {
+                rx.write(&silence_buf);
+            }
+        }
+
+        let mut drained = Vec::new();
+        while let Some(ev) = rx.events() {
+            drained.push(ev);
+        }
+
+        assert_eq!(drained.len(), 64, "queue did not cap at 64 events");
+        assert_eq!(
+            drained.first(),
+            Some(&Event::CarrierDown),
+            "the oldest event - the first CarrierUp - was not the one evicted"
+        );
+        assert_eq!(
+            drained.last(),
+            Some(&Event::CarrierUp),
+            "the newest event was evicted instead of the oldest"
         );
     }
 }
