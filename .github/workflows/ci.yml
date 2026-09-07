@@ -18,6 +18,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y minimodem libasound2-dev
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
+      # The default feature set never touches the --no-default-features
+      # build the worklet actually loads, so it needs its own clippy pass.
+      - run: cargo clippy --all-targets -p modem-wasm --no-default-features -- -D warnings
       - run: cargo test --workspace
 
   no_std:
