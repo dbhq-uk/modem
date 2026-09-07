@@ -18,8 +18,9 @@ const log = (m) => {
 window.spikeResult = 'pending';
 
 document.getElementById('go').onclick = async () => {
+  let ctx;
   try {
-    const ctx = new AudioContext();
+    ctx = new AudioContext();
     await ctx.audioWorklet.addModule('modem-worklet.js');
     log('worklet module loaded, sampleRate=' + ctx.sampleRate);
 
@@ -77,9 +78,19 @@ document.getElementById('go').onclick = async () => {
       log('TONE WRONG - expected 1270 Hz, got ' + peakHz);
       window.spikeResult = 'failed: wrong tone ' + peakHz;
     }
+
+    // Stop. The first version of this page held the tone indefinitely,
+    // which means a forgotten tab sits on someone's speakers playing
+    // 1270 Hz until they work out where it is coming from. Ask me how I
+    // know. The measurement is done, so the audio has no reason to
+    // continue.
+    node.disconnect();
+    await ctx.close();
+    log('audio stopped');
   } catch (err) {
     log('FAILED: ' + err);
     window.spikeResult = 'failed: ' + err;
+    if (ctx && ctx.state !== 'closed') await ctx.close();
   }
 };
 </script>

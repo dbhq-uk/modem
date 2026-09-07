@@ -58,6 +58,14 @@ The first draft called `alloc_f32` and `dealloc_f32` on every `process()` call. 
 
 One related trap: **growing WASM linear memory detaches every existing `Float32Array` view of it.** The view is therefore rebuilt each call rather than cached. Caching it works fine until the first allocation that grows memory, and then fails in a way that is hard to attribute.
 
+### 5. Stop the audio when you are done measuring
+
+The first version of this page verified the tone and then held it forever,
+so a forgotten tab sat on a speaker playing 1270 Hz until someone worked out
+where it was coming from. `node.disconnect()` and `ctx.close()` now run as
+soon as the measurement is taken. Worth remembering for the real page too:
+the demo should stop when the handshake finishes, not idle on a carrier.
+
 ## Running it
 
 ```bash
