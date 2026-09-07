@@ -173,14 +173,86 @@ mod tests {
         let mut tx = Tx::new(cfg(Role::Originate));
         let mut buf = vec![0.0f32; 512];
         tx.read(&mut buf);
-        let cap = tx.scratch.capacity();
-        for _ in 0..50 {
+        // Compare the address, not the capacity. A fresh allocation of the
+        // same size reports the same capacity, so a capacity check passes
+        // against precisely the bug it exists to catch.
+        //
+        // Check after every call, not just first vs last. The system
+        // allocator's free list ping-pongs between two addresses on
+        // repeated same-size alloc-then-free-old (each call allocates the
+        // new buffer before dropping the old one, freeing an address the
+        // very next call's allocation then reuses), so an endpoint-only
+        // comparison across an even number of calls coincidentally lands
+        // back on the starting address even though every call in between
+        // reallocated. Verified: with a `Vec::with_capacity(need)` mutant
+        // reintroduced on every call, comparing only before and after 50
+        // iterations passed, but every one of those 50 calls had in fact
+        // moved to a fresh address.
+        let ptr = tx.scratch.as_ptr();
+        for i in 0..50 {
             tx.read(&mut buf);
+            assert_eq!(
+                tx.scratch.as_ptr(),
+                ptr,
+                "scratch was reallocated in the hot path (call {i})"
+            );
         }
-        assert_eq!(
-            tx.scratch.capacity(),
-            cap,
-            "scratch reallocated in the hot path"
+    }
+
+    /// Bits must reach the wire in the order they were written.
+    ///
+    /// Aggregate checks cannot see this: a drained-bit count is identical
+    /// under any consumption order, and tone-presence is identical too.
+    /// Per-symbol Goertzel does not help either - at 26.6667 samples per
+    /// symbol, 1270 Hz and 1070 Hz both fall in the same bin, so the
+    /// frequency domain cannot resolve one symbol at this window length.
+    ///
+    /// So compare against an independent oracle that mirrors the intended
+    /// state machine and diff the raw samples.
+    #[test]
+    fn read_emits_bits_in_write_order() {
+        let mut tx = Tx::new(cfg(Role::Originate));
+        let payload = [0x41u8, 0x7E];
+        tx.write(&payload);
+
+        let total = tx.samples_for_bits(payload.len() * 10);
+        let mut got = vec![0.0f32; total];
+        tx.read(&mut got);
+
+        let (mark, space) = tones(Role::Originate);
+        let mut bits: Vec<bool> = Vec::new();
+        for &b in &payload {
+            bits.extend(frame_byte(b));
+        }
+
+        let mut nco = crate::nco::Nco::new(mark, DSP_RATE);
+        let mut sym_pos = 0.0f64;
+        let mut idx = 0usize;
+        let step = 1.0 / samples_per_symbol();
+        let mut want = vec![0.0f32; total];
+        for w in want.iter_mut() {
+            *w = nco.next() as f32;
+            sym_pos += step;
+            if sym_pos >= 1.0 {
+                sym_pos -= 1.0;
+                let bit = bits.get(idx).copied().unwrap_or(true);
+                idx += 1;
+                nco.set_freq(if bit { mark } else { space });
+            }
+        }
+
+        let mse: f64 = got
+            .iter()
+            .zip(&want)
+            .map(|(a, b)| {
+                let d = (*a - *b) as f64;
+                d * d
+            })
+            .sum::<f64>()
+            / total as f64;
+        assert!(
+            mse < 1e-12,
+            "waveform diverges from the oracle, mse = {mse:e}"
         );
     }
 }
