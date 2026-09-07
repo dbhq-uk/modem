@@ -15,6 +15,32 @@
 //! once acoustic filtering and callback jitter are involved, so the timing
 //! loop tracks continuously instead.
 //!
+//! # Acquisition is a precondition, not an accident
+//!
+//! Byte-exact decode from a cold start requires the sender to open with a
+//! preamble: **a stretch of alternating symbols, then at least one
+//! character time of idle mark, then data.** Both halves are load-bearing
+//! and neither substitutes for the other.
+//!
+//! The alternating part is what the timing loop acquires on. A Gardner
+//! detector measures transitions, so idle mark carries no timing
+//! information at all and the loop sits wherever it started, however long
+//! the idle runs. Measured over all 54 sub-symbol starting offsets on a
+//! 1050-byte payload: with idle mark alone, 3 offsets slice at the shut
+//! part of the eye and mis-decode, and extending the idle from 100 ms to a
+//! full second does not move that.
+//!
+//! The idle mark after it is what puts the deframer back in a known state.
+//! 8-N-1 characters sent back to back give it no other way home: a wrong
+//! byte alignment that happens to read mark at the stop-bit position is
+//! self-consistent and survives indefinitely. Measured: training with no
+//! idle after it still loses 4 of 54 offsets to a wrong alignment held for
+//! the whole stream. With both halves, all 54 offsets decode byte-exact
+//! with zero framing errors.
+//!
+//! Task 11's overture ends in exactly this shape, and Task 9's WAV
+//! fixtures and Task 17's half-duplex turnaround both need it.
+//!
 //! Nothing here allocates per block. The ring buffers and the scratch are
 //! sized at construction.
 
@@ -245,6 +271,15 @@ mod tests {
 
     /// Modulates payload, demodulates it, returns what came back.
     ///
+    /// The lead-in is real: 100 ms of idle mark is read out of `tx` and
+    /// pushed through `rx` *before* the payload is queued, so the
+    /// correlator window is full and the deframer is idle when the first
+    /// start bit arrives. It does not acquire symbol timing - idle mark has
+    /// no transitions to acquire on - which is why this fixture starts the
+    /// receiver in step with the transmitter and
+    /// `receiver_joining_mid_symbol_recovers_byte_alignment` carries the
+    /// arbitrary-offset case with the full preamble.
+    ///
     /// Block size is deliberately awkward - 733 samples is never a whole
     /// number of symbols at any rate here, so nothing can accidentally
     /// depend on a block boundary landing on a symbol boundary.
@@ -252,16 +287,21 @@ mod tests {
         let c = cfg(role, rate);
         let mut tx = Tx::new(c);
         let mut rx = Rx::new(c);
-        tx.write(payload);
-
-        // Lead-in of idle mark so the correlator window fills and the
-        // timing loop acquires before data starts, then the payload, then
-        // a tail so the last frame clears.
-        let total = rate as usize + (payload.len() * 10) * rate as usize / 300 + rate as usize;
 
         let mut out = Vec::new();
         let mut buf = vec![0.0f32; block];
         let mut got = [0u8; 256];
+
+        let mut sent = 0;
+        while sent < rate as usize / 10 {
+            tx.read(&mut buf);
+            rx.write(&buf);
+            rx.read(&mut got);
+            sent += block;
+        }
+
+        tx.write(payload);
+        let total = (payload.len() * 10) * rate as usize / 300 + rate as usize;
         let mut sent = 0;
         while sent < total {
             tx.read(&mut buf);
@@ -273,30 +313,18 @@ mod tests {
         out
     }
 
-    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-        haystack.windows(needle.len()).any(|w| w == needle)
-    }
-
     #[test]
     fn loopback_originate() {
         let payload = b"CONNECT 300";
         let got = loopback(payload, Role::Originate, 8000, 733);
-        assert!(
-            contains(&got, payload),
-            "got {:?}",
-            core::str::from_utf8(&got)
-        );
+        assert_eq!(got, payload, "got {:?}", core::str::from_utf8(&got));
     }
 
     #[test]
     fn loopback_answer() {
         let payload = b"NO CARRIER";
         let got = loopback(payload, Role::Answer, 8000, 733);
-        assert!(
-            contains(&got, payload),
-            "got {:?}",
-            core::str::from_utf8(&got)
-        );
+        assert_eq!(got, payload, "got {:?}", core::str::from_utf8(&got));
     }
 
     /// All 256 values. A reversed bit order or a swapped mark and space
@@ -305,7 +333,7 @@ mod tests {
     fn loopback_all_byte_values() {
         let payload: Vec<u8> = (0..=255u8).collect();
         let got = loopback(&payload, Role::Originate, 8000, 733);
-        assert!(contains(&got, &payload), "recovered {} bytes", got.len());
+        assert_eq!(got, payload, "recovered {} bytes", got.len());
     }
 
     /// 20000 bits. Any symbol clock error compounds here: rounding
@@ -318,8 +346,9 @@ mod tests {
             payload.extend_from_slice(b"The quick brown fox. ");
         }
         let got = loopback(&payload, Role::Originate, 8000, 733);
-        assert!(
-            contains(&got, &payload),
+        assert_eq!(
+            got,
+            payload,
             "drifted: recovered {} of {} bytes",
             got.len(),
             payload.len()
@@ -345,12 +374,21 @@ mod tests {
         for tx_rate in [8160u32, 7840] {
             let mut tx = Tx::new(cfg(Role::Originate, tx_rate));
             let mut rx = Rx::new(cfg(Role::Originate, 8000));
-            tx.write(&payload);
 
-            let total = tx_rate as usize * 3 + (payload.len() * 10) * tx_rate as usize / 300;
             let mut out = Vec::new();
             let mut buf = vec![0.0f32; 733];
             let mut got = [0u8; 256];
+
+            let mut sent = 0;
+            while sent < tx_rate as usize / 10 {
+                tx.read(&mut buf);
+                rx.write(&buf);
+                rx.read(&mut got);
+                sent += 733;
+            }
+
+            tx.write(&payload);
+            let total = tx_rate as usize * 2 + (payload.len() * 10) * tx_rate as usize / 300;
             let mut sent = 0;
             while sent < total {
                 tx.read(&mut buf);
@@ -361,25 +399,114 @@ mod tests {
             }
             // Content, not a byte count. A slipped symbol that happens to
             // stay frame-aligned yields exactly 2100 bytes and zero framing
-            // errors while every one of them is wrong.
-            assert!(
-                contains(&out, &payload),
-                "clock offset via tx rate {tx_rate}: recovered {} of {} bytes, {} framing errors",
+            // errors while every one of them is wrong, so neither aggregate
+            // can stand in for comparing what actually came back.
+            assert_eq!(
+                out,
+                payload,
+                "clock offset via tx rate {tx_rate}: recovered {} of {} bytes",
                 out.len(),
-                payload.len(),
-                rx.framing_errors()
+                payload.len()
+            );
+            assert_eq!(
+                rx.framing_errors(),
+                0,
+                "clock offset via tx rate {tx_rate} produced framing errors"
             );
         }
     }
 
+    /// The receiver does not get to choose where in a symbol it starts. A
+    /// WAV file opened at an arbitrary sample, a cpal stream that begins
+    /// when the device is ready, and a half-duplex turnaround all hand it a
+    /// sub-symbol offset it had no say in. Every one of them must recover
+    /// byte alignment.
+    ///
+    /// The preamble here is the one the module doc states as a
+    /// precondition, and both halves of it are load-bearing. Measured over
+    /// these 54 offsets: drop the training characters and 3 offsets slice
+    /// at the shut part of the eye and mis-decode, with no amount of extra
+    /// idle mark fixing it, because a Gardner detector cannot acquire on a
+    /// tone that never changes. Drop the idle mark after the training and 4
+    /// offsets latch a wrong byte alignment while the loop is still pulling
+    /// in and hold it for the whole stream, because back-to-back 8-N-1
+    /// characters give the deframer no way home once a wrong alignment
+    /// reads mark at the stop-bit position.
+    ///
+    /// 54 offsets is two whole symbols, so the sweep cannot sit on one
+    /// phase of the symbol clock and call it coverage.
+    #[test]
+    fn receiver_joining_mid_symbol_recovers_byte_alignment() {
+        let c = cfg(Role::Originate, 8000);
+        let payload = b"The quick brown fox jumps over the lazy dog. 0123456789";
+
+        fn emit(tx: &mut Tx, air: &mut Vec<f32>, n: usize) {
+            let mut b = vec![0.0f32; n];
+            tx.read(&mut b);
+            air.extend_from_slice(&b);
+        }
+
+        let mut tx = Tx::new(c);
+        let mut air = Vec::new();
+        emit(&mut tx, &mut air, 1600); // quiet line, correlator window fills
+        tx.write(&[0x55, 0x55]); // training: alternating symbols to lock to
+        emit(&mut tx, &mut air, 2 * 10 * 8000 / 300);
+        emit(&mut tx, &mut air, 267); // one character time of idle mark
+        tx.write(payload);
+        emit(&mut tx, &mut air, payload.len() * 10 * 8000 / 300 + 8000);
+
+        for skip in 0..54 {
+            let mut rx = Rx::new(c);
+            let mut out = Vec::new();
+            let mut got = [0u8; 256];
+            let mut i = skip;
+            while i + 733 <= air.len() {
+                rx.write(&air[i..i + 733]);
+                let n = rx.read(&mut got);
+                out.extend_from_slice(&got[..n]);
+                i += 733;
+            }
+            // ends_with, not equality: the training characters are part of
+            // the stream and legitimately come back too. What must hold is
+            // that everything after them is the payload exactly, with
+            // nothing lost, inserted or shifted.
+            assert!(
+                out.ends_with(payload),
+                "joined {skip} samples in: {} bytes, {} framing errors, got {:?}",
+                out.len(),
+                rx.framing_errors(),
+                core::str::from_utf8(&out)
+            );
+            assert_eq!(
+                rx.framing_errors(),
+                0,
+                "joined {skip} samples in and produced framing errors"
+            );
+        }
+    }
+
+    /// Every audio device opens on silence and carries later, so this is
+    /// the ordinary start-up path, not an edge case.
+    ///
     /// Digital silence carries no evidence of anything, so the receiver
     /// must sit in the idle line state and emit nothing at all. Slicing a
     /// tie as space instead reads silence as a start bit and manufactures a
     /// framing error every ten symbols - thirty a second of invented link
     /// damage, on a line with nothing on it.
+    ///
+    /// Then the carrier comes up on the same receiver, and that is the half
+    /// the first two assertions cannot cover. On exact silence both tone
+    /// magnitudes are zero, so the timing loop's normalising denominator is
+    /// zero too; without the epsilon guarding it the error goes NaN,
+    /// sym_phase goes NaN, every comparison against it is false and the
+    /// receiver never decodes anything again. A receiver bricked that way
+    /// is indistinguishable from a healthy idle one by byte count and error
+    /// count alike - both are zero, which is exactly what the assertions
+    /// above demand. It only surfaces when something finally arrives.
     #[test]
     fn silence_is_read_as_idle_mark() {
-        let mut rx = Rx::new(cfg(Role::Originate, 8000));
+        let c = cfg(Role::Originate, 8000);
+        let mut rx = Rx::new(c);
         let quiet = vec![0.0f32; 800];
         let mut got = [0u8; 256];
         let mut bytes = 0;
@@ -392,6 +519,33 @@ mod tests {
             rx.framing_errors(),
             0,
             "silence produced framing errors, so the slicer is reading no signal as space"
+        );
+
+        let payload = b"CONNECT 300";
+        let mut tx = Tx::new(c);
+        let mut buf = vec![0.0f32; 733];
+        let mut sent = 0;
+        while sent < 800 {
+            tx.read(&mut buf);
+            rx.write(&buf);
+            rx.read(&mut got);
+            sent += 733;
+        }
+        tx.write(payload);
+        let mut out = Vec::new();
+        let mut sent = 0;
+        while sent < payload.len() * 10 * 27 + 8000 {
+            tx.read(&mut buf);
+            rx.write(&buf);
+            let n = rx.read(&mut got);
+            out.extend_from_slice(&got[..n]);
+            sent += 733;
+        }
+        assert_eq!(
+            out,
+            payload,
+            "carrier after silence did not decode, got {:?}",
+            core::str::from_utf8(&out)
         );
     }
 
@@ -423,11 +577,7 @@ mod tests {
     fn loopback_at_48khz() {
         let payload = b"CONNECT 300 at 48 kHz";
         let got = loopback(payload, Role::Originate, 48000, 4096);
-        assert!(
-            contains(&got, payload),
-            "got {:?}",
-            core::str::from_utf8(&got)
-        );
+        assert_eq!(got, payload, "got {:?}", core::str::from_utf8(&got));
     }
 
     /// The receiver must not allocate per block once running.
