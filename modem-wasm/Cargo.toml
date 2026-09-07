@@ -19,6 +19,3 @@ default = ["browser"]
 # src/lib.rs for why a wasm-bindgen surface and a worklet-loadable artifact
 # cannot coexist in the same compiled module.
 browser = ["dep:wasm-bindgen"]
-
-[profile.release]
-opt-level = "z"

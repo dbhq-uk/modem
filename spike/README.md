@@ -21,6 +21,8 @@ The last two lines matter. Instantiation alone proves nothing about whether audi
 
 **Payload:** 24,432 bytes raw, 9,701 gzipped.
 
+**Correction (7 Sep 2026):** `modem-wasm/Cargo.toml` declared `[profile.release] opt-level = "z"`, but Cargo ignores `[profile.*]` in a non-root package and only warns about it - so the figure above, and the `wasm fetched` line in the transcript, were both measured under the workspace root's `opt-level = 3, lto = true, codegen-units = 1`, not `opt-level = "z"`. The override now lives in the workspace root's `Cargo.toml` as `[profile.release.package.modem-wasm]`. Rebuilt with it actually in effect: **22,843 bytes raw, 9,320 gzipped.** The transcript above is a real browser log and is left as it was recorded rather than edited to match.
+
 ## Five findings that shape the real implementation
 
 ### 1. The wasm-bindgen surface and the worklet build cannot be the same artifact

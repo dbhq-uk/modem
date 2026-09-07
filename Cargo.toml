@@ -13,3 +13,10 @@ repository = "https://github.com/dbhq-uk/modem"
 opt-level = 3
 lto = true
 codegen-units = 1
+
+# Cargo ignores [profile.*] in a non-root package and only warns about it,
+# so the WASM size override has to live here rather than in
+# modem-wasm/Cargo.toml. Putting it there looks right, builds fine, and
+# silently does nothing.
+[profile.release.package.modem-wasm]
+opt-level = "z"
