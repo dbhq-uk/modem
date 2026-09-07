@@ -2,7 +2,7 @@
 
 An acoustic modem simulator. Run one binary on one machine and another on a second machine, and they establish a real Bell 103 connection over the sound card. Data crosses the air as sound.
 
-Early days. The DSP is being built; see `docs/` and the plan for where it is up to.
+Early days. The DSP is being built; see the commit history for where it is up to.
 
 ## The overture is performed. The connection is real
 
