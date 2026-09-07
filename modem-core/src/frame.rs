@@ -134,6 +134,22 @@ mod tests {
         assert_eq!(d.framing_errors(), 1);
     }
 
+    /// A single bad-stop-bit test cannot tell an accumulating counter from
+    /// one that merely gets set to 1 on the first error. Two separate bad
+    /// frames must leave the count at 2, not stuck at 1.
+    #[test]
+    fn deframer_accumulates_multiple_framing_errors() {
+        let mut d = Deframer::new();
+        for _ in 0..2 {
+            d.push_bit(false);
+            for _ in 0..8 {
+                d.push_bit(true);
+            }
+            d.push_bit(false); // bad stop bit
+        }
+        assert_eq!(d.framing_errors(), 2);
+    }
+
     /// After a corrupted frame the deframer must pick the stream back up.
     /// Task 5 feeds it a noisy real-world bit stream.
     #[test]
