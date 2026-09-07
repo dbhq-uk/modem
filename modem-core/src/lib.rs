@@ -19,6 +19,7 @@ extern crate alloc;
 pub mod frame;
 pub mod nco;
 pub mod resample;
+pub mod rx;
 pub mod tx;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
