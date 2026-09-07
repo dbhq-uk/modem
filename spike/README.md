@@ -29,7 +29,7 @@ The last two lines matter. Instantiation alone proves nothing about whether audi
 
 This is the big one, and it is not obvious.
 
-Any `#[wasm_bindgen]` item - even one that never touches a string or an externref - makes wasm-bindgen 0.2.128 emit an `__wbindgen_init_externref_table` import. A `&mut [f32]` parameter adds `copy_to_typed_array` on top. Both resolve against the generated `modem_wasm_bg.js` glue, which does not exist inside `AudioWorkletGlobalScope`.
+Any `#[wasm_bindgen]` item - even one that never touches a string or an externref - makes wasm-bindgen 0.2.128 emit `__wbindgen_describe`, `__wbindgen_object_drop_ref`, `__wbindgen_externref_table_set_null` and `__wbindgen_externref_table_grow` imports, and a `&mut [f32]` parameter adds a `__wbg___wbindgen_copy_to_typed_array_...` import on top. Both resolve against the generated `modem_wasm_bg.js` glue, which does not exist inside `AudioWorkletGlobalScope`.
 
 **WASM resolves every declared import at instantiation time, not just the ones a caller uses.** So a build containing both surfaces fails in the worklet immediately, whether or not the worklet ever calls a bindgen-wrapped function.
 
