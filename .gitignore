@@ -3,6 +3,5 @@
 /dist
 *.wav
 !testdata/*.wav
-/spike/pkg
 /spike/pkg-browser
 /spike/pkg-worklet
