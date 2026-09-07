@@ -1,0 +1,99 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - name: Install minimodem for cross-validation
+        run: sudo apt-get update && sudo apt-get install -y minimodem libasound2-dev
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  no_std:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown
+      # If modem-core ever gains an I/O dependency this fails to compile.
+      # That is the whole point - there is no grep heuristic to get wrong.
+      - name: modem-core must build for wasm32
+        run: cargo build -p modem-core --target wasm32-unknown-unknown
+
+  worklet_artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Build the worklet artifact
+        run: cargo build --release --target wasm32-unknown-unknown -p modem-wasm --no-default-features
+      # The worklet instantiates with an empty import object, so any import
+      # at all breaks it at runtime. A wasm-bindgen item anywhere in the
+      # crate reintroduces one, which is why this is a build gate and not a
+      # code review question. See spike/README.md.
+      - name: Worklet artifact must have zero imports
+        run: |
+          python3 - <<'PY'
+          import sys
+
+          data = open('target/wasm32-unknown-unknown/release/modem_wasm.wasm', 'rb').read()
+          assert data[:4] == b'\x00asm', 'not a wasm module'
+
+          def uleb(buf, i):
+              result = shift = 0
+              while True:
+                  byte = buf[i]
+                  i += 1
+                  result |= (byte & 0x7F) << shift
+                  if not byte & 0x80:
+                      return result, i
+                  shift += 7
+
+          i = 8
+          while i < len(data):
+              section_id = data[i]
+              i += 1
+              size, i = uleb(data, i)
+              if section_id == 2:
+                  count, _ = uleb(data, i)
+                  if count:
+                      print(f'FAIL: worklet artifact declares {count} imports')
+                      sys.exit(1)
+              i += size
+          print('worklet artifact has zero imports')
+          PY
+
+      - name: Report payload size
+        run: |
+          W=target/wasm32-unknown-unknown/release/modem_wasm.wasm
+          echo "raw: $(stat -c%s $W) bytes"
+          echo "gzipped: $(gzip -9 -c $W | wc -c) bytes"
+
+  style:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Repo rule: plain hyphens only, never em or en dashes.
+      - name: No em dashes or en dashes
+        run: |
+          if grep -rnP '[\x{2013}\x{2014}]' --include='*.rs' --include='*.md' \
+               --include='*.js' --include='*.html' --include='*.toml' \
+               --include='*.yml' . ; then
+            echo "em or en dash found - use a plain hyphen"
+            exit 1
+          fi
+          echo "no em or en dashes"

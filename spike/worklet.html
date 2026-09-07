@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>modem AudioWorklet spike</title>
+</head>
+<body style="background:#0A0A0A;color:#FFB000;font-family:monospace;padding:2rem">
+<h1>AudioWorklet spike</h1>
+<button id="go">Start</button>
+<pre id="log"></pre>
+<script type="module">
+const log = (m) => {
+  document.getElementById('log').textContent += m + "\n";
+  console.log('[spike] ' + m);
+};
+
+// Set once the whole chain has been verified, so automation can poll it.
+window.spikeResult = 'pending';
+
+document.getElementById('go').onclick = async () => {
+  try {
+    const ctx = new AudioContext();
+    await ctx.audioWorklet.addModule('modem-worklet.js');
+    log('worklet module loaded, sampleRate=' + ctx.sampleRate);
+
+    // fetch runs on the MAIN thread. It does not exist inside
+    // AudioWorkletGlobalScope, which is why the bytes are posted in rather
+    // than fetched there.
+    //
+    // This is the --no-default-features build: zero imports, so the worklet
+    // can instantiate it with an empty import object. The wasm-bindgen
+    // build in pkg/ declares imports that resolve against generated JS glue
+    // and cannot be loaded here at all. See spike/README.md.
+    const bytes = await (await fetch('pkg-worklet/modem.wasm')).arrayBuffer();
+    log('wasm fetched, ' + bytes.byteLength + ' bytes');
+
+    const node = new AudioWorkletNode(ctx, 'modem-processor');
+
+    const ready = new Promise((resolve, reject) => {
+      node.port.onmessage = (e) => {
+        if (e.data.type === 'ready') resolve(e.data);
+        if (e.data.type === 'error') reject(new Error(e.data.message));
+      };
+      setTimeout(() => reject(new Error('worklet never reported ready')), 5000);
+    });
+
+    node.port.postMessage({ type: 'wasm', bytes }, [bytes]);
+
+    const info = await ready;
+    log('WASM INSTANTIATED IN WORKLET - exports: ' + info.exports.join(', '));
+
+    // Instantiation alone is not proof the audio path works. Analyse the
+    // worklet's actual output and confirm the 1270 Hz mark tone is there.
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 8192;
+    node.connect(analyser);
+    analyser.connect(ctx.destination);
+    await ctx.resume();
+    log('audio graph running');
+
+    await new Promise((r) => setTimeout(r, 400));
+
+    const bins = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(bins);
+    const hzPerBin = ctx.sampleRate / analyser.fftSize;
+    const target = Math.round(1270 / hzPerBin);
+
+    let peak = 0;
+    for (let i = 1; i < bins.length; i++) if (bins[i] > bins[peak]) peak = i;
+    const peakHz = Math.round(peak * hzPerBin);
+    log('spectral peak at ' + peakHz + ' Hz (' + bins[peak].toFixed(1) + ' dB)');
+
+    if (Math.abs(peak - target) <= 3 && bins[peak] > -60) {
+      log('TONE VERIFIED - spike passed');
+      window.spikeResult = 'passed';
+    } else {
+      log('TONE WRONG - expected 1270 Hz, got ' + peakHz);
+      window.spikeResult = 'failed: wrong tone ' + peakHz;
+    }
+  } catch (err) {
+    log('FAILED: ' + err);
+    window.spikeResult = 'failed: ' + err;
+  }
+};
+</script>
+</body>
+</html>
