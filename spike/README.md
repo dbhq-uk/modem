@@ -21,7 +21,7 @@ The last two lines matter. Instantiation alone proves nothing about whether audi
 
 **Payload:** 24,432 bytes raw, 9,701 gzipped.
 
-## Four findings that shape the real implementation
+## Five findings that shape the real implementation
 
 ### 1. The wasm-bindgen surface and the worklet build cannot be the same artifact
 
@@ -80,4 +80,4 @@ Then open `https://<machine>.<tailnet>.ts.net:8444/worklet.html` and click Start
 
 ## Status
 
-This is scaffolding, not shipping code. It stays in the repo because the four findings above are expensive to rediscover, and because it is the evidence behind the language decision. Plan 2 builds the real browser endpoint on this path.
+This is scaffolding, not shipping code. It stays in the repo because the five findings above are expensive to rediscover, and because it is the evidence behind the language decision. Plan 2 builds the real browser endpoint on this path.
