@@ -313,18 +313,34 @@ mod tests {
         out
     }
 
+    /// Byte-exact comparison with a failure message you can read.
+    /// `assert_eq!` on a 2100-byte payload prints both vectors in full and
+    /// buries the one fact that matters, which is where they first parted.
+    fn assert_same(got: &[u8], want: &[u8], ctx: &str) {
+        if got == want {
+            return;
+        }
+        let at = got.iter().zip(want).position(|(a, b)| a != b);
+        panic!(
+            "{ctx}: recovered {} of {} bytes, first difference at {at:?}, head {:?}",
+            got.len(),
+            want.len(),
+            core::str::from_utf8(&got[..got.len().min(48)])
+        );
+    }
+
     #[test]
     fn loopback_originate() {
         let payload = b"CONNECT 300";
         let got = loopback(payload, Role::Originate, 8000, 733);
-        assert_eq!(got, payload, "got {:?}", core::str::from_utf8(&got));
+        assert_same(&got, payload, "originate");
     }
 
     #[test]
     fn loopback_answer() {
         let payload = b"NO CARRIER";
         let got = loopback(payload, Role::Answer, 8000, 733);
-        assert_eq!(got, payload, "got {:?}", core::str::from_utf8(&got));
+        assert_same(&got, payload, "answer");
     }
 
     /// All 256 values. A reversed bit order or a swapped mark and space
@@ -333,7 +349,7 @@ mod tests {
     fn loopback_all_byte_values() {
         let payload: Vec<u8> = (0..=255u8).collect();
         let got = loopback(&payload, Role::Originate, 8000, 733);
-        assert_eq!(got, payload, "recovered {} bytes", got.len());
+        assert_same(&got, &payload, "all byte values");
     }
 
     /// 20000 bits. Any symbol clock error compounds here: rounding
@@ -346,13 +362,7 @@ mod tests {
             payload.extend_from_slice(b"The quick brown fox. ");
         }
         let got = loopback(&payload, Role::Originate, 8000, 733);
-        assert_eq!(
-            got,
-            payload,
-            "drifted: recovered {} of {} bytes",
-            got.len(),
-            payload.len()
-        );
+        assert_same(&got, &payload, "drifted");
     }
 
     /// Two sound cards never agree on the sample rate, and the timing loop
@@ -401,12 +411,10 @@ mod tests {
             // stay frame-aligned yields exactly 2100 bytes and zero framing
             // errors while every one of them is wrong, so neither aggregate
             // can stand in for comparing what actually came back.
-            assert_eq!(
-                out,
-                payload,
-                "clock offset via tx rate {tx_rate}: recovered {} of {} bytes",
-                out.len(),
-                payload.len()
+            assert_same(
+                &out,
+                &payload,
+                &alloc::format!("clock offset via tx rate {tx_rate}"),
             );
             assert_eq!(
                 rx.framing_errors(),
@@ -541,12 +549,7 @@ mod tests {
             out.extend_from_slice(&got[..n]);
             sent += 733;
         }
-        assert_eq!(
-            out,
-            payload,
-            "carrier after silence did not decode, got {:?}",
-            core::str::from_utf8(&out)
-        );
+        assert_same(&out, payload, "carrier after silence");
     }
 
     /// read must consume what it hands back. Returning the same bytes again
@@ -577,7 +580,7 @@ mod tests {
     fn loopback_at_48khz() {
         let payload = b"CONNECT 300 at 48 kHz";
         let got = loopback(payload, Role::Originate, 48000, 4096);
-        assert_eq!(got, payload, "got {:?}", core::str::from_utf8(&got));
+        assert_same(&got, payload, "48 kHz");
     }
 
     /// The receiver must not allocate per block once running.
