@@ -15,13 +15,24 @@ This directory also holds `modem.dbhq.uk`'s product page. What is here:
 - `session.js` - a thin wrapper around modem-wasm's raw C-ABI worklet
   exports (`session_new`, `process_out`/`process_in`, `dial`/`answer`,
   `send`/`receive`, ...). Shared, unchanged, between the main thread and
-  the worklet - it touches nothing AudioWorkletGlobalScope lacks.
-- `worklet.js` - the `AudioWorkletProcessor` that drives a `Session` on
-  the audio rendering thread.
-- `modem.js` - the main-thread driver: fetches the WASM bytes, brings up
-  the `AudioContext`/`AudioWorkletNode`, opens the microphone raw, and
-  exposes `dial`/`answer`/`hangup`/`send`/`stop` plus `status`/`data`/
-  `diagnostic`/`error` events.
+  both worklets - it touches nothing AudioWorkletGlobalScope lacks.
+- `worklet.js` - the `AudioWorkletProcessor` that drives one `Session`,
+  fed by a real microphone, on the audio rendering thread - the "Two
+  devices" endpoint.
+- `modem.js` - the main-thread driver for `worklet.js`: fetches the WASM
+  bytes, brings up the `AudioContext`/`AudioWorkletNode`, opens the
+  microphone raw, and exposes `dial`/`answer`/`hangup`/`send`/`stop`
+  plus `status`/`data`/`diagnostic`/`error` events.
+- `wired-worklet.js` - the `AudioWorkletProcessor` for the "One device"
+  live demo: two `Session`s cross-wired directly in software, each
+  one's `process_out` fed into the other's `process_in` and both mixed
+  to the speakers - the browser mirror of
+  `modem-audio/src/transport.rs`'s `WiredTransport::step`. No
+  microphone input at all.
+- `wired.js` - the main-thread driver for `wired-worklet.js`: same shape
+  as `modem.js` minus the microphone, exposing `dial`/`answer`/`hangup`/
+  `send(side, text)`/`stop` plus `status`/`data`/`error` events, where
+  `status`/`data` carry both ends' state under `{a, b}`/`{side, bytes}`.
 - `harness.html` - proves the endpoint two ways: a pure-WASM loopback
   (dial, answer, exchange a real message, assert the bytes survive byte
   exact - no audio device involved) and the spike's own gate, a spectral

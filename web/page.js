@@ -6,6 +6,7 @@
 // what happened on the first deploy.
 import { instantiateModemModule, SessionHandle, Role, Duplex, SessionState, STAGE_NAMES } from './session.js';
 import { ModemEndpoint, summariseMicDiagnostics } from './modem.js';
+import { WiredEndpoint, decode as decodeWired } from './wired.js';
 
 // ---------------------------------------------------------------------
 // The nine performed overture phases the explainer describes. Labels
@@ -29,7 +30,9 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
 const terminalOutput = document.getElementById('terminal-output');
 const nowPlaying = document.getElementById('now-playing');
 const dialBtn = document.getElementById('dial-btn');
-const micBtn = document.getElementById('mic-btn');
+const modeSelect = document.getElementById('mode-select');
+const modeOneBtn = document.getElementById('mode-one-btn');
+const modeTwoBtn = document.getElementById('mode-two-btn');
 const micDiagnostic = document.getElementById('mic-diagnostic');
 const endpointPanel = document.getElementById('endpoint-panel');
 const endpointStatus = document.getElementById('endpoint-status');
@@ -43,6 +46,21 @@ const chatSendBtn = document.getElementById('chat-send');
 const chatLog = document.getElementById('chat-log');
 const canvas = document.getElementById('waterfall');
 const phaseListEl = document.getElementById('phase-list');
+
+const wiredPanel = document.getElementById('wired-panel');
+const wiredStatusA = document.getElementById('wired-status-a');
+const wiredStatusB = document.getElementById('wired-status-b');
+const wiredLogA = document.getElementById('wired-log-a');
+const wiredLogB = document.getElementById('wired-log-b');
+const wiredDigits = document.getElementById('wired-digits');
+const wiredDialBtn = document.getElementById('wired-dial');
+const wiredAnswerBtn = document.getElementById('wired-answer');
+const wiredHangupBtn = document.getElementById('wired-hangup');
+const wiredStopBtn = document.getElementById('wired-stop');
+const wiredChatA = document.getElementById('wired-chat-a');
+const wiredChatSendA = document.getElementById('wired-send-a');
+const wiredChatB = document.getElementById('wired-chat-b');
+const wiredChatSendB = document.getElementById('wired-send-b');
 
 function appendTerminalLine(container, text, { command = false } = {}) {
   const line = document.createElement('p');
@@ -304,7 +322,7 @@ async function playFullOverture() {
   nowPlaying.textContent = 'Idle';
   setActivePhaseRow(null);
   dialBtn.disabled = false;
-  micBtn.hidden = false;
+  modeSelect.hidden = false;
 }
 
 dialBtn.addEventListener('click', () => {
@@ -366,9 +384,15 @@ PHASES.forEach((phase, index) => {
 });
 
 // -----------------------------------------------------------------------
-// The live endpoint - offered only once the passive demo has played, per
-// the staged design: front-loading a microphone prompt loses a visitor
-// who has no idea yet what this site is.
+// The live demos - offered only once the passive overture has played,
+// per the staged design: front-loading a mode choice (let alone a
+// microphone prompt) loses a visitor who has no idea yet what this site
+// is. Two modes, matching the binary's own two ways to run it (see the
+// "Two ways to try this" section below): "One device" cross-wires two
+// real Sessions in software, right here in the page, exactly as
+// modem-audio's WiredTransport does; "Two devices" turns this tab into
+// one real endpoint, listening on a raw microphone, that a copy of the
+// binary on a second machine can dial or answer.
 // -----------------------------------------------------------------------
 let endpoint = null;
 
@@ -382,8 +406,9 @@ function endpointStateName(state) {
   }
 }
 
-micBtn.addEventListener('click', async () => {
-  micBtn.disabled = true;
+modeTwoBtn.addEventListener('click', async () => {
+  modeOneBtn.disabled = true;
+  modeTwoBtn.disabled = true;
   micDiagnostic.textContent = 'Requesting the endpoint and microphone...';
   micDiagnostic.className = 'diagnostic';
   try {
@@ -415,12 +440,13 @@ micBtn.addEventListener('click', async () => {
     micDiagnostic.className = diagnostics.warnings.length > 0 ? 'diagnostic diagnostic--warning' : 'diagnostic';
 
     endpointPanel.hidden = false;
-    micBtn.hidden = true;
+    modeSelect.hidden = true;
   } catch (err) {
     console.error(err);
     micDiagnostic.textContent = `Could not open the endpoint: ${err.message || err}`;
     micDiagnostic.className = 'diagnostic diagnostic--warning';
-    micBtn.disabled = false;
+    modeOneBtn.disabled = false;
+    modeTwoBtn.disabled = false;
   }
 });
 
@@ -445,7 +471,7 @@ endpointHangupBtn.addEventListener('click', () => {
 // ending a call - spike/README.md finding 5's rule applies to more than
 // a forgotten carrier: a visitor should never have to close the tab to
 // know their microphone is off. Restores the page to its pre-connect
-// state so "Connect with microphone" can be pressed again.
+// state so "Two devices" can be chosen again.
 endpointStopBtn.addEventListener('click', async () => {
   if (!endpoint) return;
   await endpoint.stop();
@@ -455,8 +481,9 @@ endpointStopBtn.addEventListener('click', async () => {
   endpointStatus.textContent = 'IDLE';
   micDiagnostic.textContent = 'Microphone disconnected';
   micDiagnostic.className = 'diagnostic';
-  micBtn.hidden = false;
-  micBtn.disabled = false;
+  modeSelect.hidden = false;
+  modeOneBtn.disabled = false;
+  modeTwoBtn.disabled = false;
 });
 
 chatSendBtn.addEventListener('click', () => {
@@ -470,11 +497,124 @@ chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') chatSendBtn.click();
 });
 
-// A page navigating away must not leave a live microphone or a carrier
-// running - see spike/README.md finding 5 and modem.js's own `stop()`
-// doc. Best-effort: `beforeunload` cannot await, but stop() only tears
-// down local objects (tracks, node, context), none of which need a
-// network round trip.
+// -----------------------------------------------------------------------
+// "One device" - two real Sessions cross-wired in software, right here
+// in the page, the browser mirror of modem-audio/src/transport.rs's
+// WiredTransport. No microphone and no permission prompt: both ends
+// live in this page and the mixed signal plays through the visitor's
+// own speakers.
+// -----------------------------------------------------------------------
+let wired = null;
+
+function wiredStatusLine(status) {
+  const stageName = typeof status.stage === 'number' && status.stage >= 0 ? STAGE_NAMES[status.stage] : 'none';
+  return `${endpointStateName(status.state)} - stage: ${stageName} - turn: ${status.hasTurn ? 'yours' : 'not yours'} - carrier: ${status.carrier ? 'yes' : 'no'}`;
+}
+
+modeOneBtn.addEventListener('click', async () => {
+  modeOneBtn.disabled = true;
+  modeTwoBtn.disabled = true;
+  try {
+    wired = new WiredEndpoint();
+    await wired.init({ duplex: Duplex.HALF_PING_PONG });
+
+    wired.addEventListener('status', (e) => {
+      const { a, b } = e.detail;
+      wiredStatusA.textContent = wiredStatusLine(a);
+      wiredStatusB.textContent = wiredStatusLine(b);
+      const connectedA = a.state === SessionState.CONNECTED;
+      const connectedB = b.state === SessionState.CONNECTED;
+      wiredChatA.disabled = !connectedA;
+      wiredChatSendA.disabled = !connectedA;
+      wiredChatB.disabled = !connectedB;
+      wiredChatSendB.disabled = !connectedB;
+      wiredHangupBtn.disabled = a.state === SessionState.IDLE && b.state === SessionState.IDLE;
+    });
+
+    wired.addEventListener('data', (e) => {
+      const { side, bytes } = e.detail;
+      appendTerminalLine(side === 'a' ? wiredLogA : wiredLogB, decodeWired(bytes));
+    });
+
+    wired.addEventListener('error', (e) => {
+      appendTerminalLine(wiredLogA, `error: ${e.detail}`);
+    });
+
+    wiredPanel.hidden = false;
+    modeSelect.hidden = true;
+  } catch (err) {
+    console.error(err);
+    micDiagnostic.textContent = `Could not start the one-device demo: ${err.message || err}`;
+    micDiagnostic.className = 'diagnostic diagnostic--warning';
+    modeOneBtn.disabled = false;
+    modeTwoBtn.disabled = false;
+  }
+});
+
+wiredDialBtn.addEventListener('click', () => {
+  if (!wired) return;
+  const digits = wiredDigits.value || '0';
+  wired.dial(digits);
+  appendTerminalLine(wiredLogA, `ATDT${digits}`, { command: true });
+});
+
+wiredAnswerBtn.addEventListener('click', () => {
+  if (!wired) return;
+  wired.answer();
+  appendTerminalLine(wiredLogB, 'ATA', { command: true });
+});
+
+wiredHangupBtn.addEventListener('click', () => {
+  if (!wired) return;
+  wired.hangup();
+});
+
+// Fully releases the audio graph rather than relying on hangup() alone -
+// see wired.js's own stop() doc: an idle Session outputs silence, but
+// the node itself keeps rendering it until the context closes. Restores
+// the page to its pre-connect state so a mode can be chosen again.
+wiredStopBtn.addEventListener('click', async () => {
+  if (!wired) return;
+  await wired.stop();
+  wired = null;
+  wiredPanel.hidden = true;
+  wiredLogA.innerHTML = '';
+  wiredLogB.innerHTML = '';
+  wiredStatusA.textContent = 'IDLE';
+  wiredStatusB.textContent = 'IDLE';
+  modeSelect.hidden = false;
+  modeOneBtn.disabled = false;
+  modeTwoBtn.disabled = false;
+});
+
+wiredChatSendA.addEventListener('click', () => {
+  if (!wired || !wiredChatA.value) return;
+  wired.send('a', wiredChatA.value);
+  appendTerminalLine(wiredLogA, `> ${wiredChatA.value}`);
+  wiredChatA.value = '';
+});
+
+wiredChatA.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') wiredChatSendA.click();
+});
+
+wiredChatSendB.addEventListener('click', () => {
+  if (!wired || !wiredChatB.value) return;
+  wired.send('b', wiredChatB.value);
+  appendTerminalLine(wiredLogB, `> ${wiredChatB.value}`);
+  wiredChatB.value = '';
+});
+
+wiredChatB.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') wiredChatSendB.click();
+});
+
+// A page navigating away must not leave a live microphone, a live wired
+// call, or a carrier running - see spike/README.md finding 5 and both
+// endpoints' own `stop()` docs. Best-effort: `beforeunload` cannot
+// await, but stop() only tears down local objects (tracks, node,
+// context), none of which need a network round trip.
 window.addEventListener('beforeunload', () => {
   if (endpoint) endpoint.stop();
+  if (wired) wired.stop();
 });

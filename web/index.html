@@ -64,7 +64,6 @@
 
       <div class="demo__controls">
         <button class="dial-button" id="dial-btn" type="button">Dial</button>
-        <button class="dial-button" id="mic-btn" type="button" hidden>Connect with microphone</button>
       </div>
 
       <div class="terminal">
@@ -82,6 +81,53 @@
       </div>
 
       <noscript><p>The demo needs JavaScript. Everything else on this page reads fine without it.</p></noscript>
+
+      <div class="mode-select" id="mode-select" hidden>
+        <p>Now hold a real connection. One device or two?</p>
+        <div class="mode-select__controls">
+          <button class="dial-button" id="mode-one-btn" type="button">One device</button>
+          <button class="dial-button" id="mode-two-btn" type="button">Two devices</button>
+        </div>
+      </div>
+
+      <div class="endpoint wired" id="wired-panel" hidden aria-labelledby="wired-heading">
+        <h3 class="scenario__label" id="wired-heading">One device - both ends live, right here</h3>
+        <p>Two real sessions, cross-wired in software exactly as the binary's own split-screen demo wires them - the link never crosses the air, so this is genuinely <span class="mode-badge">DEMO MODE</span>, the same honesty the terminal app's own status bar carries. Dial from the left, answer on the right, and watch both transcripts fill in while the handshake plays through your speakers.</p>
+        <div class="wired__panels">
+          <div class="wired__panel">
+            <div class="wired__panel-bar">ORIGINATE &middot; 1270/1070 Hz</div>
+            <p class="endpoint__status" id="wired-status-a" role="status">IDLE</p>
+            <div class="terminal__output" id="wired-log-a" role="log" aria-label="Originate transcript"></div>
+            <div class="endpoint__row">
+              <label for="wired-digits">Digits</label>
+              <input type="text" id="wired-digits" value="01234567890" size="12" autocomplete="off">
+              <button type="button" id="wired-dial">ATDT (dial)</button>
+            </div>
+            <div class="endpoint__row">
+              <label for="wired-chat-a" class="sr-only">Message to send from originate</label>
+              <input type="text" id="wired-chat-a" placeholder="Type once CONNECTED" size="24" autocomplete="off" disabled>
+              <button type="button" id="wired-send-a" disabled>Send</button>
+            </div>
+          </div>
+          <div class="wired__panel wired__panel--answer">
+            <div class="wired__panel-bar">ANSWER &middot; 2225/2025 Hz</div>
+            <p class="endpoint__status" id="wired-status-b" role="status">IDLE</p>
+            <div class="terminal__output" id="wired-log-b" role="log" aria-label="Answer transcript"></div>
+            <div class="endpoint__row">
+              <button type="button" id="wired-answer">ATA (answer)</button>
+            </div>
+            <div class="endpoint__row">
+              <label for="wired-chat-b" class="sr-only">Message to send from answer</label>
+              <input type="text" id="wired-chat-b" placeholder="Type once CONNECTED" size="24" autocomplete="off" disabled>
+              <button type="button" id="wired-send-b" disabled>Send</button>
+            </div>
+          </div>
+        </div>
+        <div class="endpoint__row">
+          <button type="button" id="wired-hangup" disabled>Hang up</button>
+          <button type="button" id="wired-stop">Stop</button>
+        </div>
+      </div>
 
       <p class="diagnostic" id="mic-diagnostic" role="status"></p>
 

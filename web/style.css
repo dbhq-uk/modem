@@ -561,6 +561,64 @@ section {
 }
 
 /* ---------------------------------------------------------------------
+ * mode-select - the live "one device" / "two devices" choice, offered
+ * once the overture has played (the same staged design the microphone
+ * prompt already followed - see page.js's own doc on it).
+ * ------------------------------------------------------------------- */
+.mode-select__controls {
+  display: flex;
+  gap: var(--modem-space-sm);
+  flex-wrap: wrap;
+  margin: var(--modem-space-sm) 0;
+}
+
+/* ---------------------------------------------------------------------
+ * wired - the live "one device" split-screen demo: two real Sessions,
+ * cross-wired in software exactly as modem-audio's own WiredTransport
+ * wires them (see modem-audio/src/transport.rs). Built on `.endpoint`'s
+ * own border/row/input/button treatment - this is the same kind of live
+ * control surface, just two of them side by side, one amber-bright
+ * (originate) and one amber-dim (answer), the same pairing the
+ * generated frames above already draw for the two bands.
+ * ------------------------------------------------------------------- */
+.wired__panels {
+  display: flex;
+  gap: var(--modem-space-sm);
+  flex-wrap: wrap;
+  margin: var(--modem-space-sm) 0;
+}
+
+.wired__panel {
+  flex: 1 1 320px;
+  min-width: 0;
+  border: 1px solid var(--modem-amber-bright);
+  padding: var(--modem-space-sm);
+}
+
+.wired__panel--answer {
+  border-color: var(--modem-amber-dim);
+}
+
+.wired__panel-bar {
+  color: var(--modem-amber-bright);
+  font-size: var(--modem-type-scale-small);
+  letter-spacing: 0.08em;
+  margin-bottom: var(--modem-space-xs);
+}
+
+.wired__panel--answer .wired__panel-bar {
+  color: var(--modem-amber-dim);
+}
+
+.mode-badge {
+  color: var(--modem-ground);
+  background: var(--modem-amber-bright);
+  font-size: var(--modem-type-scale-small);
+  padding: 0 var(--modem-space-xs);
+  letter-spacing: 0.05em;
+}
+
+/* ---------------------------------------------------------------------
  * scenarios - the two ways to try modem: one device (split screen, the
  * default) and two devices (the real product). `win`/`bar`/`screen` name
  * the terminal-window chrome the same way modem-tui/examples/mockup.rs
