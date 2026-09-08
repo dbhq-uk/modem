@@ -21,6 +21,27 @@ jobs:
       # The default feature set never touches the --no-default-features
       # build the worklet actually loads, so it needs its own clippy pass.
       - run: cargo clippy --all-targets -p modem-wasm --no-default-features -- -D warnings
+      # modem-audio/tests/interop.rs skips gracefully when minimodem is
+      # absent, so `cargo test` alone cannot tell "cross-validated" from
+      # "quietly skipped" - both print `test result: ok`. Task 9's own
+      # mutation 4 proved this: hard-coding the skip-if-absent check to
+      # always report absent left the suite green with zero minimodem
+      # invocations. This step is the independent check that catches
+      # that - it fails on a missing binary, and it fails again if the
+      # tests themselves never actually ran against one, by grepping for
+      # the RAN/SKIP markers each test prints regardless of pass or fail.
+      - name: minimodem cross-validation must actually run, not skip
+        run: |
+          set -o pipefail
+          cargo test -p modem-audio --test interop -- --nocapture 2>&1 | tee /tmp/interop.log
+          if grep -q '^SKIP' /tmp/interop.log; then
+            echo "minimodem cross-validation was skipped - minimodem must be present in CI"
+            exit 1
+          fi
+          grep -q 'RAN (minimodem_decodes_our_tx)' /tmp/interop.log \
+            || { echo "minimodem_decodes_our_tx did not run"; exit 1; }
+          grep -q 'RAN (we_decode_minimodem_tx)' /tmp/interop.log \
+            || { echo "we_decode_minimodem_tx did not run"; exit 1; }
       - run: cargo test --workspace
 
   no_std:
