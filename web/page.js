@@ -34,6 +34,8 @@ const modeSelect = document.getElementById('mode-select');
 const modeOneBtn = document.getElementById('mode-one-btn');
 const modeTwoBtn = document.getElementById('mode-two-btn');
 const micDiagnostic = document.getElementById('mic-diagnostic');
+const micIntro = document.getElementById('mic-intro');
+const micEnableBtn = document.getElementById('mic-enable-btn');
 const endpointPanel = document.getElementById('endpoint-panel');
 const endpointStatus = document.getElementById('endpoint-status');
 const dialDigits = document.getElementById('dial-digits');
@@ -393,7 +395,7 @@ async function playFullOverture() {
 dialBtn.addEventListener('click', () => {
   playFullOverture().catch((err) => {
     console.error(err);
-    nowPlaying.textContent = 'Playback failed - see the console';
+    nowPlaying.textContent = 'Playback failed - press Dial to try again';
     dialBtn.disabled = false;
   });
 });
@@ -495,9 +497,19 @@ function endpointStateName(state) {
   }
 }
 
-modeTwoBtn.addEventListener('click', async () => {
-  modeOneBtn.disabled = true;
-  modeTwoBtn.disabled = true;
+// Two steps, not one: clicking "Two devices" only reveals what it is
+// about to ask for (mic-intro) - the actual getUserMedia prompt waits
+// for its own explicit "Enable microphone" click. Asking for a
+// microphone as the very first thing that happens, with the reason
+// following only after the browser's own permission dialog, had the
+// explanation arriving too late to be useful.
+modeTwoBtn.addEventListener('click', () => {
+  modeSelect.hidden = true;
+  micIntro.hidden = false;
+});
+
+micEnableBtn.addEventListener('click', async () => {
+  micEnableBtn.disabled = true;
   micDiagnostic.textContent = 'Requesting the endpoint and microphone...';
   micDiagnostic.className = 'diagnostic';
   try {
@@ -528,14 +540,13 @@ modeTwoBtn.addEventListener('click', async () => {
     micDiagnostic.textContent = summary;
     micDiagnostic.className = diagnostics.warnings.length > 0 ? 'diagnostic diagnostic--warning' : 'diagnostic';
 
+    micIntro.hidden = true;
     endpointPanel.hidden = false;
-    modeSelect.hidden = true;
   } catch (err) {
     console.error(err);
-    micDiagnostic.textContent = `Could not open the endpoint: ${err.message || err}`;
+    micDiagnostic.textContent = `Could not open the endpoint: ${err.message || err} - check your browser's microphone permission and press Enable microphone to try again.`;
     micDiagnostic.className = 'diagnostic diagnostic--warning';
-    modeOneBtn.disabled = false;
-    modeTwoBtn.disabled = false;
+    micEnableBtn.disabled = false;
   }
 });
 
@@ -566,6 +577,8 @@ endpointStopBtn.addEventListener('click', async () => {
   await endpoint.stop();
   endpoint = null;
   endpointPanel.hidden = true;
+  micIntro.hidden = true;
+  micEnableBtn.disabled = false;
   chatLog.innerHTML = '';
   endpointStatus.textContent = 'IDLE';
   micDiagnostic.textContent = 'Microphone disconnected';

@@ -566,6 +566,18 @@ section {
 }
 
 /* ---------------------------------------------------------------------
+ * mic-intro - what "Two devices" reveals before it asks for anything:
+ * the second-machine requirement and one explicit "Enable microphone"
+ * action, so the browser's own permission prompt is not the first thing
+ * that happens with no explanation attached to it yet.
+ * ------------------------------------------------------------------- */
+.mic-intro {
+  border: 1px solid var(--modem-green-dim);
+  padding: var(--modem-space-sm);
+  margin-top: var(--modem-space-sm);
+}
+
+/* ---------------------------------------------------------------------
  * wired - the live "one device" split-screen demo: two real Sessions,
  * cross-wired in software exactly as modem-audio's own WiredTransport
  * wires them (see modem-audio/src/transport.rs). Built on `.endpoint`'s

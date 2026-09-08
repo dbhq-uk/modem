@@ -141,8 +141,13 @@
 
       <p class="diagnostic" id="mic-diagnostic" role="status"></p>
 
+      <div class="mic-intro" id="mic-intro" hidden>
+        <p>The real thing needs a second machine nearby, running <code>modem --single --acoustic</code>, speakers and microphone facing this one. This tab will ask for microphone access - nothing leaves your browser except sound.</p>
+        <button type="button" class="dial-button" id="mic-enable-btn">Enable microphone</button>
+      </div>
+
       <div class="endpoint" id="endpoint-panel" hidden>
-        <p>This tab is now a real endpoint, listening on a raw microphone. Run <code>modem --single --acoustic</code> on a second machine nearby, speakers and microphones facing, and dial or answer from here to meet it.</p>
+        <p>This tab is a real endpoint, listening on a raw microphone. Dial or answer from here to meet the second machine.</p>
         <p class="endpoint__status" id="endpoint-status" role="status">IDLE</p>
         <div class="endpoint__row">
           <label for="dial-digits">Digits</label>
