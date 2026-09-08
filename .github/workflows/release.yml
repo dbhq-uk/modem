@@ -1,0 +1,136 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and publish, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should not hide whether the others work -
+      # the device matrix wants every result, including the bad ones.
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: modem
+          - label: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            binary: modem
+          - label: macos-x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+            binary: modem
+          - label: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: modem.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: ${{ matrix.target }}
+
+      # cpal opens the sound card through ALSA on Linux, so the headers
+      # have to be there even though the runner has no audio device.
+      - name: Install ALSA headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Build
+        run: cargo build --release --locked -p modem-tui --target ${{ matrix.target }}
+
+      # "Compiling is not passing" is this project's own rule for the
+      # device matrix, and it applies to a release artifact too. This is
+      # the weakest check that is still a real one: the binary starts,
+      # exits cleanly, and prints what it should. It cannot open a sound
+      # card here - no runner has one - so it deliberately does not try.
+      - name: The binary must actually run
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          OUT=$("$BIN" --help)
+          echo "$OUT"
+          grep -q "Bell 103" <<<"$OUT"
+          grep -q -- "--acoustic" <<<"$OUT"
+          grep -q -- "--answer" <<<"$OUT"
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="modem-${{ matrix.label }}"
+          mkdir -p "$STAGE"
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "$STAGE/"
+          cp README.md "$STAGE/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a -tzip "$STAGE.zip" "$STAGE"
+          else
+            tar czf "$STAGE.tar.gz" "$STAGE"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: modem-${{ matrix.label }}
+          path: |
+            modem-*.tar.gz
+            modem-*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List what is being published
+        run: ls -la dist
+
+      # Every platform in the matrix has to have produced something. A
+      # release quietly missing macOS because that leg failed is worse
+      # than no release, and `fail-fast: false` means the build job can
+      # go green-ish with a hole in it.
+      - name: Every platform must be present
+        run: |
+          set -euo pipefail
+          for label in linux-x86_64 macos-aarch64 macos-x86_64 windows-x86_64; do
+            ls dist/modem-$label.* >/dev/null 2>&1 \
+              || { echo "missing artifact for $label"; exit 1; }
+          done
+          echo "all four platforms present"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            Binaries for Linux, macOS (Apple silicon and Intel) and Windows.
+
+            The overture is performed. The connection is real Bell 103 FSK
+            at 300 baud. See the README for which parts are which.
+
+            Run `modem` for the two-pane demo on one machine, or
+            `modem --single --acoustic` on two machines with `ATDT<digits>`
+            on one and `ATA` on the other.
