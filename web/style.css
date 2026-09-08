@@ -1,0 +1,537 @@
+/*
+ * modem.dbhq.uk - plain CSS, no framework, consuming brand/tokens.css's
+ * custom properties throughout. Never a hardcoded colour, type or
+ * spacing value where a token exists for it - see ../brand/README.md.
+ *
+ * Component names below match the design spec's "Components" table and,
+ * where the concept is the same, modem-tui's own naming: crt-frame,
+ * terminal-line, dial-button, waterfall, phase-row, download-row,
+ * endorsement.
+ */
+
+@import url("../brand/tokens.css");
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--modem-ground);
+  color: var(--modem-white-bright);
+  font-family: var(--modem-type-face);
+  font-size: var(--modem-type-scale-base);
+  line-height: var(--modem-line-height-ratio);
+}
+
+/* Visually hidden but still reachable by assistive tech - used for the
+   skip link's destination context and for text equivalents of anything
+   this page otherwise conveys only visually (the glow, the waterfall). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: -999px;
+  top: 0;
+  z-index: 100;
+  background: var(--modem-ground);
+  color: var(--modem-amber-bright);
+  padding: var(--modem-space-xs) var(--modem-space-sm);
+  border: 1px solid var(--modem-amber-bright);
+}
+
+.skip-link:focus {
+  left: var(--modem-space-sm);
+  top: var(--modem-space-sm);
+}
+
+a {
+  color: var(--modem-amber-bright);
+}
+
+a:hover,
+a:focus-visible {
+  color: var(--modem-white-bright);
+}
+
+:focus-visible {
+  outline: 2px solid var(--modem-amber-bright);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--modem-type-face);
+  color: var(--modem-amber-bright);
+  font-weight: normal;
+  letter-spacing: 0.02em;
+}
+
+h2 {
+  font-size: var(--modem-type-scale-large);
+  border-bottom: 1px solid var(--modem-white-dim);
+  padding-bottom: var(--modem-space-xs);
+}
+
+h3 {
+  font-size: var(--modem-type-scale-base);
+  margin: 0;
+}
+
+p {
+  max-width: 70ch;
+}
+
+/* ---------------------------------------------------------------------
+ * crt-frame - the bezel and screen the whole page sits inside. Scanlines
+ * are dark stripes composited with `multiply`, so they can only darken a
+ * pixel, never lighten one - lightening the gap between two already-dark
+ * pixels is what would actually erode contrast. Verified against the
+ * brand's own bright phosphors: even worst-case (a stripe sitting
+ * directly over a glyph) leaves white-bright at 11.4:1 and amber-bright
+ * at 7.8:1 against the ground colour, both comfortably clear of WCAG
+ * AA's 4.5:1 for body text.
+ * ------------------------------------------------------------------- */
+.crt-frame {
+  position: relative;
+  min-height: 100vh;
+  background: var(--modem-ground);
+}
+
+.crt-frame::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, var(--modem-scanline-opacity)) 0,
+    rgba(0, 0, 0, var(--modem-scanline-opacity)) 1px,
+    transparent 1px,
+    transparent var(--modem-scanline-pitch)
+  );
+  mix-blend-mode: multiply;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crt-frame::after {
+    /* The pattern itself is static already - this rule exists so any
+       future flicker/animation added to the overlay is disabled here,
+       not discovered missing later. */
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * Hero: web/hero.png with live text over the top, per the brief - never
+ * baked into the image, so it stays sharp at any size and is editable
+ * without regenerating anything.
+ * ------------------------------------------------------------------- */
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--modem-white-dim);
+}
+
+.hero__image {
+  display: block;
+  width: 100%;
+  height: min(60vh, 480px);
+  object-fit: cover;
+  opacity: 0.55;
+}
+
+.hero__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--modem-space-lg);
+  gap: var(--modem-space-xs);
+  background: linear-gradient(
+    to top,
+    rgba(10, 10, 10, 0.95) 0%,
+    rgba(10, 10, 10, 0.35) 60%,
+    rgba(10, 10, 10, 0.55) 100%
+  );
+}
+
+.kicker {
+  margin: 0;
+  font-size: var(--modem-type-scale-base);
+  color: var(--modem-white-bright);
+  display: flex;
+  align-items: center;
+  gap: var(--modem-space-xs);
+  flex-wrap: wrap;
+}
+
+.kicker__placeholder-tag {
+  color: var(--modem-ground);
+  background: var(--modem-error);
+  font-size: var(--modem-type-scale-small);
+  padding: 0 var(--modem-space-xs);
+  border-radius: 2px;
+  font-weight: bold;
+  letter-spacing: 0.05em;
+}
+
+.wordmark {
+  margin: 0;
+  font-size: clamp(2.5rem, 10vw, 5rem);
+  color: var(--modem-amber-bright);
+  text-shadow: 0 0 var(--modem-bloom-radius) var(--modem-amber-bright);
+  line-height: 1;
+}
+
+.hero__tagline {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--modem-white-bright);
+}
+
+/* ---------------------------------------------------------------------
+ * Layout
+ * ------------------------------------------------------------------- */
+main {
+  max-width: 78ch;
+  margin: 0 auto;
+  padding: var(--modem-space-lg) var(--modem-space-md);
+}
+
+section {
+  margin-bottom: var(--modem-space-lg);
+}
+
+/* ---------------------------------------------------------------------
+ * terminal-line - a line of output. The typewriter reveal (added via
+ * the `.terminal-line--typing` class while a line is being animated in)
+ * is purely decorative timing; the full text is present in the DOM
+ * throughout; see index.html's script for why that matters for
+ * assistive tech and prefers-reduced-motion.
+ * ------------------------------------------------------------------- */
+.terminal {
+  border: 1px solid var(--modem-white-dim);
+  background: var(--modem-ground);
+  padding: var(--modem-space-sm);
+}
+
+.terminal__output {
+  min-height: calc(var(--modem-space-lg) * 3);
+  max-height: 16em;
+  overflow-y: auto;
+  margin: 0 0 var(--modem-space-sm) 0;
+  font-size: var(--modem-type-scale-small);
+}
+
+.terminal-line {
+  margin: 0;
+  color: var(--modem-white-bright);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.terminal-line--command {
+  color: var(--modem-amber-bright);
+}
+
+.terminal-line--phase {
+  color: var(--modem-white-dim);
+  padding-left: var(--modem-space-sm);
+}
+
+.terminal-line--phase::before {
+  content: "- ";
+}
+
+/* The typewriter reveal used for AT responses (ATDT.../CONNECT 300).
+   The full text is set on the element immediately, so a screen reader
+   gets the whole line the instant it appears - this animates only the
+   clip, purely cosmetic. */
+.terminal-line--reveal {
+  animation: modem-reveal 0.4s steps(20, end);
+}
+
+@keyframes modem-reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-line--reveal {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * waterfall - the canvas and its axis furniture. Decorative: everything
+ * it conveys (which phase is playing, whether there is carrier) also
+ * exists as text elsewhere on the page, so it is safe to hide it from
+ * assistive tech rather than attempt an ARIA description of a
+ * spectrogram.
+ * ------------------------------------------------------------------- */
+.waterfall-wrap {
+  display: flex;
+  gap: var(--modem-space-xs);
+  margin: var(--modem-space-sm) 0;
+}
+
+.waterfall-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: var(--modem-type-scale-small);
+  color: var(--modem-white-dim);
+  text-align: right;
+  width: 3.5ch;
+  flex-shrink: 0;
+}
+
+.waterfall {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 640 / 200;
+  background: var(--modem-ground);
+  border: 1px solid var(--modem-white-dim);
+}
+
+.now-playing {
+  font-size: var(--modem-type-scale-small);
+  color: var(--modem-amber-bright);
+  min-height: 1.4em;
+}
+
+/* ---------------------------------------------------------------------
+ * dial-button - the primary action, and the mic-permission action in
+ * its second state.
+ * ------------------------------------------------------------------- */
+.demo__controls {
+  display: flex;
+  gap: var(--modem-space-sm);
+  flex-wrap: wrap;
+  margin: var(--modem-space-sm) 0;
+}
+
+.dial-button {
+  font-family: var(--modem-type-face);
+  font-size: var(--modem-type-scale-base);
+  background: transparent;
+  color: var(--modem-amber-bright);
+  border: 1px solid var(--modem-amber-bright);
+  padding: var(--modem-space-xs) var(--modem-space-md);
+  cursor: pointer;
+  text-shadow: 0 0 var(--modem-bloom-radius) currentColor;
+}
+
+.dial-button:hover:not(:disabled),
+.dial-button:focus-visible {
+  background: var(--modem-amber-bright);
+  color: var(--modem-ground);
+  text-shadow: none;
+}
+
+.dial-button:disabled {
+  color: var(--modem-white-dim);
+  border-color: var(--modem-white-dim);
+  cursor: not-allowed;
+  text-shadow: none;
+}
+
+.diagnostic {
+  font-size: var(--modem-type-scale-small);
+  color: var(--modem-white-bright);
+  min-height: 1.4em;
+}
+
+.diagnostic--warning {
+  color: var(--modem-error);
+}
+
+/* ---------------------------------------------------------------------
+ * The live endpoint panel (Task 2's real connection, wired up here)
+ * ------------------------------------------------------------------- */
+.endpoint {
+  border: 1px solid var(--modem-amber-dim);
+  padding: var(--modem-space-sm);
+  margin-top: var(--modem-space-sm);
+}
+
+.endpoint__row {
+  display: flex;
+  gap: var(--modem-space-xs);
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: var(--modem-space-sm);
+}
+
+.endpoint input[type="text"] {
+  font-family: var(--modem-type-face);
+  background: var(--modem-ground);
+  color: var(--modem-white-bright);
+  border: 1px solid var(--modem-white-dim);
+  padding: var(--modem-space-xs);
+}
+
+.endpoint button {
+  font-family: var(--modem-type-face);
+  background: transparent;
+  color: var(--modem-white-bright);
+  border: 1px solid var(--modem-white-dim);
+  padding: var(--modem-space-xs) var(--modem-space-sm);
+  cursor: pointer;
+}
+
+.endpoint button:hover:not(:disabled),
+.endpoint button:focus-visible {
+  border-color: var(--modem-amber-bright);
+  color: var(--modem-amber-bright);
+}
+
+.endpoint button:disabled {
+  color: var(--modem-white-dim);
+  cursor: not-allowed;
+}
+
+.endpoint__status {
+  color: var(--modem-amber-bright);
+}
+
+/* ---------------------------------------------------------------------
+ * phase-row - one handshake phase in the explainer: label, description,
+ * play control.
+ * ------------------------------------------------------------------- */
+.phase-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.phase-row {
+  display: flex;
+  gap: var(--modem-space-sm);
+  align-items: flex-start;
+  padding: var(--modem-space-sm) 0;
+  border-bottom: 1px solid var(--modem-white-dim);
+}
+
+.phase-row:last-child {
+  border-bottom: none;
+}
+
+.phase-row--active {
+  background: rgba(255, 176, 0, 0.08);
+}
+
+.phase-row__play {
+  font-family: var(--modem-type-face);
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--modem-amber-bright);
+  border: 1px solid var(--modem-amber-bright);
+  padding: var(--modem-space-xs) var(--modem-space-sm);
+  cursor: pointer;
+  min-width: 6ch;
+}
+
+.phase-row__play:hover:not(:disabled),
+.phase-row__play:focus-visible {
+  background: var(--modem-amber-bright);
+  color: var(--modem-ground);
+}
+
+.phase-row__play:disabled {
+  color: var(--modem-white-dim);
+  border-color: var(--modem-white-dim);
+  cursor: not-allowed;
+}
+
+.phase-row__body {
+  flex: 1;
+}
+
+.phase-row__label {
+  color: var(--modem-amber-bright);
+  font-size: var(--modem-type-scale-base);
+}
+
+.phase-row__description {
+  margin: var(--modem-space-xs) 0 0 0;
+  color: var(--modem-white-bright);
+}
+
+/* ---------------------------------------------------------------------
+ * download-row - platform, architecture, link.
+ * ------------------------------------------------------------------- */
+.download-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.download-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--modem-space-sm);
+  padding: var(--modem-space-xs) 0;
+  border-bottom: 1px solid var(--modem-white-dim);
+}
+
+.download-row:last-child {
+  border-bottom: none;
+}
+
+.download-row__platform {
+  color: var(--modem-white-bright);
+}
+
+.download-row__link {
+  color: var(--modem-amber-bright);
+  border: 1px solid var(--modem-amber-bright);
+  padding: var(--modem-space-xs) var(--modem-space-sm);
+  text-decoration: none;
+}
+
+.download-row__link:hover,
+.download-row__link:focus-visible {
+  background: var(--modem-amber-bright);
+  color: var(--modem-ground);
+}
+
+.downloads__note {
+  font-size: var(--modem-type-scale-small);
+  color: var(--modem-white-dim);
+}
+
+/* ---------------------------------------------------------------------
+ * endorsement - the DBHQ footer line. Nothing more.
+ * ------------------------------------------------------------------- */
+.endorsement {
+  text-align: center;
+  padding: var(--modem-space-md) 0 var(--modem-space-lg) 0;
+  font-size: var(--modem-type-scale-small);
+  color: var(--modem-white-dim);
+}

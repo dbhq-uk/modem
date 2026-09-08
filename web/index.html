@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>modem - a real Bell 103 modem, behind a performed dial-up handshake</title>
+<meta name="description" content="A real Bell 103 acoustic modem in your browser, preceded by a faithfully performed dial-up overture. Dial to hear it, then open your microphone to hold a call with a copy of modem running somewhere else.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="modem - a real Bell 103 modem, behind a performed dial-up handshake">
+<meta property="og:description" content="The overture is a reconstruction. The connection underneath is real Bell 103 FSK at 300 baud.">
+<meta property="og:image" content="hero.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../brand/icon.svg" type="image/svg+xml">
+<link rel="icon" href="../brand/icon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="../brand/icon-180.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<div class="crt-frame">
+
+  <header class="hero">
+    <img class="hero__image" src="hero.png" alt="" aria-hidden="true">
+    <div class="hero__overlay">
+      <!--
+        The kicker line is not decided yet - Dan is choosing it. This is a
+        deliberately obvious placeholder, both in this comment and in the
+        red PLACEHOLDER tag rendered below, so it cannot be mistaken for
+        real copy and shipped by accident.
+      -->
+      <p class="kicker">
+        <span class="kicker__placeholder-tag">PLACEHOLDER</span>
+        kicker line - Dan to choose before launch
+      </p>
+      <h1 class="wordmark">modem</h1>
+      <p class="hero__tagline">A real Bell 103 modem, behind a performed dial-up handshake</p>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <section class="intro">
+      <p>modem runs a real Bell 103 connection between two machines over their sound cards. Getting there takes a moment: a faithfully performed dial-up overture goes first - off-hook, dial tone, DTMF, ringback, the ANSam answer tone and its phase reversals - then a real 300 baud connection underneath.</p>
+      <p class="terminal-line">The overture is a reconstruction. The connection is real.</p>
+      <p>Fast data-over-sound tools such as minimodem already move bytes across a room quicker than this ever will, and that is not what this is for. They have no interest in the dial tone, the DTMF, the answer tone or the negotiation, because none of it makes them faster. This performs exactly the parts a fast tool has no reason to want.</p>
+    </section>
+
+    <section class="demo" aria-labelledby="demo-heading">
+      <h2 id="demo-heading">Dial</h2>
+      <p>Press dial and the full overture plays through your speakers, rendered live by the same code that runs the real connection - not a recording. The waterfall draws as it goes and each phase is named as it fires. Nothing is asked of you yet: this button only plays sound.</p>
+
+      <div class="terminal">
+        <div class="terminal__output" id="terminal-output" role="log" aria-label="Call transcript"></div>
+        <div class="waterfall-wrap">
+          <div class="waterfall-axis" aria-hidden="true">
+            <span>3400</span>
+            <span>2225</span>
+            <span>1270</span>
+            <span>300</span>
+          </div>
+          <canvas class="waterfall" id="waterfall" width="640" height="200" aria-hidden="true"></canvas>
+        </div>
+        <p class="now-playing" id="now-playing" aria-live="polite">Idle</p>
+      </div>
+
+      <noscript><p>The demo needs JavaScript. Everything else on this page reads fine without it.</p></noscript>
+
+      <div class="demo__controls">
+        <button class="dial-button" id="dial-btn" type="button">Dial</button>
+        <button class="dial-button" id="mic-btn" type="button" hidden>Connect with microphone</button>
+      </div>
+      <p class="diagnostic" id="mic-diagnostic" role="status"></p>
+
+      <div class="endpoint" id="endpoint-panel" hidden>
+        <p>This tab is now a real endpoint, listening on a raw microphone. Run <code>modem --single --acoustic</code> on a second machine nearby, speakers and microphones facing, and dial or answer from here to meet it.</p>
+        <p class="endpoint__status" id="endpoint-status" role="status">IDLE</p>
+        <div class="endpoint__row">
+          <label for="dial-digits">Digits</label>
+          <input type="text" id="dial-digits" value="5551234" size="12" autocomplete="off">
+          <button type="button" id="endpoint-dial">ATDT (dial)</button>
+          <button type="button" id="endpoint-answer">ATA (answer)</button>
+          <button type="button" id="endpoint-hangup" disabled>Hang up</button>
+        </div>
+        <div class="endpoint__row">
+          <label for="chat-input" class="sr-only">Message to send</label>
+          <input type="text" id="chat-input" placeholder="Type once CONNECTED" size="30" autocomplete="off" disabled>
+          <button type="button" id="chat-send" disabled>Send</button>
+        </div>
+        <div class="terminal__output" id="chat-log" role="log" aria-label="Received characters"></div>
+        <div class="endpoint__row">
+          <button type="button" id="endpoint-stop">Disconnect microphone</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="explainer" aria-labelledby="explainer-heading">
+      <h2 id="explainer-heading">What each part of the handshake was for</h2>
+      <p>The same audio the dial button plays above, broken into its individual stages. Each one can be replayed on its own. Dialling itself is decorative throughout this page - there is no real telephone network behind it, so the far end always answers regardless of what is dialled.</p>
+      <ol class="phase-list" id="phase-list"></ol>
+    </section>
+
+    <section class="downloads" aria-labelledby="downloads-heading">
+      <h2 id="downloads-heading">Get modem</h2>
+      <p>Native binaries for Linux, macOS and Windows are built by the project's release workflow.</p>
+      <ul class="download-list">
+        <li class="download-row">
+          <span class="download-row__platform">Linux</span>
+          <a class="download-row__link" href="https://github.com/dbhq-uk/modem/releases">Releases</a>
+        </li>
+        <li class="download-row">
+          <span class="download-row__platform">macOS</span>
+          <a class="download-row__link" href="https://github.com/dbhq-uk/modem/releases">Releases</a>
+        </li>
+        <li class="download-row">
+          <span class="download-row__platform">Windows</span>
+          <a class="download-row__link" href="https://github.com/dbhq-uk/modem/releases">Releases</a>
+        </li>
+      </ul>
+      <p class="downloads__note">No release has been tagged yet - the releases page will list binaries once one has.</p>
+      <p><a href="https://github.com/dbhq-uk/modem">View the source on GitHub</a></p>
+    </section>
+
+  </main>
+
+  <footer class="endorsement">
+    <p>a <a href="https://dbhq.uk">DBHQ</a> experiment</p>
+  </footer>
+
+</div>
+
+<script type="module">
+import { instantiateModemModule, SessionHandle, Role, Duplex, SessionState, STAGE_NAMES } from './session.js';
+import { ModemEndpoint, summariseMicDiagnostics } from './modem.js';
+
+// ---------------------------------------------------------------------
+// The nine performed overture phases the explainer describes. Labels
+// match STAGE_NAMES exactly, index for index, so the copy here can never
+// silently drift from what the WASM session itself reports.
+// ---------------------------------------------------------------------
+const PHASES = [
+  { label: STAGE_NAMES[0], description: 'The click of the line being seized - a relay closing, not a tone. It is the sound of the call existing at all, a beat before anything is dialled.' },
+  { label: STAGE_NAMES[1], description: 'A continuous two-tone signal telling the exchange the line is ready to take a number. The UK pair is 350 and 450 Hz, different from the US pair most film and television dial tone actually is.' },
+  { label: STAGE_NAMES[2], description: 'DTMF, the touch-tone digits. Each key sends two frequencies at once, one from a row and one from a column, so the exchange can tell exactly which one was pressed.' },
+  { label: STAGE_NAMES[3], description: "The ringing tone you hear while the far end's phone rings, generated by your own exchange rather than the far end's phone. The UK cadence is a double ring: two short bursts of 400 and 450 Hz, then a pause." },
+  { label: STAGE_NAMES[4], description: 'The calling indicator. Before anything else happens, the originating modem announces itself on a channel a voice call never touches, so the far end knows straight away that this is a data call.' },
+  { label: STAGE_NAMES[5], description: 'The answer tone: 2100 Hz, its phase flipped 180 degrees every 450 milliseconds. Analogue phone networks ran echo suppressors that muted a call whenever it looked like only one side was talking, fine for speech and fatal for two modems talking at once. The phase reversals are a signal those suppressors were built to recognise, and switch themselves off for.' },
+  { label: STAGE_NAMES[6], description: 'Call menu and joint menu. The two modems compare what modulations they each support and settle on the one they will actually use.' },
+  { label: STAGE_NAMES[7], description: 'The acknowledgement that both ends agreed, followed by a short, deliberate silence: the last quiet moment before the two modems start probing the line itself.' },
+  { label: STAGE_NAMES[8], description: "An impression of the real V.34-style probing that follows in an actual call, where two modems measure the line's own noise and frequency response before committing to a speed. There is no physical phone line here to measure, so this stage is texture, not a conformant negotiation - the one stage on this page that is not a faithful reconstruction." },
+];
+
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const terminalOutput = document.getElementById('terminal-output');
+const nowPlaying = document.getElementById('now-playing');
+const dialBtn = document.getElementById('dial-btn');
+const micBtn = document.getElementById('mic-btn');
+const micDiagnostic = document.getElementById('mic-diagnostic');
+const endpointPanel = document.getElementById('endpoint-panel');
+const endpointStatus = document.getElementById('endpoint-status');
+const dialDigits = document.getElementById('dial-digits');
+const endpointDialBtn = document.getElementById('endpoint-dial');
+const endpointAnswerBtn = document.getElementById('endpoint-answer');
+const endpointHangupBtn = document.getElementById('endpoint-hangup');
+const endpointStopBtn = document.getElementById('endpoint-stop');
+const chatInput = document.getElementById('chat-input');
+const chatSendBtn = document.getElementById('chat-send');
+const chatLog = document.getElementById('chat-log');
+const canvas = document.getElementById('waterfall');
+const phaseListEl = document.getElementById('phase-list');
+
+function appendTerminalLine(container, text, { command = false } = {}) {
+  const line = document.createElement('p');
+  line.className = 'terminal-line' + (command ? ' terminal-line--command terminal-line--reveal' : ' terminal-line--phase');
+  line.textContent = text;
+  container.appendChild(line);
+  container.scrollTop = container.scrollHeight;
+  return line;
+}
+
+// -----------------------------------------------------------------------
+// The waterfall: frequency up the axis (300-3400 Hz, the whole telephone
+// band), time across, newest column at the right - same layout modem-tui's
+// own renderer uses, so a visitor recognises this when they later run the
+// binary (see brand/README.md and the design spec's "Components" table).
+//
+// Phosphor decay is read from the brand token, never a fresh guess here -
+// the same rule modem-tui/src/waterfall.rs follows for its own decay, and
+// for the same reason: it is the strongest CRT cue there is, and the two
+// surfaces have to agree on it or they read as different products. Each
+// frame the whole canvas is faded by `1 - exp(-dt / decaySeconds)` before
+// the new column is drawn, which is the continuous-time form of the same
+// exponential the TUI applies per scrolled column.
+// -----------------------------------------------------------------------
+class Waterfall {
+  constructor(canvasEl) {
+    this.ctx = canvasEl.getContext('2d');
+    this.width = canvasEl.width;
+    this.height = canvasEl.height;
+    const decayCss = getComputedStyle(document.documentElement).getPropertyValue('--modem-phosphor-decay').trim();
+    this.decaySeconds = parseFloat(decayCss) || 2.56;
+    const groundCss = getComputedStyle(document.documentElement).getPropertyValue('--modem-ground').trim();
+    const amberCss = getComputedStyle(document.documentElement).getPropertyValue('--modem-amber-bright').trim();
+    this.ground = hexToRgb(groundCss);
+    this.bright = hexToRgb(amberCss);
+    this.lastFrame = null;
+    this.floorDb = -70;
+    this.ctx.fillStyle = groundCss;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+  }
+
+  frame(analyser, sampleRate) {
+    const now = performance.now();
+    const dt = this.lastFrame === null ? 1 / 60 : (now - this.lastFrame) / 1000;
+    this.lastFrame = now;
+
+    const fadeAlpha = 1 - Math.exp(-dt / this.decaySeconds);
+    this.ctx.fillStyle = `rgba(${this.ground.r}, ${this.ground.g}, ${this.ground.b}, ${fadeAlpha})`;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+
+    // Shift everything one column left, then draw the new column at the
+    // right edge - the scrolling half of the effect.
+    this.ctx.drawImage(this.ctx.canvas, -1, 0);
+
+    const bins = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(bins);
+    const hzPerBin = sampleRate / analyser.fftSize;
+
+    for (let y = 0; y < this.height; y++) {
+      const freq = 3400 - (y / this.height) * (3400 - 300);
+      const bin = Math.min(bins.length - 1, Math.max(0, Math.round(freq / hzPerBin)));
+      const db = bins[bin];
+      const t = Math.min(1, Math.max(0, (db - this.floorDb) / (0 - this.floorDb)));
+      const r = lerp(this.ground.r, this.bright.r, t);
+      const g = lerp(this.ground.g, this.bright.g, t);
+      const b = lerp(this.ground.b, this.bright.b, t);
+      this.ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+      this.ctx.fillRect(this.width - 1, y, 1, 1);
+    }
+  }
+
+  reset() {
+    this.lastFrame = null;
+    this.ctx.fillStyle = `rgb(${this.ground.r}, ${this.ground.g}, ${this.ground.b})`;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+  }
+}
+
+function hexToRgb(hex) {
+  const h = hex.replace('#', '');
+  return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) };
+}
+
+function lerp(a, b, t) {
+  return Math.round(a + (b - a) * t);
+}
+
+const waterfall = new Waterfall(canvas);
+
+// -----------------------------------------------------------------------
+// Prerendering the overture: the same modem-wasm build the real endpoint
+// uses, run once on the main thread (no AudioWorklet needed for this -
+// nothing here is on a real-time deadline) to render the whole
+// performance into one buffer, segmented by the stage that owns each
+// sample. Playing back a slice of that one real rendering is what makes
+// "each phase individually playable" actually play the genuine DSP
+// output rather than a second, hand-rolled tone generator that could
+// drift from it.
+// -----------------------------------------------------------------------
+let audioCtx = null;
+let prerenderPromise = null;
+
+function ensureAudioContext() {
+  if (!audioCtx) {
+    audioCtx = new AudioContext();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  return audioCtx;
+}
+
+async function prerenderOverture(ctx) {
+  const sampleRate = 8000; // modem-core's own internal rate - no resampling
+  const response = await fetch('modem.wasm');
+  const bytes = await response.arrayBuffer();
+  const exportsHandle = await instantiateModemModule(bytes);
+  const session = new SessionHandle(exportsHandle, { sampleRate, role: Role.ORIGINATE, duplex: Duplex.HALF_PING_PONG });
+  // SessionHandle.dial wants raw bytes, not a string - ModemEndpoint.dial
+  // (modem.js) does this same encode() call for its callers; this is the
+  // same low-level SessionHandle those callers sit on top of.
+  session.dial(new TextEncoder().encode('01234567890'));
+
+  const BLOCK = 256;
+  const CONNECTED_TAIL_S = 1.2; // enough to hear CONNECT 300 land, no longer
+  const SAFETY_CAP_S = 20; // the overture's own documented upper bound
+
+  const chunks = [];
+  const segments = [];
+  let cursor = 0;
+  let current = null;
+  let connectedAt = null;
+  const buf = new Float32Array(BLOCK);
+
+  for (;;) {
+    session.processOut(buf);
+    chunks.push(buf.slice());
+    const state = session.state();
+    const stage = session.stage();
+    const label = state === SessionState.CONNECTED ? 'connected' : stage;
+
+    if (current === null || current.label !== label) {
+      if (current) current.endSample = cursor;
+      current = { label, startSample: cursor, endSample: null };
+      segments.push(current);
+    }
+    cursor += BLOCK;
+
+    if (state === SessionState.CONNECTED) {
+      if (connectedAt === null) connectedAt = cursor;
+      if ((cursor - connectedAt) / sampleRate >= CONNECTED_TAIL_S) break;
+    }
+    if (cursor / sampleRate > SAFETY_CAP_S) break;
+  }
+  current.endSample = cursor;
+  session.free();
+
+  const master = new Float32Array(cursor);
+  let offset = 0;
+  for (const chunk of chunks) {
+    master.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  const audioBuffer = ctx.createBuffer(1, master.length, sampleRate);
+  audioBuffer.copyToChannel(master, 0);
+
+  const stageSegments = new Map();
+  for (const seg of segments) {
+    if (typeof seg.label === 'number') stageSegments.set(seg.label, seg);
+  }
+
+  return { audioBuffer, segments, stageSegments, sampleRate };
+}
+
+function ensurePrerendered() {
+  const ctx = ensureAudioContext();
+  if (!prerenderPromise) {
+    prerenderPromise = prerenderOverture(ctx);
+  }
+  return prerenderPromise;
+}
+
+let activeTimers = [];
+function clearScheduledAnnotations() {
+  for (const t of activeTimers) clearTimeout(t);
+  activeTimers = [];
+}
+
+function labelText(label) {
+  return label === 'connected' ? 'CONNECT 300' : STAGE_NAMES[label];
+}
+
+function setActivePhaseRow(label) {
+  const rows = phaseListEl.querySelectorAll('.phase-row');
+  rows.forEach((row) => row.classList.remove('phase-row--active'));
+  if (typeof label === 'number') {
+    const row = phaseListEl.querySelector(`[data-stage="${label}"]`);
+    if (row) row.classList.add('phase-row--active');
+  }
+}
+
+/** Plays `[startSample, endSample)` of the prerendered buffer through the
+ * waterfall's analyser, resolving once playback ends. */
+function playSlice({ audioBuffer, sampleRate }, startSample, endSample) {
+  const ctx = ensureAudioContext();
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 2048;
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(analyser);
+  analyser.connect(ctx.destination);
+
+  let raf = null;
+  const draw = () => {
+    waterfall.frame(analyser, ctx.sampleRate);
+    raf = requestAnimationFrame(draw);
+  };
+  raf = requestAnimationFrame(draw);
+
+  const offset = startSample / sampleRate;
+  const duration = (endSample - startSample) / sampleRate;
+  source.start(0, offset, duration);
+
+  return new Promise((resolve) => {
+    source.onended = () => {
+      cancelAnimationFrame(raf);
+      resolve();
+    };
+  });
+}
+
+async function playFullOverture() {
+  dialBtn.disabled = true;
+  nowPlaying.textContent = 'Loading...';
+  terminalOutput.innerHTML = '';
+  waterfall.reset();
+
+  const rendered = await ensurePrerendered();
+  appendTerminalLine(terminalOutput, 'ATDT01234567890', { command: true });
+
+  clearScheduledAnnotations();
+  for (const seg of rendered.segments) {
+    const atMs = (seg.startSample / rendered.sampleRate) * 1000;
+    activeTimers.push(setTimeout(() => {
+      nowPlaying.textContent = labelText(seg.label);
+      setActivePhaseRow(seg.label);
+      if (seg.label === 'connected') {
+        appendTerminalLine(terminalOutput, 'CONNECT 300', { command: true });
+      } else {
+        appendTerminalLine(terminalOutput, STAGE_NAMES[seg.label]);
+      }
+    }, atMs));
+  }
+
+  await playSlice(rendered, 0, rendered.segments[rendered.segments.length - 1].endSample);
+
+  clearScheduledAnnotations();
+  nowPlaying.textContent = 'Idle';
+  setActivePhaseRow(null);
+  dialBtn.disabled = false;
+  micBtn.hidden = false;
+}
+
+dialBtn.addEventListener('click', () => {
+  playFullOverture().catch((err) => {
+    console.error(err);
+    nowPlaying.textContent = 'Playback failed - see the console';
+    dialBtn.disabled = false;
+  });
+});
+
+// -----------------------------------------------------------------------
+// The explainer: one phase-row per stage, each playing its own slice of
+// the identical rendering the dial button uses.
+// -----------------------------------------------------------------------
+PHASES.forEach((phase, index) => {
+  const li = document.createElement('li');
+  li.className = 'phase-row';
+  li.dataset.stage = String(index);
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'phase-row__play';
+  button.textContent = 'Play';
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = 'Playing';
+    try {
+      const rendered = await ensurePrerendered();
+      const seg = rendered.stageSegments.get(index);
+      if (!seg) throw new Error(`stage ${index} did not appear in the rendered overture`);
+      nowPlaying.textContent = STAGE_NAMES[index];
+      setActivePhaseRow(index);
+      await playSlice(rendered, seg.startSample, seg.endSample);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      nowPlaying.textContent = 'Idle';
+      setActivePhaseRow(null);
+      button.textContent = original;
+      button.disabled = false;
+    }
+  });
+
+  const body = document.createElement('div');
+  body.className = 'phase-row__body';
+  const h3 = document.createElement('h3');
+  h3.className = 'phase-row__label';
+  h3.textContent = phase.label;
+  const p = document.createElement('p');
+  p.className = 'phase-row__description';
+  p.textContent = phase.description;
+  body.appendChild(h3);
+  body.appendChild(p);
+
+  li.appendChild(button);
+  li.appendChild(body);
+  phaseListEl.appendChild(li);
+});
+
+// -----------------------------------------------------------------------
+// The live endpoint - offered only once the passive demo has played, per
+// the staged design: front-loading a microphone prompt loses a visitor
+// who has no idea yet what this site is.
+// -----------------------------------------------------------------------
+let endpoint = null;
+
+function endpointStateName(state) {
+  switch (state) {
+    case SessionState.IDLE: return 'IDLE';
+    case SessionState.DIALLING: return 'DIALLING';
+    case SessionState.ANSWERING: return 'ANSWERING';
+    case SessionState.CONNECTED: return 'CONNECTED';
+    default: return String(state);
+  }
+}
+
+micBtn.addEventListener('click', async () => {
+  micBtn.disabled = true;
+  micDiagnostic.textContent = 'Requesting the endpoint and microphone...';
+  micDiagnostic.className = 'diagnostic';
+  try {
+    endpoint = new ModemEndpoint();
+    await endpoint.init({ role: Role.ORIGINATE, duplex: Duplex.HALF_PING_PONG });
+
+    endpoint.addEventListener('status', (e) => {
+      const { state, stage, hasTurn, carrier } = e.detail;
+      const stageName = typeof stage === 'number' && stage >= 0 ? STAGE_NAMES[stage] : 'none';
+      endpointStatus.textContent = `${endpointStateName(state)} - stage: ${stageName} - turn: ${hasTurn ? 'yours' : 'not yours'} - carrier: ${carrier ? 'yes' : 'no'}`;
+      const connected = state === SessionState.CONNECTED;
+      chatInput.disabled = !connected;
+      chatSendBtn.disabled = !connected;
+      endpointHangupBtn.disabled = state === SessionState.IDLE;
+    });
+
+    endpoint.addEventListener('data', (e) => {
+      const text = new TextDecoder().decode(e.detail);
+      appendTerminalLine(chatLog, text);
+    });
+
+    endpoint.addEventListener('error', (e) => {
+      appendTerminalLine(chatLog, `error: ${e.detail}`);
+    });
+
+    const diagnostics = await endpoint.openMicrophone();
+    const summary = summariseMicDiagnostics(diagnostics);
+    micDiagnostic.textContent = summary;
+    micDiagnostic.className = diagnostics.warnings.length > 0 ? 'diagnostic diagnostic--warning' : 'diagnostic';
+
+    endpointPanel.hidden = false;
+    micBtn.hidden = true;
+  } catch (err) {
+    console.error(err);
+    micDiagnostic.textContent = `Could not open the endpoint: ${err.message || err}`;
+    micDiagnostic.className = 'diagnostic diagnostic--warning';
+    micBtn.disabled = false;
+  }
+});
+
+endpointDialBtn.addEventListener('click', () => {
+  if (!endpoint) return;
+  endpoint.dial(dialDigits.value || '0');
+  endpointHangupBtn.disabled = false;
+});
+
+endpointAnswerBtn.addEventListener('click', () => {
+  if (!endpoint) return;
+  endpoint.answer();
+  endpointHangupBtn.disabled = false;
+});
+
+endpointHangupBtn.addEventListener('click', () => {
+  if (!endpoint) return;
+  endpoint.hangup();
+});
+
+// The one control that fully releases the microphone rather than just
+// ending a call - spike/README.md finding 5's rule applies to more than
+// a forgotten carrier: a visitor should never have to close the tab to
+// know their microphone is off. Restores the page to its pre-connect
+// state so "Connect with microphone" can be pressed again.
+endpointStopBtn.addEventListener('click', async () => {
+  if (!endpoint) return;
+  await endpoint.stop();
+  endpoint = null;
+  endpointPanel.hidden = true;
+  chatLog.innerHTML = '';
+  endpointStatus.textContent = 'IDLE';
+  micDiagnostic.textContent = 'Microphone disconnected';
+  micDiagnostic.className = 'diagnostic';
+  micBtn.hidden = false;
+  micBtn.disabled = false;
+});
+
+chatSendBtn.addEventListener('click', () => {
+  if (!endpoint || !chatInput.value) return;
+  endpoint.send(chatInput.value);
+  appendTerminalLine(chatLog, `> ${chatInput.value}`);
+  chatInput.value = '';
+});
+
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') chatSendBtn.click();
+});
+
+// A page navigating away must not leave a live microphone or a carrier
+// running - see spike/README.md finding 5 and modem.js's own `stop()`
+// doc. Best-effort: `beforeunload` cannot await, but stop() only tears
+// down local objects (tracks, node, context), none of which need a
+// network round trip.
+window.addEventListener('beforeunload', () => {
+  if (endpoint) endpoint.stop();
+});
+</script>
+</body>
+</html>
