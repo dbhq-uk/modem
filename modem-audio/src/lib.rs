@@ -7,8 +7,10 @@
 //! Weakening `modem-core` to add file access here would defeat the whole
 //! point of the split.
 
+pub mod cpal_device;
 pub mod transport;
 pub mod wav;
 
+pub use cpal_device::CpalTransport;
 pub use transport::{Transport, TransportError, WiredTransport};
 pub use wav::{read_wav, write_wav};
