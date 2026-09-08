@@ -1,4 +1,4 @@
-//! The amber-phosphor palette, with green and white alternates.
+//! The white-phosphor palette, with green and amber alternates.
 //!
 //! `brand/tokens.json` and its generator (plan 2, not this repo) will
 //! eventually be the single source for this palette, shared with the
@@ -14,13 +14,16 @@ use ratatui::style::Color;
 /// Near-black ground, `#0A0A0A` in the spec's token table.
 pub const GROUND: Color = Color::Rgb(0x0A, 0x0A, 0x0A);
 
-/// Phosphor amber, `#FFB000` - the default.
+/// Phosphor amber, `#FFB000` - the second alternate. The spec's brand
+/// direction names amber as the project's colour and that still holds for
+/// the wordmark and the page; the terminal itself defaults to white
+/// (Dan, 8 Sep 2026).
 pub const AMBER: Color = Color::Rgb(0xFF, 0xB0, 0x00);
 
 /// Phosphor green, `#33FF33` - the first alternate.
 pub const GREEN: Color = Color::Rgb(0x33, 0xFF, 0x33);
 
-/// Phosphor white, the second alternate. Not in the spec's colour table
+/// Phosphor white - the default. Not in the spec's colour table
 /// (which names only amber, green and a dim/trace tone), so this is a
 /// judgement call: a period terminal's third common phosphor was a
 /// near-white P4, rendered here as a warm white rather than pure `#FFFFFF`
@@ -32,9 +35,9 @@ pub const WHITE: Color = Color::Rgb(0xE8, 0xE8, 0xD8);
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Theme {
     #[default]
-    Amber,
-    Green,
     White,
+    Green,
+    Amber,
 }
 
 impl Theme {
@@ -61,13 +64,13 @@ impl Theme {
         }
     }
 
-    /// Cycles to the next theme in the order the brief names them: amber,
-    /// then green, then white, then back to amber. Bound to `F6`.
+    /// Cycles white, then green, then amber, then back to white - the
+    /// order Dan chose on 8 Sep 2026, white first. Bound to `F6`.
     pub fn next(self) -> Theme {
         match self {
-            Theme::Amber => Theme::Green,
-            Theme::Green => Theme::White,
-            Theme::White => Theme::Amber,
+            Theme::White => Theme::Green,
+            Theme::Green => Theme::Amber,
+            Theme::Amber => Theme::White,
         }
     }
 
@@ -89,12 +92,12 @@ mod tests {
 
     /// Required-in-spirit: cycling through all three themes returns to the
     /// start, and never repeats early - a `next` that mapped everything to
-    /// `Amber` (a constant function) would still "terminate" but would
-    /// never show Green or White at all. Checking the full cycle, not just
+    /// one colour (a constant function) would still "terminate" but would
+    /// never show the other two at all. Checking the full cycle, not just
     /// one call, is what catches that.
     #[test]
     fn theme_cycle_visits_all_three_before_repeating() {
-        let mut t = Theme::Amber;
+        let mut t = Theme::White;
         let mut seen = vec![t];
         for _ in 0..3 {
             t = t.next();
@@ -102,13 +105,22 @@ mod tests {
         }
         assert_eq!(
             seen,
-            vec![Theme::Amber, Theme::Green, Theme::White, Theme::Amber]
+            vec![Theme::White, Theme::Green, Theme::Amber, Theme::White]
         );
+    }
+
+    /// The terminal opens white, not amber - Dan, 8 Sep 2026. Asserted
+    /// against `Theme::default()` rather than against whatever the app
+    /// happens to construct, so a caller passing an explicit theme cannot
+    /// hide a changed default.
+    #[test]
+    fn the_default_phosphor_is_white() {
+        assert_eq!(Theme::default(), Theme::White);
     }
 
     #[test]
     fn bright_and_dim_are_different_colours_for_every_theme() {
-        for theme in [Theme::Amber, Theme::Green, Theme::White] {
+        for theme in [Theme::White, Theme::Green, Theme::Amber] {
             assert_ne!(theme.bright(), theme.dim());
         }
     }

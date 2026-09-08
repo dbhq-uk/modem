@@ -180,49 +180,213 @@ fn window(title: &str, body: &str) -> String {
     )
 }
 
-fn main() {
-    let wired = WiredTransport::new(8000);
+// --- The reduction proposals -------------------------------------------
+//
+// Everything below this line is *drawn*, not rendered: it is a proposal
+// for a calmer frame than the one the crate builds today, and the crate
+// does not build it yet. Kept honestly separate from the rendered frames
+// above, because a drawn mockup that promises a layout the code does not
+// produce is exactly the trap this project keeps falling into.
 
-    // Two windows, side by side, one machine. Each is an ordinary
-    // single-pane frame - the same layout a second machine would run.
-    let (a, b) = call();
-    let left = App::single(a, &wired, Theme::Amber);
-    let right = App::single(b, &wired, Theme::Amber);
-    let side_by_side = format!(
+const PROPOSAL_WIDTH: usize = 62;
+
+/// Pads `s` to `width` display columns. The box-drawing and block
+/// characters used here are all single-width, so counting `chars` rather
+/// than bytes is enough - `len()` would count the three bytes of every
+/// `─` and shred the alignment.
+fn pad(s: &str, width: usize) -> String {
+    let n = s.chars().count();
+    if n >= width {
+        s.chars().take(width).collect()
+    } else {
+        format!("{s}{}", " ".repeat(width - n))
+    }
+}
+
+/// Proposal A: the same furniture, trimmed. Single-line box instead of
+/// double, three status fields instead of five, the two live bands
+/// instead of six labelled rows plus a stage axis, four function keys
+/// instead of seven.
+fn trimmed(role: &str, band: &str, status: &str, waterfall: &[&str], lines: &[&str]) -> String {
+    let inner = PROPOSAL_WIDTH - 2;
+    let left = " modem ";
+    let right = format!(" {role}  {band} ");
+    let rule = "─".repeat(PROPOSAL_WIDTH - left.chars().count() - right.chars().count() - 2);
+    let mut out = format!("┌{left}{rule}{right}┐\n");
+    out.push_str(&format!("│{}│\n", pad(&format!(" {status}"), inner)));
+    out.push_str(&format!("├{}┤\n", "─".repeat(inner)));
+    for row in waterfall {
+        out.push_str(&format!("│{}│\n", pad(&format!(" {row}"), inner)));
+    }
+    out.push_str(&format!("├{}┤\n", "─".repeat(inner)));
+    for line in lines {
+        out.push_str(&format!("│{}│\n", pad(&format!(" {line}"), inner)));
+    }
+    out.push_str(&format!("└{}┘\n", "─".repeat(inner)));
+    out.push_str(" F3 dial   F4 answer   F6 colour   F10 hang up\n");
+    out
+}
+
+/// Proposal B: no box at all. Two rules and whitespace carry the
+/// structure the box was carrying.
+fn stripped(role: &str, band: &str, status: &str, waterfall: &[&str], lines: &[&str]) -> String {
+    let head = format!(
+        "modem{}{role}  {band}",
+        " ".repeat(PROPOSAL_WIDTH - 5 - role.chars().count() - band.chars().count() - 2)
+    );
+    let mut out = format!("{head}\n\n{status}\n\n");
+    for row in waterfall {
+        out.push_str(&format!("{row}\n"));
+    }
+    out.push('\n');
+    for line in lines {
+        out.push_str(&format!("{line}\n"));
+    }
+    out.push_str("\nF3 dial   F4 answer   F6 colour   F10 hang up\n");
+    out
+}
+
+const WF_ORIGINATE: [&str; 2] = [
+    "2225 \u{2581}\u{2582}\u{2583}\u{2585}\u{2587}\u{2588}\u{2587}\u{2585}\u{2583}\u{2582}\u{2581}\u{2581}\u{2582}\u{2583}\u{2585}\u{2587}\u{2588}\u{2587}\u{2585}\u{2583}\u{2582}\u{2581}\u{2581}\u{2582}\u{2583}\u{2585}\u{2587}\u{2588}\u{2587}\u{2585}\u{2583}\u{2582}\u{2581}\u{2581}\u{2582}\u{2583}\u{2585}\u{2587}\u{2588}\u{2587}\u{2585}\u{2583}\u{2582}\u{2581}\u{2581}\u{2582}\u{2583}\u{2585}\u{2587}\u{2588}\u{2587}\u{2585}\u{2583}",
+    "1270 \u{2588}\u{2588}\u{2588}\u{2581}\u{2588}\u{2588}\u{2588}\u{2581}\u{2581}\u{2588}\u{2588}\u{2588}\u{2581}\u{2588}\u{2581}\u{2581}\u{2588}\u{2588}\u{2588}\u{2588}\u{2581}\u{2588}\u{2588}\u{2588}\u{2581}\u{2588}\u{2588}\u{2588}\u{2581}\u{2581}\u{2588}\u{2588}\u{2588}\u{2581}\u{2588}\u{2581}\u{2581}\u{2588}\u{2588}\u{2588}\u{2581}\u{2588}\u{2588}\u{2588}\u{2581}\u{2581}\u{2588}\u{2588}\u{2588}\u{2581}\u{2588}\u{2581}\u{2581}",
+];
+
+fn proposals() -> (String, String) {
+    let origin_lines = [
+        "ATDT01234567890",
+        "CONNECT 300",
+        "hello from the other side",
+        "> took you long enough_",
+    ];
+    let answer_lines = [
+        "ATA",
+        "CONNECT 300",
+        "> hello from the other side",
+        "took you long eno_",
+    ];
+
+    let a = format!(
         "<div class=\"row\">{}{}</div>",
-        window("modem - originate", &render(&left, 100, 24)),
-        window("modem - answer", &render(&right, 100, 24)),
+        window(
+            "originate",
+            &format!(
+                "<pre class=\"drawn\">{}</pre>",
+                escape(&trimmed(
+                    "originate",
+                    "1270/1070",
+                    "\u{25CF} carrier   300 baud   00:01:23",
+                    &WF_ORIGINATE,
+                    &origin_lines,
+                ))
+            ),
+        ),
+        window(
+            "answer",
+            &format!(
+                "<pre class=\"drawn\">{}</pre>",
+                escape(&trimmed(
+                    "answer",
+                    "2225/2025",
+                    "\u{25CF} carrier   300 baud   00:01:23",
+                    &WF_ORIGINATE,
+                    &answer_lines,
+                ))
+            ),
+        ),
     );
 
-    // One window, one end, connected to a second machine.
-    let (a2, _) = call();
-    let single = App::single(a2, &wired, Theme::Amber);
-    let one_window = window("modem", &render(&single, 100, 24));
-
-    // One window, both ends in it - the split layout the crate already
-    // builds, shown for comparison.
-    let (a3, b3) = call();
-    let split = App::split(a3, b3, &wired, Theme::Amber);
-    let split_window = window("modem - split screen", &render(&split, 100, 24));
-
-    // The same single-pane frame in the other two phosphors.
-    let (a4, _) = call();
-    let green = App::single(a4, &wired, Theme::Green);
-    let (a5, _) = call();
-    let white = App::single(a5, &wired, Theme::White);
-    let themes = format!(
+    let b = format!(
         "<div class=\"row\">{}{}</div>",
-        window("green", &render(&green, 100, 24)),
-        window("white", &render(&white, 100, 24)),
+        window(
+            "originate",
+            &format!(
+                "<pre class=\"drawn\">{}</pre>",
+                escape(&stripped(
+                    "originate",
+                    "1270/1070",
+                    "\u{25CF} carrier   00:01:23",
+                    &WF_ORIGINATE,
+                    &origin_lines,
+                ))
+            ),
+        ),
+        window(
+            "answer",
+            &format!(
+                "<pre class=\"drawn\">{}</pre>",
+                escape(&stripped(
+                    "answer",
+                    "2225/2025",
+                    "\u{25CF} carrier   00:01:23",
+                    &WF_ORIGINATE,
+                    &answer_lines,
+                ))
+            ),
+        ),
+    );
+
+    (a, b)
+}
+
+fn main() {
+    let wired = WiredTransport::new(8000);
+    let (proposal_a, proposal_b) = proposals();
+
+    // Two windows, side by side, one machine - as the crate renders it
+    // today, in the new default phosphor.
+    let (a, b) = call();
+    let left = App::single(a, &wired, Theme::default());
+    let right = App::single(b, &wired, Theme::default());
+    let side_by_side = format!(
+        "<div class=\"row\">{}{}</div>",
+        window("originate", &render(&left, 100, 24)),
+        window("answer", &render(&right, 100, 24)),
+    );
+
+    // One window, both ends in it - the split layout the crate builds.
+    let (a3, b3) = call();
+    let split = App::split(a3, b3, &wired, Theme::default());
+    let split_window = window("split screen", &render(&split, 100, 24));
+
+    // The three phosphors, default first.
+    let (a4, _) = call();
+    let (a5, _) = call();
+    let (a6, _) = call();
+    let themes = format!(
+        "<div class=\"row\">{}{}{}</div>",
+        window(
+            "white - the default",
+            &render(&App::single(a4, &wired, Theme::White), 62, 16)
+        ),
+        window(
+            "green",
+            &render(&App::single(a5, &wired, Theme::Green), 62, 16)
+        ),
+        window(
+            "amber",
+            &render(&App::single(a6, &wired, Theme::Amber), 62, 16)
+        ),
     );
 
     print!(
         "{}",
-        page(&side_by_side, &one_window, &split_window, &themes)
+        page(
+            &proposal_a,
+            &proposal_b,
+            &side_by_side,
+            &split_window,
+            &themes
+        )
     );
 }
 
-fn page(side_by_side: &str, one_window: &str, split: &str, themes: &str) -> String {
+fn page(
+    proposal_a: &str,
+    proposal_b: &str,
+    side_by_side: &str,
+    split: &str,
+    themes: &str,
+) -> String {
     format!(
         r#"<!doctype html>
 <html lang="en-GB">
@@ -233,61 +397,65 @@ fn page(side_by_side: &str, one_window: &str, split: &str, themes: &str) -> Stri
 <style>
   :root {{
     --ground: #0A0A0A;
+    --white: #E8E8D8;
     --amber: #FFB000;
-    --dim: #805800;
+    --dim: #6b6459;
   }}
   * {{ box-sizing: border-box; }}
   body {{
     margin: 0;
     padding: 3rem 2rem 5rem;
     background: #050505;
-    color: var(--amber);
+    color: var(--white);
     font-family: "DejaVu Sans Mono", "Cascadia Mono", "Consolas", monospace;
   }}
   h1 {{ font-size: 1.4rem; font-weight: normal; letter-spacing: 0.3em; margin: 0 0 0.4rem }}
   h2 {{ font-size: 0.85rem; font-weight: normal; letter-spacing: 0.22em; color: var(--dim);
        text-transform: uppercase; margin: 3.5rem 0 0.3rem }}
-  p  {{ color: #9a8a6a; font-size: 0.82rem; max-width: 62rem; line-height: 1.55; margin: 0 0 1.2rem }}
-  .row {{ display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: flex-start }}
-  .win {{ border: 1px solid #2a2213; border-radius: 6px; overflow: hidden;
+  p  {{ color: #8d877c; font-size: 0.82rem; max-width: 60rem; line-height: 1.55; margin: 0 0 1.2rem }}
+  strong {{ color: var(--white); font-weight: normal }}
+  /* No wrapping: two windows side by side stay side by side, and the row
+     scrolls sideways rather than stacking one above the other. */
+  .row {{ display: flex; gap: 1.4rem; flex-wrap: nowrap; align-items: flex-start;
+          overflow-x: auto; padding-bottom: 0.6rem }}
+  .win {{ border: 1px solid #241f18; border-radius: 6px; overflow: hidden; flex: 0 0 auto;
           background: var(--ground); box-shadow: 0 18px 45px rgba(0,0,0,.75) }}
-  .bar {{ background: #16120a; border-bottom: 1px solid #2a2213; color: #7d6c4a;
-          font-size: 0.68rem; letter-spacing: 0.18em; padding: 0.45rem 0.8rem }}
-  .screen {{ position: relative; padding: 0.9rem 1rem; background: var(--ground) }}
+  .bar {{ background: #13110d; border-bottom: 1px solid #241f18; color: #6b6459;
+          font-size: 0.66rem; letter-spacing: 0.18em; padding: 0.42rem 0.8rem }}
+  .screen {{ position: relative; padding: 0.85rem 1rem; background: var(--ground) }}
   /* The scanlines and the bloom are the page's own CRT treatment, not
      something the terminal renders - a real terminal supplies its own. */
   .screen::after {{
     content: ""; position: absolute; inset: 0; pointer-events: none;
     background: repeating-linear-gradient(
-      to bottom, rgba(0,0,0,.32) 0 1px, rgba(0,0,0,0) 1px 3px);
+      to bottom, rgba(0,0,0,.30) 0 1px, rgba(0,0,0,0) 1px 3px);
   }}
-  pre {{
-    margin: 0; font: inherit; font-size: 0.78rem; line-height: 1.16;
-    text-shadow: 0 0 6px rgba(255,176,0,.35);
-  }}
-  footer {{ margin-top: 5rem; color: #4d4433; font-size: 0.75rem }}
-  a {{ color: var(--dim) }}
+  pre {{ margin: 0; font: inherit; font-size: 0.75rem; line-height: 1.16 }}
+  pre.drawn {{ color: var(--white); text-shadow: 0 0 6px rgba(232,232,216,.30) }}
+  footer {{ margin-top: 5rem; color: #443f38; font-size: 0.75rem }}
 </style>
 </head>
 <body>
 <h1>modem</h1>
-<p>Every frame below is rendered by the real crate, not drawn. The two ends are genuinely connected to each other: one end's modulated audio is fed straight into the other's demodulator, and the text you can read crossed that link as Bell 103 FSK at 300 baud. The scanlines and the glow are this page's own CRT treatment, not something the terminal draws.</p>
-<p>Two things are not finished. <strong>The waterfall is empty</strong> - Task 16 builds the FFT that fills it, and this is the hole it drops into. <strong>The call runs full duplex</strong>, because under half duplex an idle end currently transmits silence, the far end reads that as carrier loss and the first turn hand-over hangs the call up. Full duplex is what these frames were captured over and the status line says so.</p>
+<p>White phosphor is now the default; <strong>F6</strong> cycles white, green, amber. The two proposals at the top are <strong>drawn</strong> - the crate does not build them yet. Everything below them is <strong>rendered by the real crate</strong>, with the two ends genuinely connected to each other and the chat text crossing that link as Bell 103 FSK at 300 baud.</p>
 
-<h2>One machine, two windows side by side</h2>
-<p>How the demo gets filmed. Both ends on one desk, one window each, the audio audible.</p>
+<h2>Proposal A - trimmed</h2>
+<p>Single-line box instead of double. Three status fields instead of five. The two live bands instead of six labelled rows plus a stage axis. Four function keys instead of seven - only the ones that do something. Two windows, side by side, one machine.</p>
+{proposal_a}
+
+<h2>Proposal B - stripped</h2>
+<p>No box at all. Whitespace and two rules carry what the box was carrying. Quieter still, and further from the 1990s comms-package register.</p>
+{proposal_b}
+
+<h2>Now - what the crate renders today</h2>
+<p>For comparison, the same call in the current frame. The waterfall rows are empty because Task 16 builds the FFT that fills them. The call runs full duplex: under half duplex an idle end currently transmits silence, the far end reads that as carrier loss, and the first turn hand-over hangs the call up.</p>
 {side_by_side}
 
-<h2>Two devices, one window each</h2>
-<p>The real product. Full width, the overture stage labels along the waterfall axis.</p>
-{one_window}
-
-<h2>One window, both ends in it</h2>
-<p>The split layout the crate builds today - the same two ends inside a single window, sharing one spectrum. Shown for comparison with the two-window arrangement above.</p>
+<h2>Now - one window, both ends in it</h2>
+<p>The split layout the crate also builds, sharing one spectrum between the panes.</p>
 {split}
 
-<h2>The other two phosphors</h2>
-<p>F6 cycles amber, green, white.</p>
+<h2>The three phosphors</h2>
 {themes}
 
 <footer>modem is a DBHQ experiment</footer>
