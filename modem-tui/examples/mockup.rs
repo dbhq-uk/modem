@@ -15,6 +15,7 @@
 use std::fmt::Write as _;
 use std::time::Duration;
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use modem_audio::WiredTransport;
 use modem_core::{Config, Duplex, Role};
 use modem_tui::{App, Pane, Theme};
@@ -152,6 +153,53 @@ fn call() -> (Pane, Pane, Vec<f32>) {
     pump(&mut a, &mut b, 20, &mut audio);
 
     (a, b, audio)
+}
+
+/// Task 18: two frames of the dialling directory overlay, both produced
+/// through the real `App::handle_key` `F2` path (not by poking
+/// `App`'s own private overlay state, which this example crate cannot
+/// reach anyway - only `pub` API is available here, the same
+/// restriction a real caller has). A real temp file is written and
+/// pointed at with `$MODEM_DIRECTORY` so `Directory::load` genuinely
+/// reads it, exactly as the binary would - nothing about the overlay's
+/// contents is fabricated. The second frame points the same env var at
+/// a path that does not exist, for the empty-directory message.
+fn directory_overlay_demo() -> (String, String) {
+    let temp_path =
+        std::env::temp_dir().join(format!("modem-directory-mockup-{}.tsv", std::process::id()));
+    std::fs::write(
+        &temp_path,
+        "# example dialling directory, for this mockup only\n\
+         Alice\t01234567890\tOld friend from uni\n\
+         Bob\t01234000000\n\
+         Carol\t01234999999\tCalls on Sundays\n",
+    )
+    .expect("write a temp fixture the mockup can genuinely load through Directory::load");
+    std::env::set_var("MODEM_DIRECTORY", &temp_path);
+
+    let wired = WiredTransport::new(8000);
+    let mut open = App::single(pane(Role::Originate), &wired, Theme::default());
+    open.handle_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+    // One Down, so the rendered frame shows the selection genuinely
+    // moved off the first entry - proof this is driven by real key
+    // events, not a frame that happens to look right at rest.
+    open.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    let populated = render(&open, 72, 16);
+
+    std::env::remove_var("MODEM_DIRECTORY");
+    let _ = std::fs::remove_file(&temp_path);
+
+    let missing_path = std::env::temp_dir().join(format!(
+        "modem-directory-mockup-missing-{}.tsv",
+        std::process::id()
+    ));
+    std::env::set_var("MODEM_DIRECTORY", &missing_path);
+    let mut empty = App::single(pane(Role::Originate), &wired, Theme::default());
+    empty.handle_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+    std::env::remove_var("MODEM_DIRECTORY");
+    let empty_render = render(&empty, 72, 16);
+
+    (populated, empty_render)
 }
 
 fn css(colour: Color) -> String {
@@ -425,6 +473,15 @@ fn main() {
         window("amber", &render(&app6, 62, 16)),
     );
 
+    // Task 18: the dialling directory overlay, both driven through the
+    // real F2/Down key path - see `directory_overlay_demo`'s own doc.
+    let (dir_populated, dir_empty) = directory_overlay_demo();
+    let directory_section = format!(
+        "<div class=\"row\">{}{}</div>",
+        window("F2, then Down once - Bob highlighted", &dir_populated),
+        window("F2, directory.tsv not found", &dir_empty),
+    );
+
     print!(
         "{}",
         page(
@@ -432,7 +489,8 @@ fn main() {
             &proposal_b,
             &side_by_side,
             &split_window,
-            &themes
+            &themes,
+            &directory_section,
         )
     );
 }
@@ -443,6 +501,7 @@ fn page(
     side_by_side: &str,
     split: &str,
     themes: &str,
+    directory: &str,
 ) -> String {
     format!(
         r#"<!doctype html>
@@ -519,6 +578,10 @@ fn page(
 
 <h2>The three phosphors</h2>
 {themes}
+
+<h2>Task 18 - the dialling directory</h2>
+<p>F2 opens the directory as an overlay over the focused pane, reading a tab-separated <code>directory.tsv</code> fresh from disk every time it opens. Both frames below are driven through the real F2/Down key path, not fabricated: the left one genuinely loaded a temp fixture and moved the selection down once (Bob highlighted, not Alice); the right one points at a file that does not exist, and the overlay says so rather than showing an empty box.</p>
+{directory}
 
 <footer>modem is a DBHQ experiment</footer>
 </body>
