@@ -50,16 +50,24 @@ use crate::DSP_RATE;
 /// change made the modem worse - this constant does not move to
 /// accommodate it.
 ///
-/// 0.01 (1%) matches Task 19's own independent real-world acceptance
-/// figure for the two-laptop desk test, and is anchored to a genuine
-/// measurement rather than imported wholesale: sweeping `clock_drift`
-/// past rx.rs's documented +/-2.5% Gardner pull-in range, +30,000 ppm
-/// (3.0%) measured exactly 0.01 - the first hint of degradation, one
-/// step before the loop loses lock outright (35,000 ppm measures over
-/// 90%). Every scenario this task found to be clean measured exactly
-/// 0.0, not merely low, so 0.01 sits with real margin above "working"
-/// and over an order of magnitude below every collapse this task
-/// measured.
+/// 0.01 (1%) matches Task 19's own real-world acceptance figure for the
+/// two-laptop desk test ("under 1% of characters corrupted"). A
+/// simulated, fully deterministic calibration gate should be at least as
+/// strict as the eventual live-hardware bar it feeds into, not looser.
+///
+/// Fix round 1: an earlier version of this comment additionally claimed
+/// an independent anchor from a specific `clock_drift` measurement
+/// (+30,000 ppm measuring exactly 0.01). That anchor did not survive
+/// review - the figure turned out to be a property of the *payload*
+/// used to measure it (a sentence repeated 100 times, with a 21-byte
+/// period), not of the modem, and moved by a factor of 67 once the
+/// period was controlled for (see `docs/ber-calibration.md` and the task
+/// report for the full story). Task 19's figure is the sole
+/// justification this constant rests on now. This module's own
+/// `a_scenario_above_the_gate_is_correctly_rejected` and `a_scenario_
+/// below_the_gate_is_correctly_accepted` tests bracket it with two real,
+/// payload-structure-independent measurements instead of resting on an
+/// arithmetic coincidence.
 pub const MAX_BYTE_ERROR_RATE: f64 = 0.01;
 
 // ---------------------------------------------------------------------
@@ -171,10 +179,19 @@ pub fn clip(samples: &mut [f32], level: f32) {
 }
 
 /// Adds a second-harmonic component in place: `y = x + amount * x^2`. A
-/// pure tone at frequency f produces energy at 2f this way
-/// (sin^2(wt) = 0.5 - 0.5*cos(2wt)), which is exactly the mechanism a
-/// mildly nonlinear, asymmetric amplifier stage adds - the even-order
-/// term in its Taylor expansion around the operating point.
+/// pure tone of amplitude `A` at frequency f produces energy at 2f this
+/// way (`A^2 sin^2(wt) = A^2/2 - (A^2/2) cos(2wt)`), which is exactly the
+/// mechanism a mildly nonlinear, asymmetric amplifier stage adds - the
+/// even-order term in its Taylor expansion around the operating point.
+/// The second harmonic's own amplitude is `amount * A^2 / 2` - at `A = 1`
+/// that is `amount / 2`, so `amount = 1.6` is an 80% second-harmonic-to-
+/// fundamental ratio.
+///
+/// That expansion also carries an equal-sized DC term (`A^2/2`, scaled by
+/// `amount`), which this function does add to the signal. No acoustic
+/// path passes DC, so it plays no part in anything this crate's
+/// correlator-based tests measure, but it is a real part of this
+/// function's output and worth naming rather than leaving implicit.
 ///
 /// This is the impairment that matters most in this module. The second
 /// harmonic of the 1070 Hz Originate space tone lands at 2140 Hz, 85 Hz
@@ -308,12 +325,19 @@ pub fn duplex_leak(far: &[f32], near: &[f32], near_gain: f32) -> Vec<f32> {
 // Byte error rate
 // ---------------------------------------------------------------------
 
-/// How many leading bytes of `recovered` [`measure_ber`] may skip when
-/// aligning it to `payload`. A handful covers a training artefact left
-/// over from harness bookkeeping, or a slip right at the acquisition
-/// boundary; searching further risks matching on the payload's own
-/// repetition instead of a genuine alignment.
-const ALIGN_SEARCH: usize = 8;
+/// How far [`measure_ber`] searches for the best alignment between
+/// `payload` and `recovered`, in bytes, in either direction.
+///
+/// Fix round 1: 8, one-directional, was not enough. Measured directly at
+/// -30,000 ppm clock drift: the receiver mangles the opening ~15
+/// characters of a lost-then-reacquired carrier before it locks back on
+/// and delivers the rest correctly, and the true alignment sits at
+/// offset 17 - outside the old window even in the one direction it
+/// searched. 32, both directions, covers that with margin: a training
+/// artefact or a brief reacquisition in either direction, without
+/// searching so far that it starts finding accidental matches in a
+/// payload's own structure rather than a genuine alignment.
+const ALIGN_SEARCH: isize = 32;
 
 /// Byte error rate between a known `payload` and what a receiver actually
 /// produced, content compared at the best available alignment - never a
@@ -323,28 +347,45 @@ const ALIGN_SEARCH: usize = 8;
 /// hand back the right byte count and zero framing errors while every
 /// byte is wrong, and all three of those checks are blind to it - see
 /// `measure_ber_scores_content_not_length_after_a_slip` below, which
-/// reproduces exactly that shape of input. This walks a small window of
-/// leading offsets into `recovered` (covering a training artefact or an
-/// early slip that shifted the whole stream by a few bytes), scores each
-/// offset on how many bytes actually match `payload`, and reports the
-/// fraction wrong at whichever offset scores best. `payload` bytes beyond
-/// whatever `recovered` covers at that offset count as wrong too - a
-/// receiver that silently drops the tail of a message must not be scored
-/// as though it delivered a shorter, perfect one.
+/// reproduces exactly that shape of input. This searches a window of
+/// offsets in both directions - `recovered` may carry leading content
+/// that is not part of the payload (a training artefact, or a mangled
+/// reacquisition after a lost carrier - see [`ALIGN_SEARCH`]), or it may
+/// be missing leading payload content outright (a receiver that ate the
+/// very first byte) - scores each offset on how many bytes actually
+/// match `payload`, and reports the fraction wrong at whichever offset
+/// scores best. Bytes of `payload` that a given offset skips or leaves
+/// uncovered count as wrong - a receiver that silently drops part of a
+/// message must not be scored as though it delivered a shorter, perfect
+/// one.
 pub fn measure_ber(payload: &[u8], recovered: &[u8]) -> f64 {
     if payload.is_empty() {
         return 0.0;
     }
-    let max_offset = ALIGN_SEARCH.min(recovered.len());
     let mut best_wrong = payload.len();
-    for offset in 0..=max_offset {
-        let n = payload.len().min(recovered.len() - offset);
-        let mismatched = payload[..n]
+    for offset in -ALIGN_SEARCH..=ALIGN_SEARCH {
+        // offset >= 0: recovered has `offset` extra leading bytes ahead
+        // of the payload. offset < 0: recovered is missing that many of
+        // the payload's own leading bytes.
+        let (p_start, r_start) = if offset >= 0 {
+            (0usize, offset as usize)
+        } else {
+            ((-offset) as usize, 0usize)
+        };
+        if p_start > payload.len() || r_start > recovered.len() {
+            continue;
+        }
+        let n = (payload.len() - p_start).min(recovered.len() - r_start);
+        let mismatched = payload[p_start..p_start + n]
             .iter()
-            .zip(&recovered[offset..offset + n])
+            .zip(&recovered[r_start..r_start + n])
             .filter(|(p, r)| p != r)
             .count();
-        let wrong = (payload.len() - n) + mismatched;
+        // Every payload byte this offset does not land a comparison on -
+        // skipped at the head (p_start) or left uncovered at the tail -
+        // counts as wrong, on top of any actual mismatch within the
+        // compared span.
+        let wrong = p_start + (payload.len() - p_start - n) + mismatched;
         if wrong < best_wrong {
             best_wrong = wrong;
         }
@@ -392,6 +433,45 @@ mod tests {
         (0..n)
             .map(|i| sin(core::f64::consts::TAU * freq * i as f64 / rate) as f32)
             .collect()
+    }
+
+    /// A long, non-periodic payload for `clock_drift`'s cumulative-drift
+    /// measurements.
+    ///
+    /// Fix round 1 finding (Critical 1): `"The quick brown fox. "` x100
+    /// has a 21-byte period, and `clock_drift`'s resampling group delay
+    /// interacts with that period in a way that makes the measured byte
+    /// error rate a property of the *payload's* structure, not the
+    /// modem's. Independently reproduced: the same 2,100 bytes,
+    /// deterministically shuffled to keep the byte multiset but remove
+    /// the period, moved the measured rate at +30,000 ppm by a factor of
+    /// 67 (0.01 -> 0.667) and reversed which drift direction looked worse.
+    /// 2,100 deterministic pseudo-random bytes (this crate's own
+    /// xorshift, not `rand`) have no meaningful period at all, so this
+    /// confound cannot recur regardless of which specific bytes come out.
+    fn long_payload() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for _ in 0..100 {
+            bytes.extend_from_slice(b"The quick brown fox. ");
+        }
+        // Deterministic Fisher-Yates shuffle (this crate's own xorshift,
+        // not rand): keeps the exact byte multiset - so per-byte bit
+        // statistics are unchanged, including the fact that every ASCII
+        // byte here has its top bit clear, which gives the Gardner loop
+        // a guaranteed space-before-the-stop-bit transition on every
+        // character - while destroying the original 21-byte period.
+        // Tried fully random bytes first and rejected them: uniform
+        // 0-255 bytes have their top bit set half the time, which
+        // removes that guaranteed transition on roughly half of all
+        // characters and measured catastrophically worse (ber > 0.9
+        // even at +/-25,000 ppm, inside the documented clean pull-in
+        // range) - a second, worse confound, not a fix.
+        let mut state = seed_state(0x1234_5678_9ABC_DEF0);
+        for i in (1..bytes.len()).rev() {
+            let j = (xorshift_next(&mut state) as usize) % (i + 1);
+            bytes.swap(i, j);
+        }
+        bytes
     }
 
     // ------------------------------------------------------------------
@@ -730,11 +810,20 @@ mod tests {
         buf
     }
 
-    /// Demodulates `samples` and returns everything after the two
-    /// training bytes. Does not assume the training decoded as exactly
-    /// `0x55, 0x55` - only that it took exactly two bytes, which rx.rs's
-    /// own module doc establishes as reliable even when an individual
-    /// training character comes back altered.
+    /// Demodulates `samples` and returns everything the receiver actually
+    /// decoded, unmodified - training bytes and all.
+    ///
+    /// Fix round 1: this used to assume the first two bytes were always
+    /// the training characters and strip them unconditionally. True on a
+    /// clean channel; false under impairment - measured directly at
+    /// -30,000 ppm clock drift, the raw stream opens with over a dozen
+    /// mangled bytes from a lost-then-reacquired carrier, not two. The
+    /// harness was assuming the very thing it exists to measure. Locating
+    /// the payload within the raw stream is `measure_ber`'s job now (its
+    /// bidirectional alignment search), not this function's - which also
+    /// means this same harness shape will work unmodified on a stream
+    /// that carries no training convention of this crate's own at all,
+    /// which is exactly what Task 9's minimodem cross-validation decodes.
     fn demod(samples: &[f32], role: Role) -> Vec<u8> {
         let c = Config {
             sample_rate: DSP_RATE as u32,
@@ -749,11 +838,7 @@ mod tests {
             let n = rx.read(&mut got);
             out.extend_from_slice(&got[..n]);
         }
-        if out.len() >= 2 {
-            out.split_off(2)
-        } else {
-            Vec::new()
-        }
+        out
     }
 
     #[test]
@@ -776,6 +861,14 @@ mod tests {
     // docs/ber-calibration.md, not asserted on here, since a cliff edge
     // moves by construction and a test pinned exactly on one is a
     // regression detector for noise, not for behaviour.
+    //
+    // Fix round 1 correction: four tests here used to assert only that
+    // the recovered stream still matched the payload, which passes just
+    // as well if the impairment call silently did nothing at all - an
+    // aggregate (byte error rate) invariant under a real defect (a no-op
+    // impairment), the exact pattern the brief warns about. Each now
+    // also asserts the impaired buffer actually differs from the clean
+    // one before checking what that change cost.
     // ------------------------------------------------------------------
 
     /// Task 5 measured wideband AWGN as flat down to 6 dB SNR. Measured
@@ -798,15 +891,65 @@ mod tests {
         }
     }
 
+    /// The gate needs a real scenario it correctly rejects, or it is a
+    /// free constant (fix round 1, Critical 3: setting MAX_BYTE_ERROR_RATE
+    /// to 0.5, or to 0.0, passed every test in the first submission,
+    /// because the only test referencing it checked a measured 0.0
+    /// against it, which holds for any non-negative gate). AWGN at 0 dB
+    /// SNR - the point directly past the flat regime `awgn_is_flat_down_
+    /// to_3db` establishes - measures 0.0182, comfortably above the
+    /// gate. This fails if MAX_BYTE_ERROR_RATE is ever raised to
+    /// accommodate a scenario like it.
+    #[test]
+    fn a_scenario_above_the_gate_is_correctly_rejected() {
+        let mut s = air(PAYLOAD, Role::Originate);
+        add_awgn(&mut s, 0.0, 0xC0FFEE);
+        let recovered = demod(&s, Role::Originate);
+        let ber = measure_ber(PAYLOAD, &recovered);
+        assert!(
+            ber > MAX_BYTE_ERROR_RATE,
+            "AWGN at 0 dB measured ber {ber}, expected it to sit above the gate"
+        );
+    }
+
+    /// The other bracket: a real scenario the gate must correctly
+    /// accept. `clock_drift` at -28,000 ppm on the non-periodic payload
+    /// (see `long_payload` and `clock_drift_just_beyond_pull_in_
+    /// degrades_gradually`) measures a real, small, non-zero rate below
+    /// the gate. This fails if MAX_BYTE_ERROR_RATE is ever lowered
+    /// (to 0.0, for instance) past a scenario like it.
+    #[test]
+    fn a_scenario_below_the_gate_is_correctly_accepted() {
+        let payload = long_payload();
+        let clean = air(&payload, Role::Originate);
+        let drifted = clock_drift(&clean, -28_000.0);
+        let recovered = demod(&drifted, Role::Originate);
+        let ber = measure_ber(&payload, &recovered);
+        assert!(
+            ber <= MAX_BYTE_ERROR_RATE,
+            "clock drift -28,000 ppm measured ber {ber}, expected it to sit within the gate"
+        );
+    }
+
     /// A hard limiter barely matters until it clamps the whole signal
     /// down near the carrier detector's own cold-start sensitivity floor
     /// (~0.0075 amplitude - see `carrier.rs`'s `INITIAL_FLOOR`). Measured
     /// down to level 0.0055, comfortably above that floor with margin.
+    /// Level 1.0 is excluded deliberately: it sits at this signal's own
+    /// peak amplitude, so clipping to it is legitimately a no-op and
+    /// cannot carry the "the impairment actually did something"
+    /// assertion below - `clip_leaves_a_signal_inside_the_level_
+    /// untouched` already covers that case directly.
     #[test]
     fn clip_is_harmless_well_above_the_carrier_floor() {
-        for level in [1.0f32, 0.5, 0.2, 0.05, 0.01, 0.0055] {
-            let mut s = air(PAYLOAD, Role::Originate);
+        for level in [0.5f32, 0.2, 0.05, 0.01, 0.0055] {
+            let clean = air(PAYLOAD, Role::Originate);
+            let mut s = clean.clone();
             clip(&mut s, level);
+            assert_ne!(
+                s, clean,
+                "clip at level {level} did not change the signal - the impairment may be a no-op"
+            );
             let recovered = demod(&s, Role::Originate);
             assert_eq!(
                 measure_ber(PAYLOAD, &recovered),
@@ -837,8 +980,13 @@ mod tests {
     /// tones (1270, 1070 Hz) sit well inside 300-3400 Hz.
     #[test]
     fn band_limit_does_not_disturb_a_clean_decode() {
-        let mut s = air(PAYLOAD, Role::Originate);
+        let clean = air(PAYLOAD, Role::Originate);
+        let mut s = clean.clone();
         band_limit(&mut s, DSP_RATE);
+        assert_ne!(
+            s, clean,
+            "band_limit did not change the signal - the impairment may be a no-op"
+        );
         let recovered = demod(&s, Role::Originate);
         assert_eq!(measure_ber(PAYLOAD, &recovered), 0.0);
     }
@@ -846,16 +994,12 @@ mod tests {
     /// Cross-checks rx.rs's own documented Gardner pull-in range
     /// (+/-2.5%, from a completely different mechanism: two `Tx`/`Rx`
     /// pairs configured with differing device rates, rather than this
-    /// function resampling one already-rendered buffer). 25,000 ppm is
-    /// 2.5%; measured clean in both directions, with the asymmetry the
-    /// sweep in the task report also shows (the positive direction's
-    /// clean range in fact extends slightly further, to 2.8%).
+    /// function resampling one already-rendered buffer), on `long_
+    /// payload` - see its own doc for why the natural-language payload
+    /// used in the first submission cannot be used here.
     #[test]
     fn clock_drift_survives_the_documented_pull_in_range() {
-        let mut payload = Vec::new();
-        for _ in 0..100 {
-            payload.extend_from_slice(b"The quick brown fox. ");
-        }
+        let payload = long_payload();
         for ppm in [25_000.0, -25_000.0] {
             let clean = air(&payload, Role::Originate);
             let drifted = clock_drift(&clean, ppm);
@@ -868,24 +1012,54 @@ mod tests {
         }
     }
 
-    /// Beyond the pull-in range the loop does not degrade gracefully -
-    /// measured in the task report, it collapses hard (92-96% wrong)
-    /// within half a percentage point of the boundary above. This pins
-    /// deep inside the collapsed region, not at the fragile edge itself.
+    /// Degradation beyond the pull-in range is gradual, not a cliff.
+    /// Fix round 1 finding (Important 4): the first submission's "cliff,
+    /// not slope" claim was itself an artefact of the periodic payload -
+    /// re-measured on `long_payload` with the corrected `measure_ber`,
+    /// -28,000 ppm (0.3 percentage points past the clean boundary above)
+    /// measures a small but real, non-zero byte error rate, not the
+    /// binary "works or collapses" picture the first submission drew.
+    /// This is also one of the two measurements bracketing
+    /// `MAX_BYTE_ERROR_RATE` (see `a_scenario_below_the_gate_is_
+    /// correctly_accepted`).
     #[test]
-    fn clock_drift_beyond_pull_in_corrupts_most_of_the_content() {
-        let mut payload = Vec::new();
-        for _ in 0..100 {
-            payload.extend_from_slice(b"The quick brown fox. ");
-        }
-        for ppm in [35_000.0, -30_000.0] {
+    fn clock_drift_just_beyond_pull_in_degrades_gradually() {
+        let payload = long_payload();
+        let clean = air(&payload, Role::Originate);
+        let drifted = clock_drift(&clean, -28_000.0);
+        let recovered = demod(&drifted, Role::Originate);
+        let ber = measure_ber(&payload, &recovered);
+        assert!(
+            ber > 0.0 && ber < 0.05,
+            "clock drift -28,000 ppm measured ber {ber}, expected a small but non-zero rate"
+        );
+    }
+
+    /// Well beyond the pull-in range, corruption is severe.
+    ///
+    /// Fix round 1 correction (Critical 2): the first submission's
+    /// equivalent test asserted "the loop has lost lock" at -30,000 ppm,
+    /// which was false - the receiver mangles the opening of a
+    /// lost-then-reacquired carrier, then locks back on and delivers the
+    /// remainder correctly. The reported 92-96% figure was an artefact
+    /// of `ALIGN_SEARCH` being too narrow and one-directional to find
+    /// that correctly reacquired remainder at all, so it scored the
+    /// whole message wrong. With that fixed, -30,000 ppm measures close
+    /// to `clock_drift_just_beyond_pull_in_degrades_gradually`'s figure,
+    /// not collapse - so this pins two points further out instead,
+    /// comfortably inside the region that genuinely does collapse, with
+    /// no claim about *why* beyond what is actually measured here.
+    #[test]
+    fn clock_drift_well_beyond_pull_in_corrupts_most_of_the_content() {
+        let payload = long_payload();
+        for ppm in [35_000.0, -35_000.0] {
             let clean = air(&payload, Role::Originate);
             let drifted = clock_drift(&clean, ppm);
             let recovered = demod(&drifted, Role::Originate);
             let ber = measure_ber(&payload, &recovered);
             assert!(
                 ber > 0.5,
-                "clock drift {ppm} ppm only reached ber {ber}, expected the loop to have lost lock"
+                "clock drift {ppm} ppm only reached ber {ber}, expected substantial corruption"
             );
         }
     }
@@ -896,8 +1070,13 @@ mod tests {
     #[test]
     fn reverb_of_a_desk_distance_reflection_is_tolerated() {
         for gain in [0.3f32, 0.7] {
-            let mut s = air(PAYLOAD, Role::Originate);
+            let clean = air(PAYLOAD, Role::Originate);
+            let mut s = clean.clone();
             reverb(&mut s, 16, gain);
+            assert_ne!(
+                s, clean,
+                "reverb gain {gain} did not change the signal - the impairment may be a no-op"
+            );
             let recovered = demod(&s, Role::Originate);
             assert_eq!(
                 measure_ber(PAYLOAD, &recovered),
@@ -924,18 +1103,46 @@ mod tests {
         );
     }
 
+    /// Fix round 1 finding (Important 3): a leak without any harmonic
+    /// distortion at all still corrupts the Answer direction once it is
+    /// loud enough on its own. The first submission's report claimed
+    /// correlator selectivity held for an undistorted leak up to
+    /// `near_gain` 20 "without breaking anything", which was never
+    /// actually true past 2.0 - gain 1.0 and 2.0 measure clean, but gain
+    /// 3.0 measures 0.81. Sheer loudness, no harmonic content required,
+    /// is enough by itself.
+    #[test]
+    fn undistorted_leak_at_high_gain_alone_corrupts_the_answer_direction() {
+        let answer_payload = b"NO CARRIER 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let originate_air = air(PAYLOAD, Role::Originate);
+        let answer_air = air(answer_payload, Role::Answer);
+        let mixed = duplex_leak(&answer_air, &originate_air, 3.0);
+        let recovered = demod(&mixed, Role::Answer);
+        let ber = measure_ber(answer_payload, &recovered);
+        assert!(
+            ber > 0.5,
+            "expected gain 3.0 with no distortion to corrupt the Answer direction, got ber {ber}"
+        );
+    }
+
     /// The flagship test. A payload continuously transmitted by
     /// Originate (so it carries genuine space-tone content, not just
-    /// idle mark) is heavily overdriven and leaked into an Answer
-    /// transmission at equal amplitude (`near_gain` 1.0 - loud, but not
-    /// already overwhelming on its own: `moderate_originate_distortion_
-    /// leaves_the_answer_direction_clean` below shows the same leak with
-    /// less distortion staying clean). Measured in the task report: this
-    /// specific combination is where corruption first appears as
-    /// `amount` rises (clean at 1.5, 50% wrong at 1.6) - proving the
-    /// mechanism `harmonic_distortion`'s doc claims, not just asserting
-    /// it. Mutation proof 3 swaps the second harmonic for the third at
-    /// this exact scenario and the corruption disappears.
+    /// idle mark) is distorted at `amount = 1.6` - an 80%
+    /// second-harmonic-to-fundamental ratio (the second harmonic's
+    /// amplitude is `amount * A^2 / 2` for an input of amplitude `A`; at
+    /// `A = 1` that is `amount / 2`), alongside an equal DC offset that
+    /// no acoustic path actually passes and so plays no part here - and
+    /// leaked into an Answer transmission at equal amplitude (`near_gain`
+    /// 1.0: loud, but not already overwhelming on its own at this
+    /// distortion level - `moderate_originate_distortion_leaves_the_
+    /// answer_direction_clean` below and `undistorted_leak_at_high_gain_
+    /// alone_corrupts_the_answer_direction` above are the two controls
+    /// that isolate this specific mechanism from "any loud enough leak
+    /// breaks it regardless"). Measured: clean at amount 1.5 (75%
+    /// ratio), 50% wrong at 1.6 - proving the mechanism `harmonic_
+    /// distortion`'s doc claims, not just asserting it. Mutation proof 3
+    /// swaps the second harmonic for the third at this exact scenario
+    /// and the corruption disappears.
     #[test]
     fn loud_originate_harmonic_corrupts_the_answer_direction() {
         let answer_payload = b"NO CARRIER 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -952,10 +1159,16 @@ mod tests {
     }
 
     /// The control for the test above: the same leak, at the same
-    /// amplitude, with distortion mild enough that the second harmonic's
-    /// energy at 2140 Hz has not yet grown large enough to matter. Rules
-    /// out "any leak at this gain always breaks it regardless of
-    /// distortion", which would make the test above meaningless.
+    /// amplitude, with distortion mild enough (amount 1.0, a 50% second-
+    /// harmonic-to-fundamental ratio) that the second harmonic's energy
+    /// at 2140 Hz has not yet grown large enough to matter. Rules out
+    /// "any leak at this gain always breaks it regardless of
+    /// distortion", which would make the test above meaningless -
+    /// together with `undistorted_leak_at_high_gain_alone_corrupts_the_
+    /// answer_direction`, this pins the actual shape of the mechanism:
+    /// safe at gain 1.0 regardless of moderate distortion, safe at any
+    /// distortion level tested up to 1.5 regardless of gain 1.0, and
+    /// broken only once *both* are pushed far enough.
     #[test]
     fn moderate_originate_distortion_leaves_the_answer_direction_clean() {
         let answer_payload = b"NO CARRIER 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -963,6 +1176,10 @@ mod tests {
         harmonic_distortion(&mut distorted, 1.0);
         let answer_air = air(answer_payload, Role::Answer);
         let mixed = duplex_leak(&answer_air, &distorted, 1.0);
+        assert_ne!(
+            mixed, answer_air,
+            "the leak did not change the answer-direction signal - the leak may be absent, not merely harmless"
+        );
         let recovered = demod(&mixed, Role::Answer);
         assert_eq!(measure_ber(answer_payload, &recovered), 0.0);
     }
@@ -971,7 +1188,11 @@ mod tests {
     /// cliff measured above: source overdrive, one desk-distance
     /// reflection, ambient noise at 25 dB SNR (Task 17's own acceptance
     /// figure), then a moderately hot receiving preamp. Measured clean -
-    /// this is the reference point MAX_BYTE_ERROR_RATE is set against.
+    /// this is the reference point `MAX_BYTE_ERROR_RATE` is checked
+    /// against in this suite; the constant's own justification (Task
+    /// 19's real-world figure) and its two bracketing measurements are
+    /// on `MAX_BYTE_ERROR_RATE`'s own doc comment and the two `a_
+    /// scenario_..._the_gate_is_correctly_...` tests above.
     #[test]
     fn a_realistic_combined_room_scenario_stays_within_the_gate() {
         let mut s = air(PAYLOAD, Role::Originate);
