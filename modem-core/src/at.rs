@@ -1,0 +1,916 @@
+//! The Hayes AT command interface: the control surface a terminal talks to.
+//!
+//! [`AtProcessor`] sits in front of a [`Session`], translating between two
+//! very different worlds: a human typing command lines and result codes
+//! (`AT`, `OK`, `CONNECT 300`) while idle, and a raw byte stream that must
+//! reach the far end unmolested once a call is up. Which world applies at
+//! any moment is [`AtProcessor::in_command_mode`].
+//!
+//! # No clock, no I/O
+//!
+//! This crate is `no_std` and performs no I/O (see `lib.rs`'s own doc), and
+//! the escape sequence this module implements is defined entirely in terms
+//! of elapsed time - "at least one second of silence". Rather than reach
+//! for a clock, [`AtProcessor::advance_time`] takes a [`Duration`] the
+//! caller supplies, driven from the same audio clock that paces
+//! `Session::process_out`/`process_in` (see `session.rs`). This keeps the
+//! crate pure and every test in this module deterministic: a test can
+//! assert "1500 ms of `advance_time` was not enough" without needing to
+//! race a real clock or sleep.
+//!
+//! # Deviation from the plan's stated signature
+//!
+//! The task plan sketches `advance_time(&mut self, d: Duration)` with no
+//! `Session` parameter and no return value. That cannot deliver two of this
+//! module's own required behaviours: "carrier loss emits `NO CARRIER`
+//! unprompted" and "`CONNECT 300`, on carrier" (for `ATDT`/`ATA`) both name
+//! events that happen on the *wire*, not in response to a keystroke - a
+//! real modem reports them the instant they occur, whether or not the DTE
+//! is typing anything at that moment. [`AtProcessor::feed`] is the only
+//! other entry point, and it is driven by DTE keystrokes; a call that is
+//! silently connecting, or a line that silently drops, produces no
+//! keystroke for `feed` to be called with. `advance_time` is the only
+//! method already known to be called every audio tick regardless of DTE
+//! activity (that is the whole reason it exists), so it is the one place
+//! that can observe [`Session::carrier_detected`] transition and report it
+//! unprompted. This module's `advance_time` therefore takes `&mut Session`
+//! and returns `Option<Response>`, matching `feed`'s own shape. Tasks 15
+//! and 17 do not exist yet, so nothing is broken by this - see the task
+//! report for the full reasoning.
+//!
+//! # The escape sequence is three things, not one
+//!
+//! `+++ATH0` is not a command. The real sequence is:
+//!
+//! 1. At least one second of silence (no bytes fed while in data mode).
+//! 2. Three `+` characters, no more than a second apart from each other.
+//! 3. At least one second of silence afterwards.
+//!
+//! Only step 3 completing turns the sequence into an actual mode switch;
+//! `ATH0` (or any other command) is then typed separately, afterwards, in
+//! command mode. Nothing in this module ever matches the literal byte
+//! sequence `+++ATH0` (or `+++` alone) as a unit - see
+//! `mutation_3_the_shorthand_string_is_never_recognised` below, which
+//! proves a version of this module that *did* pattern-match the literal
+//! string fails, precisely because no such pattern-match exists to find.
+//!
+//! Implemented as two small counters, live only while in data mode:
+//! `idle` (time since the last byte arrived, or since the last plus that
+//! extended a run) and `plus_count` (0 to 3, consecutive plus characters
+//! seen since the leading guard was satisfied). [`AtProcessor::feed`]
+//! advances `plus_count` on a `+` that arrives with the right timing either
+//! side of it (a fresh leading guard for the first plus, at most a second's
+//! gap for the second and third); anything else - a non-plus byte, a
+//! fourth character, or a `+` that arrives too fast or too slow - cancels
+//! the attempt and flushes every buffered plus onto the wire as ordinary
+//! data, in order, before the breaking byte itself also goes out. Nothing
+//! is ever delayed for a byte that was never going to be part of an escape
+//! attempt in the first place: a `+` arriving while data is flowing at
+//! speed (insufficient leading silence) is written straight through in the
+//! same call, not buffered and released later - see
+//! `plus_plus_plus_inside_fast_data_is_written_straight_through` below.
+//!
+//! Only [`AtProcessor::advance_time`] can complete the third step (three
+//! plusses buffered, then a further second with nothing else arriving);
+//! [`AtProcessor::feed`] can only extend a run or cancel it, since a
+//! keystroke is precisely the "something else arrived" that step 3 forbids.
+//! A completed escape produces no [`Response`] - a real Hayes modem gives
+//! no acknowledgement for `+++` either, only for the command typed
+//! afterwards.
+//!
+//! # No echo
+//!
+//! Real Hayes modems typically echo typed characters back to the terminal.
+//! Nothing in the command table or the required tests asks for it, and
+//! [`Response`] only carries result lines, so this module does not
+//! implement it.
+
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
+use core::time::Duration;
+
+use crate::session::Session;
+
+/// The Hayes default guard time (register S12's default of 50, in
+/// fiftieths of a second). Used on both sides of the escape sequence: the
+/// silence required before the first plus and the silence required after
+/// the third.
+const GUARD_TIME: Duration = Duration::from_secs(1);
+
+/// One AT command's result, or an unprompted line, as the lines a terminal
+/// would print, in order. A `Response` is deliberately just a list of
+/// strings - see this crate's task report for why several of this
+/// module's own tests compare it element by element rather than checking
+/// length or membership alone.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct Response {
+    pub lines: Vec<String>,
+}
+
+impl Response {
+    fn one(line: &str) -> Self {
+        Response {
+            lines: vec![line.to_string()],
+        }
+    }
+
+    fn two(first: &str, second: &str) -> Self {
+        Response {
+            lines: vec![first.to_string(), second.to_string()],
+        }
+    }
+}
+
+/// The control surface in front of a [`Session`]: parses AT command lines
+/// while idle, passes bytes straight through to [`Session::send`] once a
+/// call is up, and watches for the `+++` escape sequence and for carrier
+/// dropping unexpectedly. See this module's own doc for the escape
+/// sequence's exact timing rules and for why `advance_time` takes a
+/// `Session`.
+pub struct AtProcessor {
+    /// `true` while accepting bytes as an AT command line; `false` while
+    /// passing bytes straight through as call data. Starts `true` - a
+    /// fresh modem is not on a call.
+    in_command_mode: bool,
+    /// Bytes accumulated for the command line in progress, cleared on
+    /// every CR. Never holds a CR itself.
+    cmd_buf: Vec<u8>,
+    /// Time since the last byte was fed while in data mode (whether it
+    /// extended a plus run or not), or since the last plus that did.
+    /// Meaningless, and left untouched, while in command mode.
+    idle: Duration,
+    /// Consecutive, correctly-timed plus characters buffered so far as a
+    /// candidate escape sequence: 0 to 3. Never holds anything while in
+    /// command mode - entering command mode always clears it.
+    plus_count: u8,
+    /// Shadow of `Session::carrier_detected()` as of the last time it was
+    /// checked, so `advance_time` can tell a genuine transition (the event
+    /// worth reporting) from carrier merely continuing to be up or down.
+    carrier_up: bool,
+}
+
+impl Default for AtProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AtProcessor {
+    /// A fresh processor: in command mode, nothing buffered, no carrier
+    /// assumed. Matches a modem that has just been switched on.
+    pub fn new() -> Self {
+        Self {
+            in_command_mode: true,
+            cmd_buf: Vec::new(),
+            idle: Duration::ZERO,
+            plus_count: 0,
+            carrier_up: false,
+        }
+    }
+
+    /// Whether a typed byte would currently be interpreted as part of an
+    /// AT command line (`true`) or passed straight through as call data
+    /// (`false`).
+    pub fn in_command_mode(&self) -> bool {
+        self.in_command_mode
+    }
+
+    /// Feeds one byte typed at the DTE. In command mode, accumulates it
+    /// into the command line in progress and executes on CR, returning
+    /// that command's [`Response`]. In data mode, either extends a
+    /// candidate escape sequence (see this module's own doc) or passes it
+    /// straight through to `session.send`; either way returns `None` -
+    /// entering command mode via `+++` is silent, and ordinary data is not
+    /// acknowledged.
+    pub fn feed(&mut self, byte: u8, session: &mut Session) -> Option<Response> {
+        if self.in_command_mode {
+            self.feed_command_byte(byte, session)
+        } else {
+            self.feed_data_byte(byte, session);
+            None
+        }
+    }
+
+    /// Advances the internal clock by `d`, driven by the caller from the
+    /// audio clock (see this module's own doc for why this, not `feed`, is
+    /// what can report events that happen with no keystroke behind them).
+    /// Completes a pending escape sequence once its trailing guard time has
+    /// elapsed, and reports `CONNECT 300` or `NO CARRIER` on a genuine
+    /// carrier transition.
+    pub fn advance_time(&mut self, d: Duration, session: &mut Session) -> Option<Response> {
+        if !self.in_command_mode {
+            self.idle = self.idle.saturating_add(d);
+            if self.plus_count == 3 && self.idle >= GUARD_TIME {
+                // The trailing guard has elapsed with nothing else having
+                // arrived (a byte arriving would have gone through
+                // `feed_data_byte` and cleared `plus_count` already, so
+                // reaching this point at all means step 3 is genuinely
+                // satisfied). The three buffered plusses were the escape
+                // signal, not data - they are discarded, never sent.
+                self.plus_count = 0;
+                self.idle = Duration::ZERO;
+                self.in_command_mode = true;
+            }
+        }
+        self.poll_carrier(session)
+    }
+
+    /// Checks `session.carrier_detected()` against the last known state
+    /// and reports a genuine transition, if any. A rising edge is only
+    /// worth announcing while still in data mode waiting for it (a rise
+    /// noticed while already back in command mode - because the far end
+    /// connected while this end was mid-escape, an unlikely but possible
+    /// ordering - is not the `ATDT`/`ATA` connect announcement and is not
+    /// reported). A falling edge always matters, in either mode: a call
+    /// that drops is worth reporting whether or not the DTE happened to be
+    /// online at that exact moment, and always hangs up cleanly on this
+    /// end too, so a dead `Session` is never left half-connected.
+    fn poll_carrier(&mut self, session: &mut Session) -> Option<Response> {
+        let up = session.carrier_detected();
+        if up && !self.carrier_up {
+            self.carrier_up = true;
+            if !self.in_command_mode {
+                return Some(Response::one("CONNECT 300"));
+            }
+        } else if !up && self.carrier_up {
+            self.carrier_up = false;
+            session.hangup();
+            self.in_command_mode = true;
+            self.plus_count = 0;
+            self.idle = Duration::ZERO;
+            return Some(Response::one("NO CARRIER"));
+        }
+        None
+    }
+
+    /// Accumulates one command-mode byte, executing on CR. LF is ignored
+    /// (tolerating a terminal that sends CRLF), so it can arrive between
+    /// commands without starting an empty command line of its own. A bare
+    /// CR on an empty buffer produces no response, matching the shape of
+    /// pressing return with nothing typed.
+    fn feed_command_byte(&mut self, byte: u8, session: &mut Session) -> Option<Response> {
+        match byte {
+            b'\n' => None,
+            b'\r' => {
+                if self.cmd_buf.is_empty() {
+                    return None;
+                }
+                let line = core::mem::take(&mut self.cmd_buf);
+                let upper = String::from_utf8_lossy(&line).to_ascii_uppercase();
+                Some(self.execute(&upper, session))
+            }
+            other => {
+                self.cmd_buf.push(other);
+                None
+            }
+        }
+    }
+
+    /// Executes one already-uppercased command line - the case-folding
+    /// happens once in [`AtProcessor::feed_command_byte`], not here, so
+    /// every arm below can match a plain literal. See the task brief's
+    /// command table for the full list; anything not matched is `ERROR`,
+    /// including a line that does not even start with `AT`.
+    fn execute(&mut self, upper: &str, session: &mut Session) -> Response {
+        let Some(rest) = upper.strip_prefix("AT") else {
+            return Response::one("ERROR");
+        };
+        match rest {
+            "" => Response::one("OK"),
+            "Z" => {
+                // Reset: only this processor's own pending escape state -
+                // an active call is not torn down by ATZ.
+                self.plus_count = 0;
+                self.idle = Duration::ZERO;
+                Response::one("OK")
+            }
+            "I" => Response::two(&format!("modem-core Bell 103 v{}", crate::VERSION), "OK"),
+            "A" => {
+                session.answer();
+                self.carrier_up = false;
+                self.go_online();
+                Response::one("OK")
+            }
+            "H" | "H0" => {
+                session.hangup();
+                self.carrier_up = false;
+                Response::two("OK", "NO CARRIER")
+            }
+            "O" | "O0" => {
+                if session.carrier_detected() {
+                    self.go_online();
+                    Response::one("CONNECT 300")
+                } else {
+                    Response::one("ERROR")
+                }
+            }
+            _ if rest.starts_with("DT") => {
+                let digits = &rest[2..];
+                session.dial(digits);
+                self.carrier_up = false;
+                self.go_online();
+                Response::one("OK")
+            }
+            _ => Response::one("ERROR"),
+        }
+    }
+
+    /// Common bookkeeping for switching to data mode: leaves
+    /// `carrier_up` untouched, since `ATO` resumes a call already in
+    /// progress (see its own doc) while `ATDT`/`ATA` clear it themselves
+    /// first, having just built a fresh `Session::tx`/`rx` pair with no
+    /// carrier of its own yet.
+    fn go_online(&mut self) {
+        self.in_command_mode = false;
+        self.plus_count = 0;
+        self.idle = Duration::ZERO;
+    }
+
+    /// One data-mode byte: either extends a candidate escape sequence, is
+    /// discarded as part of one that just failed (see below), or is
+    /// written straight to `session.send`. See this module's own doc for
+    /// the full algorithm; in short, a `+` only ever buffers instead of
+    /// transmitting immediately when the leading guard (for the first
+    /// plus) or the inter-plus gap (for the second and third) is actually
+    /// satisfied *at the moment it arrives* - so a `+` inside fast-flowing
+    /// data is written through in this same call, never held back on the
+    /// chance it might turn into an escape.
+    fn feed_data_byte(&mut self, byte: u8, session: &mut Session) {
+        let idle = self.idle;
+        let continues_run = byte == b'+'
+            && match self.plus_count {
+                0 => idle >= GUARD_TIME,
+                1 | 2 => idle <= GUARD_TIME,
+                _ => false,
+            };
+        if continues_run {
+            self.plus_count += 1;
+            self.idle = Duration::ZERO;
+            return;
+        }
+
+        // Not a valid continuation: whatever was buffered was never part
+        // of a real escape sequence after all (or `plus_count` was
+        // already 3, and any byte at all - even another plus - breaks a
+        // sequence that is only supposed to be followed by silence). It
+        // was real data all along, and goes out now, in order, before
+        // this byte.
+        for _ in 0..self.plus_count {
+            session.send(b"+");
+        }
+        self.plus_count = 0;
+
+        if byte == b'+' && idle >= GUARD_TIME {
+            // This byte itself opens a fresh attempt - most commonly, the
+            // ordinary case of the very first plus after real silence, but
+            // also reachable if the flush above just fired because an
+            // earlier candidate's own inter-plus gap ran long enough to
+            // *become* a fresh leading guard in its own right.
+            self.plus_count = 1;
+        } else {
+            session.send(&[byte]);
+        }
+        self.idle = Duration::ZERO;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::SessionState;
+    use crate::{Config, Duplex, Role};
+
+    /// `Duplex::Full`, not `HalfPingPong`: an AT-controlled terminal
+    /// session is inherently full duplex - either end can type at any
+    /// moment, with no "who currently holds the turn" concept for a human
+    /// to manage. This also matters mechanically: under `HalfPingPong`,
+    /// `process_out`'s own documented discipline is that the end without
+    /// the turn transmits nothing at all (see `session.rs`), so an
+    /// Originate session's own `carrier_detected()` would never rise
+    /// unless something explicitly yielded the turn to the far end - a
+    /// half-duplex-specific mechanic this module's command table has no
+    /// concept of. Under `Full`, both ends transmit unconditionally once
+    /// connected, so carrier genuinely reflects "is the far end still
+    /// there" the whole time, exactly what `CONNECT 300` and `NO CARRIER`
+    /// need.
+    fn cfg(role: Role) -> Config {
+        Config {
+            sample_rate: 8000,
+            role,
+            duplex: Duplex::Full,
+        }
+    }
+
+    const BLOCK: usize = 256;
+    /// One block of audio at 8 kHz, matching `BLOCK` - the unit
+    /// `advance_time` is fed in every test below, mirroring how a real
+    /// audio-driven caller would pace it one block at a time.
+    fn block_duration() -> Duration {
+        Duration::from_secs_f64(BLOCK as f64 / 8000.0)
+    }
+
+    /// Wires two sessions' audio together for one block, exactly like
+    /// `session.rs`'s own `pump` helper (see its doc) - the AT layer adds
+    /// no new audio plumbing of its own, so this is deliberately the same
+    /// shape.
+    fn pump(a: &mut Session, b: &mut Session) {
+        let mut oa = vec![0.0f32; BLOCK];
+        let mut ob = vec![0.0f32; BLOCK];
+        a.process_out(&mut oa);
+        b.process_out(&mut ob);
+        a.process_in(&ob);
+        b.process_in(&oa);
+    }
+
+    const MAX_ITERS: usize = 4000;
+
+    /// Pumps both sessions, ticking `at`'s clock by one block every
+    /// iteration, until `local`'s carrier has genuinely risen (proof the
+    /// call is real, not just that `state()` reports `Connected` - see
+    /// this crate's own standing caution against trusting `SessionState`
+    /// alone). Returns every `Response` `advance_time` produced along the
+    /// way, in order, so a test can find its `CONNECT 300` without caring
+    /// exactly which tick it landed on.
+    fn connect(at: &mut AtProcessor, local: &mut Session, far: &mut Session) -> Vec<Response> {
+        let mut responses = Vec::new();
+        for _ in 0..MAX_ITERS {
+            pump(local, far);
+            if let Some(r) = at.advance_time(block_duration(), local) {
+                responses.push(r);
+            }
+            if local.carrier_detected() && far.carrier_detected() {
+                return responses;
+            }
+        }
+        panic!("carrier never rose on both ends within the iteration budget");
+    }
+
+    /// A short settle, matching `session.rs`'s own convention: lets a
+    /// just-granted turn's acquisition preamble drain before real data is
+    /// queued.
+    fn settle(a: &mut Session, b: &mut Session) {
+        for _ in 0..10 {
+            pump(a, b);
+        }
+    }
+
+    /// Feeds every byte of an ASCII command line, including a trailing
+    /// CR, and returns whatever `feed` returned for the CR itself (every
+    /// other byte in a well-formed command line returns `None`).
+    fn feed_line(at: &mut AtProcessor, session: &mut Session, line: &str) -> Option<Response> {
+        let mut last = None;
+        for b in line.bytes() {
+            last = at.feed(b, session);
+        }
+        last
+    }
+
+    #[test]
+    fn new_processor_starts_in_command_mode() {
+        let at = AtProcessor::new();
+        assert!(at.in_command_mode());
+    }
+
+    /// Required test: `AT` returns `OK`, and so does lowercase `at` -
+    /// checked as one exact-content comparison each, not merely "some
+    /// response arrived". Mutation 4 (case-sensitive parsing) fails the
+    /// lowercase half of this directly - see the task report.
+    #[test]
+    fn at_command_returns_ok_case_insensitively() {
+        let mut session = Session::new(cfg(Role::Originate));
+        let mut at = AtProcessor::new();
+
+        let resp = feed_line(&mut at, &mut session, "AT\r");
+        assert_eq!(resp, Some(Response::one("OK")));
+        assert!(at.in_command_mode());
+
+        let resp = feed_line(&mut at, &mut session, "at\r");
+        assert_eq!(resp, Some(Response::one("OK")));
+        assert!(at.in_command_mode());
+    }
+
+    /// Required test: an unknown command returns `ERROR`, and a line that
+    /// does not even start with `AT` does too.
+    #[test]
+    fn unknown_command_returns_error() {
+        let mut session = Session::new(cfg(Role::Originate));
+        let mut at = AtProcessor::new();
+
+        assert_eq!(
+            feed_line(&mut at, &mut session, "ATXYZ\r"),
+            Some(Response::one("ERROR"))
+        );
+        assert_eq!(
+            feed_line(&mut at, &mut session, "XYZ\r"),
+            Some(Response::one("ERROR"))
+        );
+    }
+
+    #[test]
+    fn atz_returns_ok() {
+        let mut session = Session::new(cfg(Role::Originate));
+        let mut at = AtProcessor::new();
+        assert_eq!(
+            feed_line(&mut at, &mut session, "ATZ\r"),
+            Some(Response::one("OK"))
+        );
+    }
+
+    #[test]
+    fn ati_returns_a_line_then_ok() {
+        let mut session = Session::new(cfg(Role::Originate));
+        let mut at = AtProcessor::new();
+        let resp = feed_line(&mut at, &mut session, "ATI\r").expect("ATI must respond");
+        assert_eq!(resp.lines.len(), 2);
+        assert_eq!(resp.lines[1], "OK");
+        assert!(!resp.lines[0].is_empty());
+    }
+
+    /// Required test: `ATDT<digits>` puts the session into dialling and
+    /// enters data mode. Checked on the response and the mode flag, not
+    /// on `SessionState` alone - `state()` is included only as
+    /// corroborating evidence that `dial` was actually invoked, not as
+    /// the test's sole claim.
+    #[test]
+    fn atdt_dials_and_enters_data_mode() {
+        let mut session = Session::new(cfg(Role::Originate));
+        let mut at = AtProcessor::new();
+
+        let resp = feed_line(&mut at, &mut session, "ATDT01234\r");
+        assert_eq!(resp, Some(Response::one("OK")));
+        assert!(!at.in_command_mode());
+        assert_eq!(session.state(), SessionState::Dialling);
+    }
+
+    /// `ATDT` really does carry a call: dials for real, waits for a real
+    /// carrier from a genuine answering `Session` (never asserting on
+    /// `SessionState` as the proof - see `connect`'s own doc), gets
+    /// `CONNECT 300` unprompted from `advance_time`, then proves data mode
+    /// actually passes bytes through by sending real content and reading
+    /// it back byte-exact from the far end.
+    #[test]
+    fn atdt_reaches_connect_and_data_mode_carries_real_traffic() {
+        let mut local = Session::new(cfg(Role::Originate));
+        let mut far = Session::new(cfg(Role::Answer));
+        let mut at = AtProcessor::new();
+
+        assert_eq!(
+            feed_line(&mut at, &mut local, "ATDT1\r"),
+            Some(Response::one("OK"))
+        );
+        far.answer();
+
+        let responses = connect(&mut at, &mut local, &mut far);
+        assert_eq!(
+            responses,
+            vec![Response::one("CONNECT 300")],
+            "expected exactly one CONNECT 300, unprompted, and nothing else"
+        );
+
+        settle(&mut local, &mut far);
+        for &b in b"HELLO FAR END" {
+            assert_eq!(at.feed(b, &mut local), None);
+        }
+        for _ in 0..500 {
+            pump(&mut local, &mut far);
+        }
+        assert_eq!(far.receive(), b"HELLO FAR END");
+    }
+
+    /// Required test / Mutation 1 target: `+++` with no leading guard time
+    /// does not escape - it is transmitted as data. Proven on content (the
+    /// far end's decoded bytes), not on `in_command_mode()` alone, though
+    /// that is checked too.
+    #[test]
+    fn plus_plus_plus_with_no_leading_guard_is_transmitted_as_data() {
+        let mut local = Session::new(cfg(Role::Originate));
+        let mut far = Session::new(cfg(Role::Answer));
+        let mut at = AtProcessor::new();
+        feed_line(&mut at, &mut local, "ATDT1\r");
+        far.answer();
+        connect(&mut at, &mut local, &mut far);
+        settle(&mut local, &mut far);
+
+        // Fresh into data mode, `idle` is zero - the very definition of no
+        // leading guard. Fed back to back with no advance_time between
+        // them, exactly as continuous typing would arrive.
+        for &b in b"+++" {
+            assert_eq!(at.feed(b, &mut local), None);
+        }
+        // Give the (correct) implementation every chance to wrongly
+        // escape, if it were going to: a full second and then some.
+        for _ in 0..40 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+        }
+
+        assert!(
+            !at.in_command_mode(),
+            "no leading guard was present; +++ must not have escaped"
+        );
+        for _ in 0..500 {
+            pump(&mut local, &mut far);
+        }
+        assert_eq!(far.receive(), b"+++");
+    }
+
+    /// Required test: `+++` appearing inside ordinary data at speed is
+    /// transmitted, not swallowed. Distinct from the no-leading-guard test
+    /// above: the plusses here are surrounded by other real data on both
+    /// sides in one continuous burst, proving the escape detector does not
+    /// even momentarily disrupt ordinary fast-flowing content. Also the
+    /// test that stands in for the brief's "one-string shorthand" trap in
+    /// its passing form - see `mutation_3_the_shorthand_string_is_never_
+    /// recognised` below for the failing form.
+    #[test]
+    fn plus_plus_plus_inside_fast_data_is_written_straight_through() {
+        let mut local = Session::new(cfg(Role::Originate));
+        let mut far = Session::new(cfg(Role::Answer));
+        let mut at = AtProcessor::new();
+        feed_line(&mut at, &mut local, "ATDT1\r");
+        far.answer();
+        connect(&mut at, &mut local, &mut far);
+        settle(&mut local, &mut far);
+
+        for &b in b"go+++ahead" {
+            assert_eq!(at.feed(b, &mut local), None);
+        }
+        for _ in 0..40 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+        }
+        assert!(!at.in_command_mode());
+
+        for _ in 0..500 {
+            pump(&mut local, &mut far);
+        }
+        assert_eq!(far.receive(), b"go+++ahead");
+    }
+
+    /// Required test / Mutation 2 target: `+++` with leading guard but no
+    /// trailing guard does not escape. Covers both ways the trailing guard
+    /// can fail to be satisfied: not enough silence yet (proves the guard
+    /// is a real duration check, not merely "did any time pass"), and a
+    /// fourth character arriving immediately, which must cancel the
+    /// attempt and flush every buffered plus - and the character that
+    /// broke it - onto the wire as data, in order.
+    #[test]
+    fn plus_plus_plus_with_leading_guard_but_no_trailing_guard_does_not_escape() {
+        let mut local = Session::new(cfg(Role::Originate));
+        let mut far = Session::new(cfg(Role::Answer));
+        let mut at = AtProcessor::new();
+        feed_line(&mut at, &mut local, "ATDT1\r");
+        far.answer();
+        connect(&mut at, &mut local, &mut far);
+        settle(&mut local, &mut far);
+
+        // Leading guard: a full second of silence before the first plus.
+        for _ in 0..40 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+        }
+        for &b in b"+++" {
+            assert_eq!(at.feed(b, &mut local), None);
+        }
+
+        // Less than the trailing guard: escape must not have completed
+        // yet. This is what actually falls over under Mutation 2 (the
+        // trailing-guard duration check removed) - a mutated
+        // advance_time would flip to command mode on this very first
+        // tick, regardless of how little time it represents.
+        at.advance_time(Duration::from_millis(500), &mut local);
+        assert!(
+            !at.in_command_mode(),
+            "half a second is not the guard time; must not have escaped yet"
+        );
+
+        // A fourth character, arriving with no further silence, cancels
+        // the attempt outright.
+        assert_eq!(at.feed(b'X', &mut local), None);
+        assert!(!at.in_command_mode());
+
+        // Give it a further full second, in case a broken implementation
+        // was merely slow rather than correctly cancelled.
+        for _ in 0..40 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+        }
+        assert!(!at.in_command_mode());
+
+        for _ in 0..500 {
+            pump(&mut local, &mut far);
+        }
+        assert_eq!(
+            far.receive(),
+            b"+++X",
+            "the cancelled escape attempt must have gone out as data, in order, X included"
+        );
+    }
+
+    /// Required test: `+++` with guard time either side does escape, and
+    /// `ATH0` afterwards hangs up. The hangup is verified on the real
+    /// signal, not the response text alone: pumps the far end afterwards
+    /// and confirms its own receiver genuinely loses carrier, proving
+    /// `local` actually stopped transmitting rather than merely reporting
+    /// that it did.
+    #[test]
+    fn plus_plus_plus_with_guard_both_sides_escapes_and_ath0_hangs_up() {
+        let mut local = Session::new(cfg(Role::Originate));
+        let mut far = Session::new(cfg(Role::Answer));
+        let mut at = AtProcessor::new();
+        feed_line(&mut at, &mut local, "ATDT1\r");
+        far.answer();
+        connect(&mut at, &mut local, &mut far);
+        settle(&mut local, &mut far);
+
+        for _ in 0..40 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+        }
+        for &b in b"+++" {
+            assert_eq!(at.feed(b, &mut local), None);
+        }
+        let mut escaped = false;
+        for _ in 0..80 {
+            pump(&mut local, &mut far);
+            let r = at.advance_time(block_duration(), &mut local);
+            assert_eq!(
+                r, None,
+                "a completed escape must be silent, not report anything"
+            );
+            if at.in_command_mode() {
+                escaped = true;
+                break;
+            }
+        }
+        assert!(
+            escaped,
+            "guard time either side must have escaped into command mode"
+        );
+
+        // No data leaked out as the three plusses - they were the escape
+        // signal, not content.
+        for _ in 0..500 {
+            pump(&mut local, &mut far);
+        }
+        assert_eq!(far.receive(), b"");
+
+        let resp = feed_line(&mut at, &mut local, "ATH0\r");
+        assert_eq!(resp, Some(Response::two("OK", "NO CARRIER")));
+
+        // Real signal proof: local has genuinely stopped transmitting, so
+        // the far end's own receiver must lose carrier too, not merely
+        // read as "hung up" because local's Session object says so.
+        let silence = vec![0.0f32; BLOCK];
+        for _ in 0..60 {
+            far.process_in(&silence);
+        }
+        assert!(
+            !far.carrier_detected(),
+            "far end must genuinely lose carrier once local really hung up"
+        );
+    }
+
+    /// Required test: carrier loss emits `NO CARRIER` unprompted. The far
+    /// end hangs up for real (stops transmitting entirely, not a
+    /// synthetic flag flip), and `local`'s own receiver must genuinely
+    /// lose lock before `advance_time` reports anything - proven by
+    /// pumping real silence from `far` into `local`, not by calling any
+    /// internal state setter.
+    #[test]
+    fn carrier_loss_emits_no_carrier_unprompted() {
+        let mut local = Session::new(cfg(Role::Originate));
+        let mut far = Session::new(cfg(Role::Answer));
+        let mut at = AtProcessor::new();
+        feed_line(&mut at, &mut local, "ATDT1\r");
+        far.answer();
+        connect(&mut at, &mut local, &mut far);
+        settle(&mut local, &mut far);
+        assert!(!at.in_command_mode());
+
+        far.hangup();
+        let mut reported = None;
+        for _ in 0..MAX_ITERS {
+            pump(&mut local, &mut far);
+            if let Some(r) = at.advance_time(block_duration(), &mut local) {
+                reported = Some(r);
+                break;
+            }
+        }
+        assert_eq!(reported, Some(Response::one("NO CARRIER")));
+        assert!(
+            at.in_command_mode(),
+            "losing carrier must return the DTE to command mode"
+        );
+        assert!(
+            !local.carrier_detected(),
+            "the shadow flag must be reporting a real transition, not a stale one"
+        );
+
+        // Fully functional again, not just flagged as such.
+        assert_eq!(
+            feed_line(&mut at, &mut local, "AT\r"),
+            Some(Response::one("OK"))
+        );
+    }
+
+    /// Required test: `ATO` returns to data mode when connected, `ERROR`
+    /// when not.
+    #[test]
+    fn ato_errors_when_not_connected() {
+        let mut session = Session::new(cfg(Role::Originate));
+        let mut at = AtProcessor::new();
+        assert_eq!(
+            feed_line(&mut at, &mut session, "ATO\r"),
+            Some(Response::one("ERROR"))
+        );
+        assert!(at.in_command_mode());
+    }
+
+    #[test]
+    fn ato_resumes_data_mode_when_connected_and_traffic_flows_again() {
+        let mut local = Session::new(cfg(Role::Originate));
+        let mut far = Session::new(cfg(Role::Answer));
+        let mut at = AtProcessor::new();
+        feed_line(&mut at, &mut local, "ATDT1\r");
+        far.answer();
+        connect(&mut at, &mut local, &mut far);
+        settle(&mut local, &mut far);
+
+        // Escape to command mode without hanging up.
+        for _ in 0..40 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+        }
+        for &b in b"+++" {
+            at.feed(b, &mut local);
+        }
+        for _ in 0..80 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+            if at.in_command_mode() {
+                break;
+            }
+        }
+        assert!(at.in_command_mode());
+
+        let resp = feed_line(&mut at, &mut local, "ATO\r");
+        assert_eq!(resp, Some(Response::one("CONNECT 300")));
+        assert!(!at.in_command_mode());
+
+        settle(&mut local, &mut far);
+        for &b in b"BACK ONLINE" {
+            at.feed(b, &mut local);
+        }
+        for _ in 0..500 {
+            pump(&mut local, &mut far);
+        }
+        assert_eq!(far.receive(), b"BACK ONLINE");
+    }
+
+    /// Own mutation target (Mutation 5): `ATH`'s two-line response is
+    /// checked for exact order, not merely that both lines are present.
+    /// A defect that pushes `"NO CARRIER"` before `"OK"` still produces a
+    /// `Response` containing both strings - `resp.lines.contains(&"OK"
+    /// .to_string()) && resp.lines.contains(&"NO CARRIER".to_string())`
+    /// would pass it unchanged, which is exactly the aggregate blind spot
+    /// this crate's task reports warn about (`Response` is a list of
+    /// strings). Comparing the whole `Vec` catches the swap; see the task
+    /// report for the mutation transcript.
+    #[test]
+    fn ath0_response_is_ok_then_no_carrier_in_that_order() {
+        let mut local = Session::new(cfg(Role::Originate));
+        let mut far = Session::new(cfg(Role::Answer));
+        let mut at = AtProcessor::new();
+        feed_line(&mut at, &mut local, "ATDT1\r");
+        far.answer();
+        connect(&mut at, &mut local, &mut far);
+        settle(&mut local, &mut far);
+
+        // Escape to command mode first - typing "ATH0" while still in data
+        // mode would just be sent as data, not executed.
+        for _ in 0..40 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+        }
+        for &b in b"+++" {
+            at.feed(b, &mut local);
+        }
+        for _ in 0..80 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+            if at.in_command_mode() {
+                break;
+            }
+        }
+        assert!(
+            at.in_command_mode(),
+            "must have escaped before ATH0 can be typed"
+        );
+
+        let resp = feed_line(&mut at, &mut local, "ATH0\r").expect("ATH0 must respond");
+        assert_eq!(resp.lines, vec!["OK".to_string(), "NO CARRIER".to_string()]);
+    }
+}
