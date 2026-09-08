@@ -63,12 +63,28 @@
 //! gap for the second and third); anything else - a non-plus byte, a
 //! fourth character, or a `+` that arrives too fast or too slow - cancels
 //! the attempt and flushes every buffered plus onto the wire as ordinary
-//! data, in order, before the breaking byte itself also goes out. Nothing
-//! is ever delayed for a byte that was never going to be part of an escape
+//! data, in order, before the breaking byte itself also goes out, with no
+//! exception: a cancelling byte never gets a second chance to open a fresh
+//! attempt of its own, even if it is itself a `+` that happens to arrive
+//! after a long gap (see `feed_data_byte`'s own doc). This is a
+//! deliberately simple rule, not an oversight - a design that let a
+//! cancelling byte sometimes restart a new attempt was tried and dropped
+//! precisely because it made the inter-plus gap limit (the middle one of
+//! the three rules above) unable to be proven by any test: any scenario
+//! built to defeat it could always be read, instead, as evidence of a
+//! *new* attempt starting from the byte that broke the old one. Nothing is
+//! ever delayed for a byte that was never going to be part of an escape
 //! attempt in the first place: a `+` arriving while data is flowing at
 //! speed (insufficient leading silence) is written straight through in the
 //! same call, not buffered and released later - see
 //! `plus_plus_plus_inside_fast_data_is_written_straight_through` below.
+//!
+//! The plus **count** is enforced the same way as the timing: once
+//! `plus_count` reaches 3, the only valid continuation is silence, so a
+//! fourth character - including a fourth `+` - is not "the third plus
+//! ignored and the escape fires anyway"; it cancels the whole attempt, and
+//! all four characters go out as data. See
+//! `a_fourth_plus_also_cancels_the_attempt` below.
 //!
 //! Only [`AtProcessor::advance_time`] can complete the third step (three
 //! plusses buffered, then a further second with nothing else arriving);
@@ -352,26 +368,25 @@ impl AtProcessor {
         }
 
         // Not a valid continuation: whatever was buffered was never part
-        // of a real escape sequence after all (or `plus_count` was
-        // already 3, and any byte at all - even another plus - breaks a
-        // sequence that is only supposed to be followed by silence). It
-        // was real data all along, and goes out now, in order, before
-        // this byte.
+        // of a real escape sequence after all - a byte arrived either too
+        // soon, too late, or is not a plus at all; `plus_count` may also
+        // already be 3, where the only valid continuation is silence and
+        // any byte at all - even another plus - breaks it. Every buffered
+        // plus was real data all along, and goes out now, in order,
+        // followed unconditionally by this byte, which does not get a
+        // second chance to open a fresh attempt of its own even if it is
+        // itself a `+` that happens to arrive after a long gap - a byte's
+        // only route into a candidate escape is the `continues_run` check
+        // above, evaluated once, on its own arrival. This keeps the model
+        // simple enough to prove: once a run breaks, everything buffered,
+        // and the byte that broke it, is data, full stop. See
+        // `plus_plus_plus_with_an_inter_plus_gap_over_a_second_does_not_
+        // escape` and `a_fourth_plus_also_cancels_the_attempt` below.
         for _ in 0..self.plus_count {
             session.send(b"+");
         }
         self.plus_count = 0;
-
-        if byte == b'+' && idle >= GUARD_TIME {
-            // This byte itself opens a fresh attempt - most commonly, the
-            // ordinary case of the very first plus after real silence, but
-            // also reachable if the flush above just fired because an
-            // earlier candidate's own inter-plus gap ran long enough to
-            // *become* a fresh leading guard in its own right.
-            self.plus_count = 1;
-        } else {
-            session.send(&[byte]);
-        }
+        session.send(&[byte]);
         self.idle = Duration::ZERO;
     }
 }
@@ -758,6 +773,119 @@ mod tests {
             b"+++X",
             "the cancelled escape attempt must have gone out as data, in order, X included"
         );
+    }
+
+    /// Coordinator review finding: the inter-plus gap limit (`at.rs`'s
+    /// `1 | 2 => idle <= GUARD_TIME` arm) had no test that could actually
+    /// isolate it. Mutating it to `true` passed the whole suite, including
+    /// every escape test above - none of them ever separate the first plus
+    /// from the second and third by more than an instant, so the limit was
+    /// never exercised on its own. Without it, `+`, a five-minute pause,
+    /// `+`, another pause, `+` would still escape, which is not the Hayes
+    /// sequence at all and would fire on transmitted data containing
+    /// scattered plus signs.
+    ///
+    /// This drives exactly that shape, deliberately kept to only three
+    /// plus characters total so a single `far.receive()` comparison can
+    /// tell the whole story: the leading guard is satisfied, one plus
+    /// arrives, then time advances well past the guard with nothing else
+    /// happening, then the remaining two plusses arrive back to back. A
+    /// correct implementation cannot let the first plus survive that gap -
+    /// it is flushed as data the moment the second plus arrives too late
+    /// to continue it - and the two that follow immediately after can only
+    /// ever count as a fresh two-plus attempt of their own, one short of
+    /// completing anything, so they are written straight through too by
+    /// the same rule (see this module's own doc: a cancelling byte gets no
+    /// second chance to open a new attempt). All three end up as data,
+    /// none of them buffered forever, and the call never escapes.
+    #[test]
+    fn plus_plus_plus_with_an_inter_plus_gap_over_a_second_does_not_escape() {
+        let mut local = Session::new(cfg(Role::Originate));
+        let mut far = Session::new(cfg(Role::Answer));
+        let mut at = AtProcessor::new();
+        feed_line(&mut at, &mut local, "ATDT1\r");
+        far.answer();
+        connect(&mut at, &mut local, &mut far);
+        settle(&mut local, &mut far);
+
+        // Leading guard, then the first plus.
+        for _ in 0..40 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+        }
+        assert_eq!(at.feed(b'+', &mut local), None);
+
+        // Well past the guard time, with nothing else arriving - the gap
+        // the inter-plus limit exists to catch.
+        at.advance_time(Duration::from_secs(2), &mut local);
+
+        // The remaining two plusses, back to back.
+        assert_eq!(at.feed(b'+', &mut local), None);
+        assert_eq!(at.feed(b'+', &mut local), None);
+
+        // Give it a further full second and more, in case a broken
+        // implementation reached plus_count 3 and was only waiting on the
+        // trailing guard.
+        for _ in 0..80 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+        }
+        assert!(
+            !at.in_command_mode(),
+            "a plus spread across a five-second gap must not complete an escape"
+        );
+
+        for _ in 0..500 {
+            pump(&mut local, &mut far);
+        }
+        assert_eq!(
+            far.receive(),
+            b"+++",
+            "every plus must have gone out as data - none of them buffered forever"
+        );
+    }
+
+    /// Coordinator review finding: confirms the deliberate answer to "does
+    /// a fourth plus arriving within the window cancel the sequence, or
+    /// does it escape on three and ignore the rest?" This module's rule
+    /// (see its own doc) is the former: once `plus_count` reaches 3, the
+    /// only valid continuation is silence, so a fourth character - even
+    /// another plus - is treated exactly like any other cancelling byte
+    /// (`plus_plus_plus_with_leading_guard_but_no_trailing_guard_does_not_
+    /// escape` above proves this for a non-plus fourth character; this is
+    /// the same claim for a plus). All four characters go out as data, in
+    /// order, and the call never escapes.
+    #[test]
+    fn a_fourth_plus_also_cancels_the_attempt() {
+        let mut local = Session::new(cfg(Role::Originate));
+        let mut far = Session::new(cfg(Role::Answer));
+        let mut at = AtProcessor::new();
+        feed_line(&mut at, &mut local, "ATDT1\r");
+        far.answer();
+        connect(&mut at, &mut local, &mut far);
+        settle(&mut local, &mut far);
+
+        for _ in 0..40 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+        }
+        for &b in b"++++" {
+            assert_eq!(at.feed(b, &mut local), None);
+        }
+
+        for _ in 0..80 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+        }
+        assert!(
+            !at.in_command_mode(),
+            "a fourth plus must cancel the attempt, not complete it early"
+        );
+
+        for _ in 0..500 {
+            pump(&mut local, &mut far);
+        }
+        assert_eq!(far.receive(), b"++++");
     }
 
     /// Required test: `+++` with guard time either side does escape, and
