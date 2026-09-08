@@ -887,13 +887,61 @@ section {
 }
 
 /* ---------------------------------------------------------------------
- * endorsement - the DBHQ footer line. Nothing more.
+ * endorsement - the DBHQ footer line, plus the small GitHub/Links row
+ * every page in web/ carries beneath it. endorsement__links is its own
+ * paragraph rather than more inline links crowded into the first one,
+ * so the two kinds of link (who made this / where else to go) stay
+ * visually distinct without needing two different colours to say so.
  * ------------------------------------------------------------------- */
 .endorsement {
   text-align: center;
   padding: var(--modem-space-md) 0 var(--modem-space-lg) 0;
   font-size: var(--modem-type-scale-small);
   color: var(--modem-white-dim);
+}
+
+.endorsement__links {
+  display: flex;
+  justify-content: center;
+  gap: var(--modem-space-sm);
+  margin-top: var(--modem-space-xs);
+}
+
+/* ---------------------------------------------------------------------
+ * resource-row - one external link and the one sentence saying why it
+ * is worth a visitor's time, on links.html. Same header-plus-
+ * description-below shape as phase-row above, minus the play button:
+ * there is nothing to play here, only somewhere else to go.
+ * ------------------------------------------------------------------- */
+.resource-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.resource-row {
+  padding: var(--modem-space-sm) 0;
+  border-bottom: 1px solid var(--modem-white-dim);
+}
+
+.resource-row:last-child {
+  border-bottom: none;
+}
+
+/* Padding lives on the link itself, not just the row around it, so the
+   tappable area is the anchor's own box (roughly 54px tall at the base
+   type scale) rather than dead space in the row's margin that looks
+   clickable but is not - see the touch-target note on dial-button etc.
+   in the Mobile section for the same reasoning applied elsewhere. */
+.resource-row__link {
+  display: inline-block;
+  padding: var(--modem-space-xs) 0;
+  font-size: var(--modem-type-scale-base);
+}
+
+.resource-row__description {
+  margin: var(--modem-space-xs) 0 0 0;
+  color: var(--modem-white-bright);
 }
 
 /* ---------------------------------------------------------------------
