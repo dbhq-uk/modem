@@ -20,9 +20,11 @@
 //!   drops into.
 //! - [`spectrum`] - the plain-data argument that boundary is built on.
 //! - [`pane`] - one end's protocol state plus its terminal emulation.
+//! - [`directory`] - the hand-editable dialling directory (Task 18).
 //! - [`app`] - ties it all together: layout choice, focus, key handling.
 
 pub mod app;
+pub mod directory;
 pub mod draw;
 pub mod frame;
 pub mod pane;
@@ -31,6 +33,7 @@ pub mod theme;
 pub mod waterfall;
 
 pub use app::{App, LayoutMode, RequestedLayout};
+pub use directory::{Directory, Entry};
 pub use pane::Pane;
 pub use spectrum::Spectrum;
 pub use theme::Theme;
