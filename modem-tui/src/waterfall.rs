@@ -495,15 +495,20 @@ mod tests {
     #[test]
     fn both_bell_103_marks_resolve_as_two_lit_rows_with_a_gap() {
         const SR: u32 = 8000;
-        // 41 rows: comfortably above the threshold, and (measured, not
-        // guessed - see the task report) far enough from a subband
-        // boundary landing between the two tones' own bins that the gap
-        // margin is tens of dB, not a hair's breadth. Heights exist
-        // (e.g. 16, 40) where the same two tones' FFT bins happen to
-        // straddle a subband edge and blur into an adjacent row - a real
-        // limitation of fixed-width sub-band bucketing, not something
-        // this test papers over by picking a lucky height once.
-        const H: u16 = 41;
+        // 134 rows: measured (not guessed - see the task report), not
+        // just "above the threshold". At this height the real FFT size
+        // (512 at 8 kHz) resolves the pair with margin to spare, but the
+        // sub-band grid is narrow enough that forcing the FFT down to
+        // 256 (mutation proof 3 - see the task report) widens each
+        // tone's main lobe enough to swamp the gap row instead, so this
+        // is also the height that proves the display genuinely depends
+        // on `fft_size_for`, not just on there being room for a gap at
+        // all. Heights exist (e.g. 16, 40) where the same two tones' FFT
+        // bins happen to straddle a sub-band edge and blur into an
+        // adjacent row even at the real FFT size - a real limitation of
+        // fixed-width sub-band bucketing, not something this test papers
+        // over by picking a lucky height once.
+        const H: u16 = 134;
         let n = modem_core::analyse::fft_size_for(SR);
         let mut spectrum = Spectrum::new(SR);
         spectrum.push(two_tone_column(1070.0, 1270.0, SR, n));
