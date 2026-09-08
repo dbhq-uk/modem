@@ -11,6 +11,15 @@
 
 @import url("../brand/tokens.css");
 
+/* The page container width. Not a brand/tokens.json value: that file is
+   for colour, type and CRT-effect values the TUI and the page must
+   agree on, and a browser container width has no terminal equivalent.
+   One local constant so the hero and main line up at every viewport
+   instead of two hand-matched numbers drifting apart. */
+:root {
+  --page-max-width: 1320px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -59,6 +68,32 @@ body {
   top: var(--modem-space-sm);
 }
 
+/* Browser surfaces the design system otherwise leaves to the platform
+   default - themed from the same phosphor rather than left grey. */
+::selection {
+  background: var(--modem-amber-bright);
+  color: var(--modem-ground);
+}
+
+* {
+  scrollbar-color: var(--modem-amber-dim) var(--modem-ground);
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--modem-ground);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--modem-amber-dim);
+  border: 2px solid var(--modem-ground);
+}
+
 a {
   color: var(--modem-amber-bright);
 }
@@ -82,14 +117,19 @@ h3 {
   letter-spacing: 0.02em;
 }
 
+/* Type hierarchy: h1 (the wordmark) is its own clamp; h2 and h3 step
+   down from it in size only, never weight - a real terminal signals
+   emphasis with size and colour, not a bold face the font stack may
+   not even carry. */
 h2 {
-  font-size: var(--modem-type-scale-large);
+  font-size: var(--modem-type-scale-xlarge);
+  margin-top: 0;
   border-bottom: 1px solid var(--modem-white-dim);
   padding-bottom: var(--modem-space-xs);
 }
 
 h3 {
-  font-size: var(--modem-type-scale-base);
+  font-size: var(--modem-type-scale-large);
   margin: 0;
 }
 
@@ -106,11 +146,36 @@ p {
  * directly over a glyph) leaves white-bright at 11.4:1 and amber-bright
  * at 7.8:1 against the ground colour, both comfortably clear of WCAG
  * AA's 4.5:1 for body text.
+ *
+ * The vignette (::before) is the same idea taken to the edges of the
+ * viewport: a plain black overlay composites identically whether or not
+ * `multiply` is declared (multiplying anything by black is the same as
+ * compositing opaque black at that alpha), so the number that matters is
+ * the alpha itself. Capped at 0.3 and checked against the WCAG contrast
+ * formula directly at the darkest corner stop: white-bright drops from
+ * 16.2:1 to 9.1:1, amber-bright from 10.8:1 to 5.5:1 - both still clear
+ * of AA's 4.5:1 even in the one place the vignette is strongest. Fixed,
+ * not absolute, so it reads as the screen's own edge falloff rather than
+ * a mark on the document, and stays put as the long page scrolls under
+ * it - the same reason the scanlines are fixed.
  * ------------------------------------------------------------------- */
 .crt-frame {
   position: relative;
   min-height: 100vh;
   background: var(--modem-ground);
+}
+
+.crt-frame::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 49;
+  background: radial-gradient(
+    ellipse 85% 75% at 50% 45%,
+    transparent 55%,
+    rgba(0, 0, 0, 0.3) 100%
+  );
 }
 
 .crt-frame::after {
@@ -139,6 +204,52 @@ p {
 }
 
 /* ---------------------------------------------------------------------
+ * crt-warmup - the one authored moment of motion: the tube collapsing
+ * to a bright line and expanding back out, the reverse of how a CRT
+ * looks switching off. A fixed overlay painted over everything else
+ * (z-index above the scanline/vignette layers), never a transform on
+ * the real content - the page is full height immediately and correct
+ * underneath throughout, so there is no layout to mistime.
+ * ------------------------------------------------------------------- */
+.crt-warmup {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  pointer-events: none;
+  background: var(--modem-ground);
+  animation: modem-crt-power-on 900ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes modem-crt-power-on {
+  0% {
+    transform: scaleY(0.004) scaleX(0.6);
+    background: var(--modem-amber-bright);
+    opacity: 1;
+  }
+  8% {
+    transform: scaleY(0.012) scaleX(1);
+    background: var(--modem-amber-bright);
+    opacity: 1;
+  }
+  40% {
+    transform: scaleY(1) scaleX(1);
+    background: var(--modem-ground);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleY(1) scaleX(1);
+    background: var(--modem-ground);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crt-warmup {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------
  * Hero: web/hero.png with live text over the top, per the brief - never
  * baked into the image, so it stays sharp at any size and is editable
  * without regenerating anything.
@@ -152,9 +263,17 @@ p {
 .hero__image {
   display: block;
   width: 100%;
-  height: min(60vh, 480px);
+  height: min(46vh, 380px);
   object-fit: cover;
   opacity: 0.55;
+  /* The source render (web/hero.png) is green - a leftover from before
+     the page committed to one phosphor colour throughout. There is no
+     generator for this asset to re-render from, so the fix is a hue
+     correction rather than a hand-edited or regenerated file: -67deg is
+     the source image's own measured hue (~108°) rotated onto the brand
+     amber's hue (~41°, from --modem-amber-bright/#FFB000), checked
+     against a pixel sample of the rendered file, not guessed. */
+  filter: hue-rotate(-67deg) saturate(1.1);
 }
 
 .hero__overlay {
@@ -162,16 +281,27 @@ p {
   inset: 0;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   justify-content: center;
-  padding: var(--modem-space-lg);
-  gap: var(--modem-space-xs);
   background: linear-gradient(
     to top,
     rgba(10, 10, 10, 0.95) 0%,
     rgba(10, 10, 10, 0.35) 60%,
     rgba(10, 10, 10, 0.55) 100%
   );
+}
+
+/* Mirrors main's own max-width and horizontal padding, so the wordmark
+   sits on the same left edge as the body copy below it however wide the
+   viewport gets, while .hero__image and this gradient stay full-bleed. */
+.hero__content {
+  width: 100%;
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: 0 var(--modem-space-md);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--modem-space-xs);
 }
 
 .kicker {
@@ -205,16 +335,22 @@ p {
 .hero__tagline {
   margin: 0;
   max-width: 60ch;
+  font-size: var(--modem-type-scale-large);
   color: var(--modem-white-bright);
 }
 
 /* ---------------------------------------------------------------------
- * Layout
+ * Layout - main is wider than the 70ch reading measure `p` keeps for
+ * itself (below), so wide, non-prose content (the terminal, the
+ * generated frames) has room to breathe without dragging body copy out
+ * to an uncomfortable line length. Top padding is deliberately tighter
+ * than bottom: the hero already separates itself with its own border,
+ * so main does not need to repeat that gap before the first heading.
  * ------------------------------------------------------------------- */
 main {
-  max-width: 78ch;
+  max-width: var(--page-max-width);
   margin: 0 auto;
-  padding: var(--modem-space-lg) var(--modem-space-md);
+  padding: var(--modem-space-md) var(--modem-space-md) var(--modem-space-lg);
 }
 
 section {
@@ -313,9 +449,14 @@ section {
   display: block;
   width: 100%;
   height: auto;
-  aspect-ratio: 640 / 200;
+  aspect-ratio: 960 / 200;
   background: var(--modem-ground);
   border: 1px solid var(--modem-white-dim);
+  /* A wider native canvas (see index.html's width attribute) means more
+     seconds of history are visible at once, not just a blown-up copy of
+     the old one - keep upscaling crisp/blocky rather than smoothed,
+     matching the rest of the CRT character-cell aesthetic. */
+  image-rendering: pixelated;
 }
 
 .now-playing {
@@ -446,9 +587,17 @@ section {
   margin-bottom: var(--modem-space-xs);
 }
 
+/* width: max-content so the window hugs the fixed-width monospace frame
+   it holds, rather than stretching to fill the wider container and
+   leaving a slab of empty chrome beside real content - the container is
+   now wide enough that the frame renders at its natural size within it
+   (max-width: 100% is the fallback once a viewport genuinely cannot fit
+   that natural width, e.g. narrow phones, where .screen's own
+   overflow-x still applies). */
 .win {
   border: 1px solid var(--modem-white-dim);
   background: var(--modem-ground);
+  width: max-content;
   max-width: 100%;
   margin: var(--modem-space-sm) 0 0 0;
 }
@@ -476,7 +625,7 @@ section {
   margin: 0;
   width: max-content;
   font-family: var(--modem-type-face);
-  font-size: clamp(0.55rem, 1.6vw, 0.85rem);
+  font-size: clamp(0.6rem, 1.3vw, 1rem);
   line-height: 1.15;
 }
 

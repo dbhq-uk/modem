@@ -18,23 +18,35 @@
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 
+<!-- The one authored moment of motion: the page arriving like a CRT
+     warming up. A fixed cosmetic overlay only - it never touches the
+     real content underneath, so there is nothing to reflow or mis-time.
+     prefers-reduced-motion hides it outright in style.css, and it never
+     intercepts a click either way (pointer-events: none). -->
+<div class="crt-warmup" aria-hidden="true"></div>
+
 <div class="crt-frame">
 
   <header class="hero">
     <img class="hero__image" src="hero.png" alt="" aria-hidden="true">
     <div class="hero__overlay">
-      <!--
-        The kicker line is not decided yet - Dan is choosing it. This is a
-        deliberately obvious placeholder, both in this comment and in the
-        red PLACEHOLDER tag rendered below, so it cannot be mistaken for
-        real copy and shipped by accident.
-      -->
-      <p class="kicker">
-        <span class="kicker__placeholder-tag">PLACEHOLDER</span>
-        kicker line - Dan to choose before launch
-      </p>
-      <h1 class="wordmark">modem</h1>
-      <p class="hero__tagline">A real Bell 103 modem, behind a performed dial-up handshake</p>
+      <!-- hero__content mirrors main's own max-width, so the wordmark
+           lines up with the body copy below it at every viewport while
+           the image and its gradient stay full-bleed behind it. -->
+      <div class="hero__content">
+        <!--
+          The kicker line is not decided yet - Dan is choosing it. This is a
+          deliberately obvious placeholder, both in this comment and in the
+          red PLACEHOLDER tag rendered below, so it cannot be mistaken for
+          real copy and shipped by accident.
+        -->
+        <p class="kicker">
+          <span class="kicker__placeholder-tag">PLACEHOLDER</span>
+          kicker line - Dan to choose before launch
+        </p>
+        <h1 class="wordmark">modem</h1>
+        <p class="hero__tagline">A real Bell 103 modem, behind a performed dial-up handshake</p>
+      </div>
     </div>
   </header>
 
@@ -50,6 +62,11 @@
       <h2 id="demo-heading">Dial</h2>
       <p>Press dial and the full overture plays through your speakers, rendered live by the same code that runs the real connection - not a recording. The waterfall draws as it goes and each phase is named as it fires. Nothing is asked of you yet: this button only plays sound.</p>
 
+      <div class="demo__controls">
+        <button class="dial-button" id="dial-btn" type="button">Dial</button>
+        <button class="dial-button" id="mic-btn" type="button" hidden>Connect with microphone</button>
+      </div>
+
       <div class="terminal">
         <div class="terminal__output" id="terminal-output" role="log" aria-label="Call transcript"></div>
         <div class="waterfall-wrap">
@@ -59,17 +76,13 @@
             <span>1270</span>
             <span>300</span>
           </div>
-          <canvas class="waterfall" id="waterfall" width="640" height="200" aria-hidden="true"></canvas>
+          <canvas class="waterfall" id="waterfall" width="960" height="200" aria-hidden="true"></canvas>
         </div>
         <p class="now-playing" id="now-playing" aria-live="polite">Idle</p>
       </div>
 
       <noscript><p>The demo needs JavaScript. Everything else on this page reads fine without it.</p></noscript>
 
-      <div class="demo__controls">
-        <button class="dial-button" id="dial-btn" type="button">Dial</button>
-        <button class="dial-button" id="mic-btn" type="button" hidden>Connect with microphone</button>
-      </div>
       <p class="diagnostic" id="mic-diagnostic" role="status"></p>
 
       <div class="endpoint" id="endpoint-panel" hidden>
