@@ -52,7 +52,15 @@ INDEX_HTML = WEB / "index.html"
 # One marker pair per frame, matched in web/index.html by
 # `splice_region` below. `frame_id` is also the `id` mockup.rs's own
 # `main` gives each frame's wrapping div - see this module's own doc.
-FRAMES = ("one-device", "two-device")
+#
+# The two "one-device-mobile-*" frames are the narrow-viewport variant of
+# "one-device": the same wired call, rendered as two 72-column single
+# panes (originate, answer) instead of one 100-column split, because
+# App::split refuses to lay out below 80 columns (MIN_SPLIT_COLUMNS) -
+# there is no narrower split render to ask the generator for, only a
+# different layout. index.html shows one pair or the other by viewport
+# width; see web/style.css's own note on that breakpoint.
+FRAMES = ("one-device", "two-device", "one-device-mobile-a", "one-device-mobile-b")
 
 
 def run_mockup() -> str:

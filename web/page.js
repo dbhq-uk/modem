@@ -93,9 +93,9 @@ class Waterfall {
     const decayCss = getComputedStyle(document.documentElement).getPropertyValue('--modem-phosphor-decay').trim();
     this.decaySeconds = parseFloat(decayCss) || 2.56;
     const groundCss = getComputedStyle(document.documentElement).getPropertyValue('--modem-ground').trim();
-    const amberCss = getComputedStyle(document.documentElement).getPropertyValue('--modem-amber-bright').trim();
+    const greenCss = getComputedStyle(document.documentElement).getPropertyValue('--modem-green-bright').trim();
     this.ground = hexToRgb(groundCss);
-    this.bright = hexToRgb(amberCss);
+    this.bright = hexToRgb(greenCss);
     this.lastFrame = null;
     this.floorDb = -70;
     this.ctx.fillStyle = groundCss;

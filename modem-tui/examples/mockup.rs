@@ -482,13 +482,13 @@ fn main() {
     );
 
     // One window, both ends in it - the split layout the crate builds.
-    // Rendered in amber, not the crate's own default: this render is
+    // Rendered in green, not the crate's own default: this render is
     // reused verbatim below as modem.dbhq.uk's spliced "one device"
     // frame (see the web_frames block), and the page has committed to
-    // amber as its single phosphor colour - see web/style.css's own
+    // green as its single phosphor colour - see web/style.css's own
     // note on that decision.
     let (a3, b3, audio3) = call();
-    let mut split = App::split(a3, b3, &wired, Theme::Amber);
+    let mut split = App::split(a3, b3, &wired, Theme::Green);
     split.push_samples(&audio3);
     let split_window = window("split screen", &render(&split, 100, 24));
 
@@ -532,13 +532,29 @@ fn main() {
     // in `FakeAcousticTransport` (see its own doc), so [DEMO MODE] is
     // genuinely absent - the real product's frame, one end talking to a
     // second machine, not a fabricated one.
-    // Amber for the same reason as `split` above - this is
+    // Green for the same reason as `split` above - this is
     // modem.dbhq.uk's spliced "two device" frame, and the page commits
     // to one phosphor colour throughout.
     let (a7, _, audio7) = call();
     let acoustic = FakeAcousticTransport;
-    let mut single_acoustic = App::single(a7, &acoustic, Theme::Amber);
+    let mut single_acoustic = App::single(a7, &acoustic, Theme::Green);
     single_acoustic.push_samples(&audio7);
+
+    // "One device", narrower: the same wired one-device scenario as
+    // `split` above, rendered as two 72-column single panes instead of
+    // one 100-column split - a real render at a width a phone screen can
+    // actually hold, not the same frame shrunk with CSS. `MIN_SPLIT_COLUMNS`
+    // (see app.rs) is 80, so App::split simply cannot lay out anywhere
+    // near phone width; two single panes, one per role, is the narrowest
+    // faithful rendering the crate has to offer. Both stay on the wired
+    // transport (same as `split`), so [DEMO MODE] is genuinely present on
+    // both, matching the wide frame they replace on small screens.
+    let (a8, b8, audio8) = call();
+    let mut mobile_originate = App::single(a8, &wired, Theme::Green);
+    let mut mobile_answer = App::single(b8, &wired, Theme::Green);
+    mobile_originate.push_samples(&audio8);
+    mobile_answer.push_samples(&audio8);
+
     let web_frames = format!(
         "<div class=\"row\">{}{}</div>",
         window(
@@ -553,6 +569,22 @@ fn main() {
             &format!(
                 "<div id=\"web-frame-two-device\">{}</div>",
                 render(&single_acoustic, 72, 22)
+            ),
+        ),
+    ) + &format!(
+        "<div class=\"row\">{}{}</div>",
+        window(
+            "web-frame-one-device-mobile-a: originate, 72 columns",
+            &format!(
+                "<div id=\"web-frame-one-device-mobile-a\">{}</div>",
+                render(&mobile_originate, 72, 22)
+            ),
+        ),
+        window(
+            "web-frame-one-device-mobile-b: answer, 72 columns",
+            &format!(
+                "<div id=\"web-frame-one-device-mobile-b\">{}</div>",
+                render(&mobile_answer, 72, 22)
             ),
         ),
     );

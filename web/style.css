@@ -58,9 +58,9 @@ body {
   top: 0;
   z-index: 100;
   background: var(--modem-ground);
-  color: var(--modem-amber-bright);
+  color: var(--modem-green-bright);
   padding: var(--modem-space-xs) var(--modem-space-sm);
-  border: 1px solid var(--modem-amber-bright);
+  border: 1px solid var(--modem-green-bright);
 }
 
 .skip-link:focus {
@@ -71,12 +71,12 @@ body {
 /* Browser surfaces the design system otherwise leaves to the platform
    default - themed from the same phosphor rather than left grey. */
 ::selection {
-  background: var(--modem-amber-bright);
+  background: var(--modem-green-bright);
   color: var(--modem-ground);
 }
 
 * {
-  scrollbar-color: var(--modem-amber-dim) var(--modem-ground);
+  scrollbar-color: var(--modem-green-dim) var(--modem-ground);
   scrollbar-width: thin;
 }
 
@@ -90,12 +90,12 @@ body {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: var(--modem-amber-dim);
+  background: var(--modem-green-dim);
   border: 2px solid var(--modem-ground);
 }
 
 a {
-  color: var(--modem-amber-bright);
+  color: var(--modem-green-bright);
 }
 
 a:hover,
@@ -104,7 +104,7 @@ a:focus-visible {
 }
 
 :focus-visible {
-  outline: 2px solid var(--modem-amber-bright);
+  outline: 2px solid var(--modem-green-bright);
   outline-offset: 2px;
 }
 
@@ -112,7 +112,7 @@ h1,
 h2,
 h3 {
   font-family: var(--modem-type-face);
-  color: var(--modem-amber-bright);
+  color: var(--modem-green-bright);
   font-weight: normal;
   letter-spacing: 0.02em;
 }
@@ -143,8 +143,8 @@ p {
  * pixel, never lighten one - lightening the gap between two already-dark
  * pixels is what would actually erode contrast. Verified against the
  * brand's own bright phosphors: even worst-case (a stripe sitting
- * directly over a glyph) leaves white-bright at 11.4:1 and amber-bright
- * at 7.8:1 against the ground colour, both comfortably clear of WCAG
+ * directly over a glyph) leaves white-bright at 11.4:1 and green-bright
+ * at 10.4:1 against the ground colour, both comfortably clear of WCAG
  * AA's 4.5:1 for body text.
  *
  * The vignette (::before) is the same idea taken to the edges of the
@@ -152,9 +152,9 @@ p {
  * `multiply` is declared (multiplying anything by black is the same as
  * compositing opaque black at that alpha), so the number that matters is
  * the alpha itself. Capped at 0.3 and checked against the WCAG contrast
- * formula directly at the darkest corner stop: white-bright drops from
- * 16.2:1 to 9.1:1, amber-bright from 10.8:1 to 5.5:1 - both still clear
- * of AA's 4.5:1 even in the one place the vignette is strongest. Fixed,
+ * formula directly at the darkest corner stop: white-bright drops to
+ * 7.8:1, green-bright to 7.2:1 - both still clear of AA's 4.5:1 even in
+ * the one place the vignette is strongest. Fixed,
  * not absolute, so it reads as the screen's own edge falloff rather than
  * a mark on the document, and stays put as the long page scrolls under
  * it - the same reason the scanlines are fixed.
@@ -223,12 +223,12 @@ p {
 @keyframes modem-crt-power-on {
   0% {
     transform: scaleY(0.004) scaleX(0.6);
-    background: var(--modem-amber-bright);
+    background: var(--modem-green-bright);
     opacity: 1;
   }
   8% {
     transform: scaleY(0.012) scaleX(1);
-    background: var(--modem-amber-bright);
+    background: var(--modem-green-bright);
     opacity: 1;
   }
   40% {
@@ -266,14 +266,13 @@ p {
   height: min(46vh, 380px);
   object-fit: cover;
   opacity: 0.55;
-  /* The source render (web/hero.png) is green - a leftover from before
-     the page committed to one phosphor colour throughout. There is no
-     generator for this asset to re-render from, so the fix is a hue
-     correction rather than a hand-edited or regenerated file: -67deg is
-     the source image's own measured hue (~108°) rotated onto the brand
-     amber's hue (~41°, from --modem-amber-bright/#FFB000), checked
-     against a pixel sample of the rendered file, not guessed. */
-  filter: hue-rotate(-67deg) saturate(1.1);
+  /* web/hero.png was generated green at Dan's own request, and the icon
+     (brand/icon.svg) is phosphor green #33FF33 - green is the brand's
+     colour. An earlier pass hue-shifted this asset to amber with a CSS
+     filter to make the page read as one colour system; the diagnosis
+     (three competing colour systems looked accidental) was right but
+     amber was the wrong fix - the asset is already the project's own
+     colour, generated on purpose, so it is used as rendered. */
 }
 
 .hero__overlay {
@@ -307,8 +306,8 @@ p {
 .wordmark {
   margin: 0;
   font-size: clamp(2.5rem, 10vw, 5rem);
-  color: var(--modem-amber-bright);
-  text-shadow: 0 0 var(--modem-bloom-radius) var(--modem-amber-bright);
+  color: var(--modem-green-bright);
+  text-shadow: 0 0 var(--modem-bloom-radius) var(--modem-green-bright);
   line-height: 1;
 }
 
@@ -366,7 +365,7 @@ section {
 }
 
 .terminal-line--command {
-  color: var(--modem-amber-bright);
+  color: var(--modem-green-bright);
 }
 
 .terminal-line--phase {
@@ -441,7 +440,7 @@ section {
 
 .now-playing {
   font-size: var(--modem-type-scale-small);
-  color: var(--modem-amber-bright);
+  color: var(--modem-green-bright);
   min-height: 1.4em;
 }
 
@@ -460,8 +459,8 @@ section {
   font-family: var(--modem-type-face);
   font-size: var(--modem-type-scale-base);
   background: transparent;
-  color: var(--modem-amber-bright);
-  border: 1px solid var(--modem-amber-bright);
+  color: var(--modem-green-bright);
+  border: 1px solid var(--modem-green-bright);
   padding: var(--modem-space-xs) var(--modem-space-md);
   cursor: pointer;
   text-shadow: 0 0 var(--modem-bloom-radius) currentColor;
@@ -469,7 +468,7 @@ section {
 
 .dial-button:hover:not(:disabled),
 .dial-button:focus-visible {
-  background: var(--modem-amber-bright);
+  background: var(--modem-green-bright);
   color: var(--modem-ground);
   text-shadow: none;
 }
@@ -495,7 +494,7 @@ section {
  * The live endpoint panel (Task 2's real connection, wired up here)
  * ------------------------------------------------------------------- */
 .endpoint {
-  border: 1px solid var(--modem-amber-dim);
+  border: 1px solid var(--modem-green-dim);
   padding: var(--modem-space-sm);
   margin-top: var(--modem-space-sm);
 }
@@ -527,8 +526,8 @@ section {
 
 .endpoint button:hover:not(:disabled),
 .endpoint button:focus-visible {
-  border-color: var(--modem-amber-bright);
-  color: var(--modem-amber-bright);
+  border-color: var(--modem-green-bright);
+  color: var(--modem-green-bright);
 }
 
 .endpoint button:disabled {
@@ -537,7 +536,7 @@ section {
 }
 
 .endpoint__status {
-  color: var(--modem-amber-bright);
+  color: var(--modem-green-bright);
 }
 
 /* ---------------------------------------------------------------------
@@ -557,8 +556,8 @@ section {
  * cross-wired in software exactly as modem-audio's own WiredTransport
  * wires them (see modem-audio/src/transport.rs). Built on `.endpoint`'s
  * own border/row/input/button treatment - this is the same kind of live
- * control surface, just two of them side by side, one amber-bright
- * (originate) and one amber-dim (answer), the same pairing the
+ * control surface, just two of them side by side, one green-bright
+ * (originate) and one green-dim (answer), the same pairing the
  * generated frames above already draw for the two bands.
  * ------------------------------------------------------------------- */
 .wired__panels {
@@ -571,28 +570,28 @@ section {
 .wired__panel {
   flex: 1 1 320px;
   min-width: 0;
-  border: 1px solid var(--modem-amber-bright);
+  border: 1px solid var(--modem-green-bright);
   padding: var(--modem-space-sm);
 }
 
 .wired__panel--answer {
-  border-color: var(--modem-amber-dim);
+  border-color: var(--modem-green-dim);
 }
 
 .wired__panel-bar {
-  color: var(--modem-amber-bright);
+  color: var(--modem-green-bright);
   font-size: var(--modem-type-scale-small);
   letter-spacing: 0.08em;
   margin-bottom: var(--modem-space-xs);
 }
 
 .wired__panel--answer .wired__panel-bar {
-  color: var(--modem-amber-dim);
+  color: var(--modem-green-dim);
 }
 
 .mode-badge {
   color: var(--modem-ground);
-  background: var(--modem-amber-bright);
+  background: var(--modem-green-bright);
   font-size: var(--modem-type-scale-small);
   padding: 0 var(--modem-space-xs);
   letter-spacing: 0.05em;
@@ -697,8 +696,8 @@ section {
   font-family: var(--modem-type-face);
   flex-shrink: 0;
   background: transparent;
-  color: var(--modem-amber-bright);
-  border: 1px solid var(--modem-amber-bright);
+  color: var(--modem-green-bright);
+  border: 1px solid var(--modem-green-bright);
   padding: var(--modem-space-xs) var(--modem-space-sm);
   cursor: pointer;
   min-width: 6ch;
@@ -706,7 +705,7 @@ section {
 
 .phase-row__play:hover:not(:disabled),
 .phase-row__play:focus-visible {
-  background: var(--modem-amber-bright);
+  background: var(--modem-green-bright);
   color: var(--modem-ground);
 }
 
@@ -721,7 +720,7 @@ section {
 }
 
 .phase-row__label {
-  color: var(--modem-amber-bright);
+  color: var(--modem-green-bright);
   font-size: var(--modem-type-scale-base);
 }
 
@@ -757,15 +756,15 @@ section {
 }
 
 .download-row__link {
-  color: var(--modem-amber-bright);
-  border: 1px solid var(--modem-amber-bright);
+  color: var(--modem-green-bright);
+  border: 1px solid var(--modem-green-bright);
   padding: var(--modem-space-xs) var(--modem-space-sm);
   text-decoration: none;
 }
 
 .download-row__link:hover,
 .download-row__link:focus-visible {
-  background: var(--modem-amber-bright);
+  background: var(--modem-green-bright);
   color: var(--modem-ground);
 }
 
