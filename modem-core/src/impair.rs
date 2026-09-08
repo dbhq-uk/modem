@@ -89,11 +89,25 @@ use crate::DSP_RATE;
 /// gate_is_correctly_rejected` (AWGN at 0 dB on `long_payload`, stable
 /// across seeds because 2,100 bytes is enough for a noise process to
 /// average out, unlike the 55-byte `PAYLOAD` fix round 2 used there) is
-/// the upper one. Neither claims to be typical or universal; each is a
-/// concrete, disclosed, reproducible fact. See `docs/ber-calibration.md`
-/// for the full picture, including the honest one: no clock-offset
-/// tolerance figure at or above 2.5% is safe to quote as payload-
-/// independent, in either direction.
+/// an upper one.
+///
+/// Fix round 4: that single upper bracket (0.82+) left an unpinned band
+/// between the gate and its own value - 0.05 and 0.1 are both real,
+/// 5x-to-10x loosenings, and both passed every workspace test
+/// unnoticed. Closed with two more brackets, each covering the part of
+/// the range the others miss: `reverb_of_a_strong_close_reflection_
+/// corrupts_content` (0.145455, fully deterministic) catches a gate
+/// raised to 0.5 but not to 0.1; `a_scenario_just_above_the_gate_is_
+/// correctly_rejected` (AWGN at 0 dB on the 55-byte `PAYLOAD`, the exact
+/// scenario fix round 3 removed from the near side, at a fixed seed)
+/// catches anything above 0.018182. None of the three claims to be
+/// typical or universal; each is a concrete, disclosed, reproducible
+/// fact, which is what a bracket actually needs to be. See `docs/ber-
+/// calibration.md` for the full picture, including the honest one: no
+/// clock-offset tolerance figure at or above 2.5% is safe to quote as
+/// payload-independent - every collapse measured across all rounds sits
+/// on the negative-drift side, but a tolerance figure is quoted
+/// symmetrically, so +/-2.5% remains the boundary that can be quoted.
 pub const MAX_BYTE_ERROR_RATE: f64 = 0.01;
 
 // ---------------------------------------------------------------------
@@ -967,9 +981,10 @@ mod tests {
     /// free constant (fix round 1, Critical 3: setting MAX_BYTE_ERROR_RATE
     /// to 0.5, or to 0.0, passed every test in the first submission,
     /// because the only test referencing it checked a measured 0.0
-    /// against it, which holds for any non-negative gate). AWGN at 0 dB
-    /// SNR fails if MAX_BYTE_ERROR_RATE is ever raised to accommodate a
-    /// scenario like it.
+    /// against it, which holds for any non-negative gate). This is the
+    /// far-side upper bracket: AWGN at 0 dB SNR fails if
+    /// MAX_BYTE_ERROR_RATE is ever raised anywhere near this scenario's
+    /// own value or beyond.
     ///
     /// Fix round 3 correction: fix round 2 ran this on the 55-byte
     /// `PAYLOAD`, where six seeds checked spanned 0.018 to 0.836 - the
@@ -980,6 +995,11 @@ mod tests {
     /// 80x the gate, with no draw anywhere near it. Same mechanism, same
     /// narrative, instability explained by payload length rather than
     /// routed around by picking a different mechanism.
+    ///
+    /// Fix round 4 note: this test's own 0.82+ margin is too generous to
+    /// notice a gate loosened to anything below that - see
+    /// `a_scenario_just_above_the_gate_is_correctly_rejected` below for
+    /// the near-side bracket that closes the resulting gap.
     #[test]
     fn a_scenario_above_the_gate_is_correctly_rejected() {
         let payload = long_payload();
@@ -990,6 +1010,39 @@ mod tests {
         assert!(
             ber > MAX_BYTE_ERROR_RATE,
             "AWGN at 0 dB measured ber {ber}, expected it to sit above the gate"
+        );
+    }
+
+    /// The near-side upper bracket - fix round 4 addition. The far-side
+    /// bracket above (minimum 0.82 across seeds on `long_payload`) and
+    /// the reverb scenario further down (0.145455, fully deterministic)
+    /// left an unpinned band: a gate loosened to 0.05 or 0.1 - a 5x or
+    /// 10x relaxation, not a small one - passed all 100 workspace tests
+    /// unnoticed, since 0.1 < 0.145455 and 0.05 and 0.1 are both well
+    /// under the far-side bracket's 0.82.
+    ///
+    /// This closes it with the scenario fix round 3 removed from the
+    /// near side: AWGN at 0 dB on the original 55-byte `PAYLOAD`, at the
+    /// fixed seed `0xC0FFEE`, deterministically measures 0.018182 (1 of
+    /// 55 bytes wrong) every time. Fix round 3 moved this off the near
+    /// side because six *different* seeds on this payload spanned 0.018
+    /// to 0.836 - a real finding, but about the general claim "AWGN at
+    /// 0 dB on a short payload measures around X", not about this one
+    /// fixed, reproducible measurement. Round 3's own thesis - a bracket
+    /// only needs to be a true existence claim, not a universal one -
+    /// applies here exactly as it does to the seedless reverb scenario:
+    /// a fixed seed is exactly as reproducible as no seed at all. This
+    /// brings the unpinned band down from 14.5x the gate to 1.8x, for
+    /// about 0.3 s of test time.
+    #[test]
+    fn a_scenario_just_above_the_gate_is_correctly_rejected() {
+        let mut s = air(PAYLOAD, Role::Originate);
+        add_awgn(&mut s, 0.0, 0xC0FFEE);
+        let recovered = demod(&s, Role::Originate);
+        let ber = measure_ber(PAYLOAD, &recovered);
+        assert!(
+            ber > MAX_BYTE_ERROR_RATE,
+            "AWGN at 0 dB on PAYLOAD measured ber {ber}, expected it to sit just above the gate"
         );
     }
 
@@ -1199,16 +1252,16 @@ mod tests {
     /// impairment, not a theoretical one.
     ///
     /// Fix round 3 addition: this scenario is fully deterministic (no
-    /// seed anywhere in `reverb`), reproducibly measures 0.145, and that
-    /// value sits usefully between `MAX_BYTE_ERROR_RATE` and the two
-    /// fragile gate mutants reviewed this round (0.0 and 0.5) - neither
-    /// of the dedicated gate-bracket tests happens to catch a gate
-    /// raised to 0.5, since both were narrowed this round to existence
-    /// claims near the gate itself. Asserting against the gate directly
-    /// here, rather than a separately-chosen 0.1, closes that: 0.145 is
-    /// not greater than 0.5, so this fails if the gate is ever raised
-    /// that far, while still demonstrating the real corruption this test
-    /// exists to show at the actual gate value.
+    /// seed anywhere in `reverb`), reproducibly measures 0.145455, and
+    /// that value sits usefully between `MAX_BYTE_ERROR_RATE` and the
+    /// far-side bracket's own 0.82+. Asserting against the gate directly
+    /// here, rather than a separately-chosen 0.1, means this fails if
+    /// the gate is ever raised as far as 0.145455, while still
+    /// demonstrating the real corruption this test exists to show at
+    /// the actual gate value. This is the mid-side bracket: it catches
+    /// a gate raised to 0.5, but not one raised to 0.05 or 0.1, since
+    /// both sit below 0.145455 - `a_scenario_just_above_the_gate_is_
+    /// correctly_rejected` (fix round 4) is the one that catches those.
     #[test]
     fn reverb_of_a_strong_close_reflection_corrupts_content() {
         let mut s = air(PAYLOAD, Role::Originate);
