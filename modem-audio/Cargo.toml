@@ -7,4 +7,6 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+cpal = "0.18.2"
 modem-core = { path = "../modem-core" }
+rtrb = "0.4.0"
