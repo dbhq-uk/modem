@@ -155,33 +155,42 @@ jobs:
       # on Windows line endings or macOS float behaviour.
       - run: cargo test --workspace --exclude modem-audio
 
-  # Everything under brand/ except _gen/ is generated. Nothing stopped
-  # somebody hand-editing an SVG, or editing a generator and forgetting to
-  # regenerate - both leave the committed asset disagreeing with its own
-  # source, silently. This regenerates and fails on any diff.
+  # Everything under brand/ except _gen/ is generated, and so is the pair
+  # of terminal frames inside web/index.html's "Two ways to try this"
+  # section (web/_gen/frames.py). Nothing stopped somebody hand-editing
+  # an SVG or a marked HTML region, or editing a generator and forgetting
+  # to regenerate - both leave the committed asset disagreeing with its
+  # own source, silently. This regenerates and fails on any diff.
   generated_assets:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install the renderers the generators shell out to
-        run: sudo apt-get update && sudo apt-get install -y librsvg2-bin imagemagick
+      # web/_gen/frames.py runs modem-tui's mockup example to get its
+      # frames - needs a toolchain, and libasound2-dev for modem-audio's
+      # cpal dependency to build at all, same package the `test` job
+      # installs for the same reason.
+      - uses: dtolnay/rust-toolchain@1.98.1
+      - name: Install the tools the generators need
+        run: sudo apt-get update && sudo apt-get install -y librsvg2-bin imagemagick libasound2-dev
       # Every generator, discovered rather than listed - a new one added
-      # to brand/_gen/ is covered the moment it lands, instead of silently
-      # sitting outside this check until somebody remembers to add it.
+      # to brand/_gen/ or web/_gen/ is covered the moment it lands,
+      # instead of silently sitting outside this check until somebody
+      # remembers to add it.
       - name: Run every generator
         run: |
           set -euo pipefail
-          for g in brand/_gen/*.py; do
+          for g in brand/_gen/*.py web/_gen/*.py; do
             echo "running $g"
             python3 "$g"
           done
       - name: Generated assets must match their generators
         run: |
-          if ! git diff --exit-code -- brand/; then
+          if ! git diff --exit-code -- brand/ web/index.html; then
             echo
-            echo "A file under brand/ differs from what its generator produces."
+            echo "A generated file differs from what its generator produces."
             echo "Either it was hand-edited, or a generator changed and nobody"
-            echo "re-ran it. Run the scripts in brand/_gen/ and commit the result."
+            echo "re-ran it. Run the scripts under brand/_gen/ and web/_gen/ and"
+            echo "commit the result."
             exit 1
           fi
           echo "generated assets match their generators"
