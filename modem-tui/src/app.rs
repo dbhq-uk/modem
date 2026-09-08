@@ -48,9 +48,15 @@ pub const MIN_SPLIT_COLUMNS: u16 = 80;
 /// eventually), not something that flips on its own based on terminal
 /// size. [`decide_layout`] is what turns this into an actual
 /// [`LayoutMode`] for a given size.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+///
+/// **Split is the default** (Dan, 8 Sep 2026): both ends on one machine
+/// is what somebody sees first, and single pane is what they run once
+/// they have a second machine to point it at. Both are first-class - the
+/// default only decides which one comes up with no flag.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum RequestedLayout {
     Single,
+    #[default]
     Split,
 }
 
@@ -823,6 +829,55 @@ mod tests {
     // temporarily changing `render_frame` to pass `&Spectrum::silent(..)`
     // for one column and `&self.spectrum` for the other, and re-running
     // the test above.
+
+    /// Split is what comes up with no flag. Asserted through
+    /// `decide_layout` at a width that can hold it, so this pins the
+    /// layout actually drawn rather than only the enum's discriminant -
+    /// a `Default` pointing at `Split` while `decide_layout` ignored it
+    /// would still pass an `assert_eq!(RequestedLayout::default(), ..)`.
+    #[test]
+    fn the_default_layout_is_split() {
+        assert_eq!(RequestedLayout::default(), RequestedLayout::Split);
+        assert_eq!(
+            decide_layout(RequestedLayout::default(), Rect::new(0, 0, 100, 24)),
+            LayoutMode::Split
+        );
+    }
+
+    /// Both layouts have to work, not just the default one: single pane
+    /// is the real product and split is the demo, and neither is allowed
+    /// to become the one that only renders by accident.
+    #[test]
+    fn both_layouts_draw_their_own_chrome_at_their_own_widths() {
+        let wired = modem_audio::WiredTransport::new(8000);
+
+        let single = App::single(pane(Role::Originate), &wired, Theme::default());
+        let mut buf = Buffer::empty(Rect::new(0, 0, 72, 24));
+        single.render_into(buf.area, &mut buf);
+        let title = row_text(&buf, 0);
+        assert!(
+            title.contains("modem") && title.contains("ORIGINATE"),
+            "single pane lost its own title bar: {title:?}"
+        );
+
+        let split = App::split(
+            pane(Role::Originate),
+            pane(Role::Answer),
+            &wired,
+            Theme::default(),
+        );
+        let mut buf2 = Buffer::empty(Rect::new(0, 0, 100, 24));
+        split.render_into(buf2.area, &mut buf2);
+        let title2 = row_text(&buf2, 0);
+        assert!(
+            title2.contains("ORIGINATE") && title2.contains("ANSWER"),
+            "split screen must title both ends on one row: {title2:?}"
+        );
+        assert!(
+            row_text(&buf2, 23).contains("F7 swap focus"),
+            "split screen must offer focus swapping"
+        );
+    }
 
     #[test]
     fn too_narrow_message_has_no_trailing_full_stop() {
