@@ -23,6 +23,7 @@
 //!    it - see `split_below_eighty_columns_shows_a_message_not_a_broken_layout`
 //!    and its mutation proof.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
@@ -33,6 +34,7 @@ use ratatui::widgets::Widget;
 
 use modem_audio::Transport;
 
+use crate::directory::Directory;
 use crate::draw;
 use crate::frame::{self, Title};
 use crate::pane::Pane;
@@ -101,6 +103,50 @@ pub struct App {
     sample_buffer: Vec<f32>,
     fft_size: usize,
     theme: Theme,
+    /// The dialling directory, shown as an overlay over the focused pane
+    /// while `Some` - see [`DirectoryOverlay`]'s own doc. `None` the rest
+    /// of the time; nothing is loaded from disk until `F2` is actually
+    /// pressed (see [`App::handle_key`]), so building an `App` never
+    /// touches the filesystem on its own.
+    directory_overlay: Option<DirectoryOverlay>,
+}
+
+/// The dialling directory's own overlay state - the loaded directory, the
+/// path it was loaded from (so the empty-directory message can say where
+/// it looked), and which entry is currently highlighted.
+///
+/// `F2` (see [`App::handle_key`]) always loads fresh from disk when
+/// opening - a hand-edited file is exactly the kind of thing somebody
+/// changes between calls, and re-reading it on every open is what makes
+/// that edit visible without restarting the whole application.
+struct DirectoryOverlay {
+    directory: Directory,
+    path: PathBuf,
+    /// An index into `directory.entries()` - `0` when the directory is
+    /// empty, same as everywhere else in this crate's own convention of
+    /// never letting an empty collection produce an out-of-range index.
+    selected: usize,
+}
+
+/// The next selection index, wrapping from the last entry back to the
+/// first. `len == 0` (no entries loaded, e.g. a missing file) always
+/// yields `0` rather than computing a modulus by zero.
+fn next_selection(selected: usize, len: usize) -> usize {
+    if len == 0 {
+        0
+    } else {
+        (selected + 1) % len
+    }
+}
+
+/// The previous selection index, wrapping from the first entry to the
+/// last - see [`next_selection`]'s own doc for the `len == 0` case.
+fn prev_selection(selected: usize, len: usize) -> usize {
+    if len == 0 {
+        0
+    } else {
+        (selected + len - 1) % len
+    }
 }
 
 impl App {
@@ -118,6 +164,7 @@ impl App {
             sample_buffer: Vec::new(),
             fft_size: modem_core::analyse::fft_size_for(sample_rate),
             theme,
+            directory_overlay: None,
         }
     }
 
@@ -135,6 +182,7 @@ impl App {
             sample_buffer: Vec::new(),
             fft_size: modem_core::analyse::fft_size_for(sample_rate),
             theme,
+            directory_overlay: None,
         }
     }
 
@@ -274,11 +322,22 @@ impl App {
     }
 
     /// Routes one key event to the focused pane, or to the app itself for
-    /// the keys this crate already has enough to act on (`F7` swap focus,
-    /// `F6` theme cycle, `F4` answer, `F10` hang up). `F1`/`F2`/`F3`/`F5`
-    /// are chrome only for now - help, the dialling directory (Task 18)
-    /// and the standalone waterfall view need UI this task does not
-    /// build, and dialling needs a number source Task 18 provides.
+    /// the keys this crate already has enough to act on (`F2` open the
+    /// dialling directory, `F7` swap focus, `F6` theme cycle, `F4`
+    /// answer, `F10` hang up). `F1`/`F3`/`F5` are still chrome only -
+    /// help and the standalone waterfall view need UI this task does not
+    /// build.
+    ///
+    /// **While the directory overlay is open, every key goes to it
+    /// instead of the pane** - see [`DirectoryOverlay`]'s own doc. Up and
+    /// Down move the selection and wrap at both ends
+    /// ([`next_selection`]/[`prev_selection`]); Enter dials the
+    /// highlighted entry through [`Pane::type_line`] (so the AT layer
+    /// sees a real `ATDT` command, not a special case) and closes the
+    /// overlay; Esc and a second `F2` close it without dialling. Nothing
+    /// else does anything while it is open - typing into the pane
+    /// underneath while browsing the directory would be confusing, not
+    /// useful.
     pub fn handle_key(&mut self, key: KeyEvent) {
         // Windows reports both press and release; Unix (without the
         // keyboard-enhancement protocol) reports only press. Acting on
@@ -287,7 +346,49 @@ impl App {
         if key.kind != KeyEventKind::Press {
             return;
         }
+
+        if let Some(overlay) = &mut self.directory_overlay {
+            match key.code {
+                KeyCode::Down => {
+                    overlay.selected =
+                        next_selection(overlay.selected, overlay.directory.entries().len());
+                }
+                KeyCode::Up => {
+                    overlay.selected =
+                        prev_selection(overlay.selected, overlay.directory.entries().len());
+                }
+                KeyCode::Enter => {
+                    // The command is built and the overlay is dropped
+                    // before `feed_focused_line` runs, so nothing here
+                    // can still be reading `overlay` once dialling
+                    // starts touching the focused pane.
+                    let dial = overlay
+                        .directory
+                        .entries()
+                        .get(overlay.selected)
+                        .map(|entry| format!("ATDT{}", entry.number));
+                    self.directory_overlay = None;
+                    if let Some(cmd) = dial {
+                        self.feed_focused_line(&cmd);
+                    }
+                }
+                KeyCode::Esc | KeyCode::F(2) => {
+                    self.directory_overlay = None;
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match key.code {
+            KeyCode::F(2) => {
+                let (directory, path) = Directory::load();
+                self.directory_overlay = Some(DirectoryOverlay {
+                    directory,
+                    path,
+                    selected: 0,
+                });
+            }
             KeyCode::F(7) => {
                 if self.panes.len() == 2 {
                     self.focus = 1 - self.focus;
@@ -321,6 +422,18 @@ impl App {
         }
     }
 
+    /// Types a whole line into the focused pane through [`Pane::type_line`],
+    /// one character at a time through the real `AtProcessor`, exactly as
+    /// a person would type it. Used by the directory overlay's Enter
+    /// handling so dialling a directory entry is indistinguishable, from
+    /// the AT layer's own point of view, from somebody typing `ATDT`
+    /// themselves.
+    fn feed_focused_line(&mut self, line: &str) {
+        if let Some(pane) = self.panes.get_mut(self.focus) {
+            pane.type_line(line);
+        }
+    }
+
     /// Advances every pane's clock by `dt` - see [`Pane::tick`].
     pub fn tick(&mut self, dt: Duration) {
         for pane in &mut self.panes {
@@ -338,10 +451,72 @@ impl App {
         // never the terminal emulator's own default, it was this near-
         // black phosphor ground.
         draw::fill(buf, area, ' ', Style::default().bg(crate::theme::GROUND));
-        match self.layout_mode(area) {
-            LayoutMode::TooNarrow => self.render_too_narrow(area, buf),
-            LayoutMode::Single => self.render_frame(area, buf, false),
-            LayoutMode::Split => self.render_frame(area, buf, true),
+        // `render_frame` hands back the focused pane's own content rect
+        // from the one `FrameLayout` it already computed - see `frame`'s
+        // own module doc on why there is only ever one such computation
+        // per frame - so the overlay draws into exactly the area the
+        // pane it covers actually occupies, never a second, possibly
+        // divergent, recomputation of the same layout.
+        let focused_rect = match self.layout_mode(area) {
+            LayoutMode::TooNarrow => {
+                self.render_too_narrow(area, buf);
+                None
+            }
+            LayoutMode::Single => Some(self.render_frame(area, buf, false)),
+            LayoutMode::Split => Some(self.render_frame(area, buf, true)),
+        };
+        if let (Some(overlay), Some(rect)) = (&self.directory_overlay, focused_rect) {
+            self.render_directory_overlay(overlay, rect, buf);
+        }
+    }
+
+    /// Draws the dialling directory over `area` - the focused pane's own
+    /// content rect, so the overlay never spills into the other pane in
+    /// split mode. Bounds-checked the same way every other widget in this
+    /// crate is (through [`draw::text`]/[`draw::fill`]), so this never
+    /// panics at any size, including one smaller than the overlay's own
+    /// content - see the size-sweep test below.
+    fn render_directory_overlay(&self, overlay: &DirectoryOverlay, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+        draw::fill(buf, area, ' ', Style::default().bg(crate::theme::GROUND));
+        let bright = Style::default().fg(self.theme.bright());
+        let dim = Style::default().fg(self.theme.dim());
+
+        let header = if overlay.directory.skipped() > 0 {
+            format!(
+                "dialling directory ({} skipped)",
+                overlay.directory.skipped()
+            )
+        } else {
+            "dialling directory".to_string()
+        };
+        draw::text(buf, area, area.left(), area.top(), &header, bright);
+
+        let mut y = area.top().saturating_add(1);
+        if overlay.directory.entries().is_empty() {
+            // The one thing this format must never do is fail silently -
+            // an empty overlay with no explanation reads as broken, not
+            // as "there is nothing here yet".
+            let msg = format!("no entries - looked in {}", overlay.path.display());
+            draw::text(buf, area, area.left(), y, &msg, dim);
+            return;
+        }
+
+        for (i, entry) in overlay.directory.entries().iter().enumerate() {
+            if y >= area.bottom() {
+                break;
+            }
+            let marker = if i == overlay.selected { '>' } else { ' ' };
+            let line = if entry.note.is_empty() {
+                format!("{marker} {}  {}", entry.name, entry.number)
+            } else {
+                format!("{marker} {}  {}  {}", entry.name, entry.number, entry.note)
+            };
+            let style = if i == overlay.selected { bright } else { dim };
+            draw::text(buf, area, area.left(), y, &line, style);
+            y = y.saturating_add(1);
         }
     }
 
@@ -353,7 +528,7 @@ impl App {
         draw::text(buf, area, area.left(), area.top(), &msg, Style::default());
     }
 
-    fn render_frame(&self, area: Rect, buf: &mut Buffer, split: bool) {
+    fn render_frame(&self, area: Rect, buf: &mut Buffer, split: bool) -> Rect {
         // The fkey bar is its own row below the outer frame, outside its
         // border - see the mockups. One row is reserved for it whenever
         // there is one to spare; on an area too short even for that, the
@@ -410,6 +585,12 @@ impl App {
         if let Some(fkey_area) = fkey_area {
             self.render_fkey_bar(buf, fkey_area, split);
         }
+
+        layout
+            .columns
+            .get(self.focus)
+            .copied()
+            .unwrap_or(frame_area)
     }
 
     fn titles(&self, split: bool) -> Vec<Title> {
@@ -579,19 +760,20 @@ impl App {
 }
 
 /// The function-key strip, single-pane. **Only keys [`App::handle_key`]
-/// actually acts on.** F1 help, F2 directory, F3 dial and F5 waterfall
-/// were all on this bar and none of them did anything - help and the
-/// standalone waterfall view have no UI yet, and dialling needs the
-/// directory Task 18 builds. Advertising a dead key costs width the
-/// frame needs to fit two windows side by side, and this project's whole
-/// argument is that it does not claim things it is not doing. They come
-/// back as their features land.
-const FKEY_BAR_SINGLE: &str = " F4 answer  F6 colour  F10 hang up";
+/// actually acts on.** F1 help, F3 dial (superseded by F2's own Enter-to-
+/// dial) and F5 waterfall were all on this bar and none of them did
+/// anything - help and the standalone waterfall view still have no UI.
+/// F2 comes back here with Task 18's dialling directory, now that there
+/// is a real number source and a real UI behind it. Advertising a dead
+/// key costs width the frame needs to fit two windows side by side, and
+/// this project's whole argument is that it does not claim things it is
+/// not doing. The rest come back as their own features land.
+const FKEY_BAR_SINGLE: &str = " F2 directory  F4 answer  F6 colour  F10 hang up";
 
 /// The same strip when split, with focus swapping in place of the colour
 /// cycle - both panes share one theme, so F6 has nothing pane-specific
 /// to say here.
-const FKEY_BAR_SPLIT: &str = " F4 answer  F7 swap focus  F10 hang up";
+const FKEY_BAR_SPLIT: &str = " F2 directory  F4 answer  F7 swap focus  F10 hang up";
 
 /// Hard-wraps `line` to `width` columns, the way a terminal does - no
 /// word breaking, because a modem transcript is a character grid and a
@@ -1244,5 +1426,213 @@ mod tests {
             !row.contains("F10 hang up"),
             "the keys, not the badge, are what gets cut: {row:?}"
         );
+    }
+
+    // --- Task 18: the dialling directory overlay -----------------------
+
+    /// Three entries with distinct, easily told-apart numbers - used by
+    /// every overlay test below. Built fresh each call rather than
+    /// shared, since `Directory` and `Entry` are cheap and a test that
+    /// mutates its own `App`'s overlay must never share state with
+    /// another test.
+    fn three_entry_directory() -> Directory {
+        Directory::parse(concat!(
+            "Alice\t01111111111\n",
+            "Bob\t02222222222\n",
+            "Carol\t03333333333\n",
+        ))
+    }
+
+    fn app_with_overlay(selected: usize) -> App {
+        let wired = modem_audio::WiredTransport::new(8000);
+        let mut app = App::single(pane(Role::Originate), &wired, Theme::default());
+        app.directory_overlay = Some(DirectoryOverlay {
+            directory: three_entry_directory(),
+            path: PathBuf::from("/tmp/does-not-matter-for-this-test.tsv"),
+            selected,
+        });
+        app
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        app.handle_key(KeyEvent::new(code, crossterm::event::KeyModifiers::NONE));
+    }
+
+    // Required test: wrapping over a full cycle, not a single step. The
+    // brief's own warning is that a `next` which always returned 0 would
+    // pass a test that only checks "after some downs, are we back at
+    // 0?" - starting selection is already 0, so that check alone cannot
+    // tell a genuine wrap from a `next` that never moves at all. Instead
+    // this records the selection after each of four consecutive Downs
+    // and checks the whole sequence: [1, 2, 0, 1]. The `0` at step three
+    // proves the wrap happened; the `1` at step four (not another 0)
+    // proves it did not get stuck there - a mutation that clamped at the
+    // end (proof 1) fails at step three (2 again, not 0), and a `next`
+    // that always returns 0 fails at step one already (0, not 1).
+    #[test]
+    fn down_wraps_through_a_full_cycle_and_keeps_advancing_correctly_past_the_wrap() {
+        let mut app = app_with_overlay(0);
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            press(&mut app, KeyCode::Down);
+            seen.push(app.directory_overlay.as_ref().unwrap().selected);
+        }
+        assert_eq!(
+            seen,
+            vec![1, 2, 0, 1],
+            "down must wrap at the end of a three-entry directory and keep advancing \
+             correctly afterwards, got {seen:?}"
+        );
+    }
+
+    #[test]
+    fn up_from_the_first_entry_wraps_to_the_last() {
+        let mut app = app_with_overlay(0);
+        press(&mut app, KeyCode::Up);
+        assert_eq!(
+            app.directory_overlay.as_ref().unwrap().selected,
+            2,
+            "up from entry 0 of a three-entry directory must wrap to entry 2"
+        );
+    }
+
+    // --- Mutation proof 1 (see the task report for the actual run):
+    // clamp instead of wrap - change `next_selection`/`prev_selection` to
+    // `(selected + 1).min(len - 1)` / `selected.saturating_sub(1)`. Both
+    // tests above must fail.
+
+    /// Required test: Enter dials the *highlighted* entry, not the
+    /// first. Deliberately never asserts on `SessionState` - reaching
+    /// `Dialling` proves nothing about which number was dialled, only
+    /// that dialling of some kind happened. The actual proof is the
+    /// literal `ATDT<digits>` line the third entry's own number produces,
+    /// found in the pane's real scrollback.
+    #[test]
+    fn enter_dials_the_highlighted_entry_not_the_first() {
+        let mut app = app_with_overlay(2); // Carol, the third entry
+        press(&mut app, KeyCode::Enter);
+
+        assert!(
+            app.directory_overlay.is_none(),
+            "Enter must close the overlay"
+        );
+        assert_eq!(
+            app.panes()[0].history().first(),
+            Some(&"ATDT03333333333".to_string()),
+            "Enter must dial the highlighted (third) entry's own number, not the first \
+             entry's - got history {:?}",
+            app.panes()[0].history()
+        );
+    }
+
+    // --- Mutation proof 2 (see the task report for the actual run): dial
+    // `entries[0]` unconditionally instead of `entries[overlay.selected]`
+    // - the test above must fail (it would dial Alice's number instead
+    // of Carol's).
+
+    /// Required test: Esc closes without dialling - no `ATDT` anywhere in
+    /// the scrollback afterwards.
+    #[test]
+    fn esc_closes_without_dialling() {
+        let mut app = app_with_overlay(1);
+        press(&mut app, KeyCode::Esc);
+
+        assert!(
+            app.directory_overlay.is_none(),
+            "Esc must close the overlay"
+        );
+        assert!(
+            !app.panes()[0].history().iter().any(|l| l.contains("ATDT")),
+            "Esc must never dial, got history {:?}",
+            app.panes()[0].history()
+        );
+    }
+
+    /// A second `F2` also closes without dialling - the forgiving
+    /// counterpart to Esc, not required by the brief but cheap to offer
+    /// and cheap to pin here.
+    #[test]
+    fn a_second_f2_closes_the_overlay_without_dialling() {
+        let mut app = app_with_overlay(1);
+        press(&mut app, KeyCode::F(2));
+        assert!(app.directory_overlay.is_none());
+        assert!(!app.panes()[0].history().iter().any(|l| l.contains("ATDT")));
+    }
+
+    /// Required test: an empty directory renders a message saying where
+    /// it looked, and does not panic.
+    #[test]
+    fn empty_directory_overlay_says_where_it_looked_and_does_not_panic() {
+        let wired = modem_audio::WiredTransport::new(8000);
+        let mut app = App::single(pane(Role::Originate), &wired, Theme::default());
+        app.directory_overlay = Some(DirectoryOverlay {
+            directory: Directory::parse(""),
+            path: PathBuf::from("/home/example/.config/modem/directory.tsv"),
+            selected: 0,
+        });
+
+        let mut buf = Buffer::empty(Rect::new(0, 0, 72, 24));
+        app.render_into(buf.area, &mut buf);
+
+        let rows: Vec<String> = (0..buf.area.height).map(|y| row_text(&buf, y)).collect();
+        assert!(
+            rows.iter()
+                .any(|r| r.contains("/home/example/.config/modem/directory.tsv")),
+            "an empty directory must say where it looked: {rows:?}"
+        );
+    }
+
+    /// Required test: the overlay renders at a range of sizes without
+    /// panicking, including sizes smaller than the overlay's own content
+    /// (three entries plus a header needs at least four rows, and the
+    /// longest line here is well over ten columns wide).
+    #[test]
+    fn directory_overlay_renders_at_a_range_of_sizes_without_panicking() {
+        let wired = modem_audio::WiredTransport::new(8000);
+        for width in [0u16, 1, 2, 5, 10, 30, 72, 100] {
+            for height in [0u16, 1, 2, 3, 10, 24] {
+                let mut app = App::single(pane(Role::Originate), &wired, Theme::default());
+                app.directory_overlay = Some(DirectoryOverlay {
+                    directory: three_entry_directory(),
+                    path: PathBuf::from("/tmp/does-not-matter-for-this-test.tsv"),
+                    selected: 1,
+                });
+                let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
+                app.render_into(buf.area, &mut buf);
+            }
+        }
+    }
+
+    /// The selected entry's own line must actually look different from
+    /// the others once rendered, not merely carry a different `selected`
+    /// index internally that nothing on screen reflects.
+    #[test]
+    fn the_highlighted_entry_is_visibly_marked_in_the_rendered_overlay() {
+        let app = app_with_overlay(1); // Bob
+        let mut buf = Buffer::empty(Rect::new(0, 0, 72, 24));
+        app.render_into(buf.area, &mut buf);
+
+        let rows: Vec<String> = (0..buf.area.height).map(|y| row_text(&buf, y)).collect();
+        assert!(
+            rows.iter().any(|r| r.contains("> Bob")),
+            "the selected entry (Bob) must carry a visible marker immediately before its \
+             name, got {rows:?}"
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|r| r.contains("> Alice") || r.contains("> Carol")),
+            "only the selected entry may carry the marker, got {rows:?}"
+        );
+    }
+
+    #[test]
+    fn the_fkey_bar_advertises_f2_directory_before_it_is_ever_opened() {
+        let wired = modem_audio::WiredTransport::new(8000);
+        let app = App::single(pane(Role::Originate), &wired, Theme::default());
+        assert!(app.directory_overlay.is_none());
+        let mut buf = Buffer::empty(Rect::new(0, 0, 72, 24));
+        app.render_into(buf.area, &mut buf);
+        assert!(row_text(&buf, 23).contains("F2 directory"));
     }
 }
