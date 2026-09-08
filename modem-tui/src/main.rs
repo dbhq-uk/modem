@@ -106,7 +106,13 @@ fn print_help() {
     println!("  --acoustic   use the real sound card instead of the wired demo transport");
     println!();
     println!("Dial with ATDT<digits>, answer with ATA - typed into either pane, followed");
-    println!("by Enter. F4 answers, F7 swaps focus, F10 hangs up. Ctrl+C quits.");
+    println!("by Enter. F2 opens the dialling directory (Up/Down to pick, Enter to dial,");
+    println!("Esc to close), F4 answers, F7 swaps focus, F10 hangs up. Ctrl+C quits.");
+    println!();
+    println!("The dialling directory reads $MODEM_DIRECTORY, or else");
+    println!("$XDG_CONFIG_HOME/modem/directory.tsv, or else ~/.config/modem/directory.tsv.");
+    println!("Tab-separated name/number/note, one per line, note optional, '#' at the very");
+    println!("start of a line for a comment. This binary only ever reads that file.");
 }
 
 fn main() {
