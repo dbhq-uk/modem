@@ -1,0 +1,33 @@
+/*
+ * GENERATED FILE. Do not hand-edit - edit brand/tokens.json and/or brand/_gen/tokens.py, then run `python3 brand/_gen/tokens.py`.
+ * Source: brand/tokens.json
+ */
+:root {
+  --modem-ground: #0A0A0A;
+
+  --modem-white-bright: #E8E8D8;
+  --modem-white-dim: #74746C;
+  --modem-green-bright: #33FF33;
+  --modem-green-dim: #198019;
+  --modem-amber-bright: #FFB000;
+  --modem-amber-dim: #805800;
+  --modem-error: #FF3333;
+
+  --modem-type-face: ui-monospace, 'Cascadia Code', 'Cascadia Mono', 'JetBrains Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+  --modem-type-scale-small: 0.8rem;
+  --modem-type-scale-base: 1.0rem;
+  --modem-type-scale-large: 1.25rem;
+  --modem-type-scale-xlarge: 2.0rem;
+
+  --modem-spacing-unit: 1ch;
+  --modem-line-height-ratio: 1.4;
+  --modem-space-xs: 1ch;
+  --modem-space-sm: 2ch;
+  --modem-space-md: 4ch;
+  --modem-space-lg: 8ch;
+
+  --modem-scanline-opacity: 0.15;
+  --modem-scanline-pitch: 2px;
+  --modem-bloom-radius: 6px;
+  --modem-phosphor-decay: 2.56s;
+}

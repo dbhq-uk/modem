@@ -21,6 +21,8 @@
 //! - [`spectrum`] - the plain-data argument that boundary is built on.
 //! - [`pane`] - one end's protocol state plus its terminal emulation.
 //! - [`directory`] - the hand-editable dialling directory (Task 18).
+//! - [`tokens`] - the generated design tokens `theme` builds its palette
+//!   from - see that module's own doc.
 //! - [`app`] - ties it all together: layout choice, focus, key handling.
 
 pub mod app;
@@ -30,6 +32,7 @@ pub mod frame;
 pub mod pane;
 pub mod spectrum;
 pub mod theme;
+pub mod tokens;
 pub mod waterfall;
 
 pub use app::{App, LayoutMode, RequestedLayout};
