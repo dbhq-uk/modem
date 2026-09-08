@@ -928,13 +928,18 @@ section {
   border-bottom: none;
 }
 
-/* Padding lives on the link itself, not just the row around it, so the
-   tappable area is the anchor's own box (roughly 54px tall at the base
-   type scale) rather than dead space in the row's margin that looks
-   clickable but is not - see the touch-target note on dial-button etc.
-   in the Mobile section for the same reasoning applied elsewhere. */
+/* The tappable area is the anchor's own box, not dead space in the
+   row's margin that looks clickable but is not - see the touch-target
+   note on dial-button etc. in the Mobile section for the same
+   reasoning applied elsewhere. min-height is set directly rather than
+   left to padding alone: 1ch of vertical padding is a character
+   width, not a character height, so it measured under 44px on its
+   own. inline-flex centres a title that wraps to two lines on a
+   narrow phone just as well as one that does not. */
 .resource-row__link {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   padding: var(--modem-space-xs) 0;
   font-size: var(--modem-type-scale-base);
 }
