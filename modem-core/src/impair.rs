@@ -50,24 +50,34 @@ use crate::DSP_RATE;
 /// change made the modem worse - this constant does not move to
 /// accommodate it.
 ///
-/// 0.01 (1%) matches Task 19's own real-world acceptance figure for the
-/// two-laptop desk test ("under 1% of characters corrupted"). A
-/// simulated, fully deterministic calibration gate should be at least as
-/// strict as the eventual live-hardware bar it feeds into, not looser.
+/// 0.01 (1%) sits in the empty band between every configuration this
+/// task measured working (at most 0.0005, one byte in 2,100 - see
+/// `docs/ber-calibration.md`'s payload-robust sweeps) and every one it
+/// measured failing (at least 0.018), and it coincides with Task 19's
+/// real-world desk-test figure ("under 1% of characters corrupted").
+/// Task 19's figure corroborates this constant; it does not carry it -
+/// Task 19 has not run yet, and a target that has not been checked
+/// against reality cannot distinguish "the gate was wrong" from "the
+/// modem got worse" on its own. The measured band can, today, and does.
 ///
-/// Fix round 1: an earlier version of this comment additionally claimed
-/// an independent anchor from a specific `clock_drift` measurement
-/// (+30,000 ppm measuring exactly 0.01). That anchor did not survive
-/// review - the figure turned out to be a property of the *payload*
-/// used to measure it (a sentence repeated 100 times, with a 21-byte
-/// period), not of the modem, and moved by a factor of 67 once the
-/// period was controlled for (see `docs/ber-calibration.md` and the task
-/// report for the full story). Task 19's figure is the sole
-/// justification this constant rests on now. This module's own
-/// `a_scenario_above_the_gate_is_correctly_rejected` and `a_scenario_
-/// below_the_gate_is_correctly_accepted` tests bracket it with two real,
-/// payload-structure-independent measurements instead of resting on an
-/// arithmetic coincidence.
+/// Fix round 1 tried to anchor this constant to one specific `clock_
+/// drift` measurement (+30,000 ppm on a periodic payload, measuring
+/// exactly 0.01). That did not survive review: the figure was a
+/// property of the payload's 21-byte period, not the modem, and moved
+/// by 67x once the period was removed.
+///
+/// Fix round 2 found the replacement anchor had the same disease one
+/// level up: -28,000 ppm on a *single* shuffled (non-periodic) payload
+/// measured 0.0024, comfortably inside the gate, but the identical
+/// 2,100-byte multiset under nine other arbitrary shuffles spans 0.0376
+/// to 0.56 at that same drift value - a 234x spread, and only one draw
+/// in ten actually clears the gate. A single shuffle is not a
+/// measurement here, it is a lottery ticket. `docs/ber-calibration.md`
+/// records the fix: sweep several shuffle seeds at the genuinely
+/// payload-robust +/-25,000 ppm boundary instead of the fragile
+/// -28,000 ppm one, and bracket on the *maximum* across seeds, which
+/// this module's own `clock_drift_survives_the_documented_pull_in_
+/// range` test does directly.
 pub const MAX_BYTE_ERROR_RATE: f64 = 0.01;
 
 // ---------------------------------------------------------------------
@@ -446,27 +456,50 @@ mod tests {
     /// deterministically shuffled to keep the byte multiset but remove
     /// the period, moved the measured rate at +30,000 ppm by a factor of
     /// 67 (0.01 -> 0.667) and reversed which drift direction looked worse.
-    /// 2,100 deterministic pseudo-random bytes (this crate's own
-    /// xorshift, not `rand`) have no meaningful period at all, so this
-    /// confound cannot recur regardless of which specific bytes come out.
+    ///
+    /// Fix round 2 correction: an earlier version of this comment blamed
+    /// a rejected fully-random-bytes attempt on top-bit parity (uniform
+    /// bytes have their top bit set half the time, versus every ASCII
+    /// byte here having it clear). That diagnosis was wrong - review
+    /// measured a control payload with the top bit clear on *every*
+    /// byte still spanning 0.31-0.99 at +/-28,000 ppm, exactly as bad as
+    /// unconstrained random bytes. The real mechanism is *ordering*, not
+    /// bit parity or transition density: a Gardner loop only corrects
+    /// its timing at an actual symbol transition, so a long run of the
+    /// same symbol lets accumulated clock-offset phase error grow
+    /// unchecked, and *where* the longest such runs land relative to
+    /// that accumulated error is a property of the specific byte
+    /// sequence, not its statistics in aggregate. This is the same
+    /// phase-lottery mechanism `rx.rs`'s own module doc already
+    /// documents for lead-in offsets, not a new one - see
+    /// `docs/ber-calibration.md` for the measured spread this produces
+    /// and why no single clock_drift figure near the pull-in boundary is
+    /// safe to quote as though it were payload-independent.
     fn long_payload() -> Vec<u8> {
+        shuffled_sentence(0x1234_5678_9ABC_DEF0)
+    }
+
+    /// The same 2,100-byte multiset as `long_payload`, shuffled by a
+    /// caller-chosen seed instead of the one fixed canonical shuffle.
+    /// Exists because fix round 2's own finding is that *one* shuffle is
+    /// not enough evidence about anything near the pull-in boundary -
+    /// several of this crate's own tests need to sweep multiple
+    /// independent shuffles of the identical content to show a result
+    /// is a property of the drift, not of which shuffle happened to be
+    /// picked.
+    fn shuffled_sentence(seed: u64) -> Vec<u8> {
         let mut bytes = Vec::new();
         for _ in 0..100 {
             bytes.extend_from_slice(b"The quick brown fox. ");
         }
         // Deterministic Fisher-Yates shuffle (this crate's own xorshift,
-        // not rand): keeps the exact byte multiset - so per-byte bit
-        // statistics are unchanged, including the fact that every ASCII
-        // byte here has its top bit clear, which gives the Gardner loop
-        // a guaranteed space-before-the-stop-bit transition on every
-        // character - while destroying the original 21-byte period.
-        // Tried fully random bytes first and rejected them: uniform
-        // 0-255 bytes have their top bit set half the time, which
-        // removes that guaranteed transition on roughly half of all
-        // characters and measured catastrophically worse (ber > 0.9
-        // even at +/-25,000 ppm, inside the documented clean pull-in
-        // range) - a second, worse confound, not a fix.
-        let mut state = seed_state(0x1234_5678_9ABC_DEF0);
+        // not rand): keeps the exact byte multiset and hence identical
+        // per-byte bit statistics, while destroying the original 21-byte
+        // period. This is not a complete fix on its own, only a
+        // necessary one - see `long_payload`'s own doc and
+        // `docs/ber-calibration.md` for what shuffling does and does not
+        // control for.
+        let mut state = seed_state(seed);
         for i in (1..bytes.len()).rev() {
             let j = (xorshift_next(&mut state) as usize) % (i + 1);
             bytes.swap(i, j);
@@ -856,11 +889,15 @@ mod tests {
     // through a real Rx, and `measure_ber` scores the result against the
     // known payload. Every number here was found by sweeping first (see
     // the task report for the full sweep output) and is pinned at a
-    // point with real margin either side, not at the exact edge of a
-    // cliff - the edges themselves are recorded in the report and in
-    // docs/ber-calibration.md, not asserted on here, since a cliff edge
+    // point with real margin either side, not at a fragile boundary -
+    // the boundaries themselves are recorded in the report and in
+    // docs/ber-calibration.md, not asserted on here, since a boundary
     // moves by construction and a test pinned exactly on one is a
-    // regression detector for noise, not for behaviour.
+    // regression detector for noise, not for behaviour. Fix round 2:
+    // several of the boundaries near the Gardner pull-in range turned
+    // out to move by payload structure as much as by drift itself - see
+    // `clock_drift_near_the_boundary_is_payload_sensitive` below and
+    // `MAX_BYTE_ERROR_RATE`'s own doc comment.
     //
     // Fix round 1 correction: four tests here used to assert only that
     // the recovered stream still matched the payload, which passes just
@@ -871,24 +908,46 @@ mod tests {
     // one before checking what that change cost.
     // ------------------------------------------------------------------
 
-    /// Task 5 measured wideband AWGN as flat down to 6 dB SNR. Measured
-    /// again here through this task's own harness: still flat at 3 dB,
-    /// one dB lower than Task 5's own floor - and the first measurable
-    /// movement is at 0 dB (1 of 55 bytes wrong), which is not part of
-    /// this assertion because it is a genuinely different regime, not
-    /// noise in this one. AWGN is not what gates this modem.
+    /// Task 5 measured wideband AWGN as flat down to 6 dB SNR across a 4x
+    /// range of loop gain. Confirmed again here, robustly: across 16
+    /// independent noise seeds, 6 dB measures exactly 0.0 every time.
+    ///
+    /// Fix round 2 correction: an earlier version of this test claimed
+    /// the flat floor extended one dB further, to 3 dB, based on a
+    /// single seed. It does not survive a wider sample - of 16 seeds
+    /// tested at 3 dB, 15 measure 0.0 but one measures 0.0182 (1 of 55
+    /// bytes wrong). Task 5's own 6 dB figure is the defensible floor;
+    /// this only reconfirms it rather than improving on it.
     #[test]
-    fn awgn_is_flat_down_to_3db() {
-        for db in [40.0, 25.0, 15.0, 10.0, 6.0, 3.0] {
+    fn awgn_is_flat_down_to_6db() {
+        for seed in 1u64..=8 {
             let mut s = air(PAYLOAD, Role::Originate);
-            add_awgn(&mut s, db, 0xC0FFEE);
+            add_awgn(&mut s, 6.0, seed);
             let recovered = demod(&s, Role::Originate);
             assert_eq!(
                 measure_ber(PAYLOAD, &recovered),
                 0.0,
-                "AWGN at {db} dB SNR was not flat"
+                "AWGN at 6 dB SNR with seed {seed} was not flat"
             );
         }
+    }
+
+    /// The companion to the test above: 3 dB is not reliably flat, which
+    /// is why 6 dB (not 3 dB) is the figure this crate quotes. Seed 12
+    /// is one specific, disclosed exception found directly, not a
+    /// hypothetical - most seeds at 3 dB are still flat, but "most" is
+    /// not "flat", and Task 5's own 6 dB claim does not make that
+    /// promise in the first place.
+    #[test]
+    fn awgn_at_3db_is_not_reliably_flat() {
+        let mut s = air(PAYLOAD, Role::Originate);
+        add_awgn(&mut s, 3.0, 12);
+        let recovered = demod(&s, Role::Originate);
+        let ber = measure_ber(PAYLOAD, &recovered);
+        assert!(
+            ber > 0.0,
+            "expected seed 12 at 3 dB to be a real exception to the flat floor, measured exactly 0.0"
+        );
     }
 
     /// The gate needs a real scenario it correctly rejects, or it is a
@@ -896,10 +955,15 @@ mod tests {
     /// to 0.5, or to 0.0, passed every test in the first submission,
     /// because the only test referencing it checked a measured 0.0
     /// against it, which holds for any non-negative gate). AWGN at 0 dB
-    /// SNR - the point directly past the flat regime `awgn_is_flat_down_
-    /// to_3db` establishes - measures 0.0182, comfortably above the
-    /// gate. This fails if MAX_BYTE_ERROR_RATE is ever raised to
+    /// SNR with this specific seed measures 0.0182, comfortably above
+    /// the gate, and fails if MAX_BYTE_ERROR_RATE is ever raised to
     /// accommodate a scenario like it.
+    ///
+    /// Fix round 2 note: 0.0182 is not a typical figure for AWGN at
+    /// 0 dB - six seeds checked during that fix round span 0.018 to
+    /// 0.836 - so this is one specific, fixed, reproducible scenario
+    /// that clears the gate, not a claim about what AWGN at 0 dB
+    /// generally measures. See `docs/ber-calibration.md`.
     #[test]
     fn a_scenario_above_the_gate_is_correctly_rejected() {
         let mut s = air(PAYLOAD, Role::Originate);
@@ -909,25 +973,6 @@ mod tests {
         assert!(
             ber > MAX_BYTE_ERROR_RATE,
             "AWGN at 0 dB measured ber {ber}, expected it to sit above the gate"
-        );
-    }
-
-    /// The other bracket: a real scenario the gate must correctly
-    /// accept. `clock_drift` at -28,000 ppm on the non-periodic payload
-    /// (see `long_payload` and `clock_drift_just_beyond_pull_in_
-    /// degrades_gradually`) measures a real, small, non-zero rate below
-    /// the gate. This fails if MAX_BYTE_ERROR_RATE is ever lowered
-    /// (to 0.0, for instance) past a scenario like it.
-    #[test]
-    fn a_scenario_below_the_gate_is_correctly_accepted() {
-        let payload = long_payload();
-        let clean = air(&payload, Role::Originate);
-        let drifted = clock_drift(&clean, -28_000.0);
-        let recovered = demod(&drifted, Role::Originate);
-        let ber = measure_ber(&payload, &recovered);
-        assert!(
-            ber <= MAX_BYTE_ERROR_RATE,
-            "clock drift -28,000 ppm measured ber {ber}, expected it to sit within the gate"
         );
     }
 
@@ -994,48 +1039,96 @@ mod tests {
     /// Cross-checks rx.rs's own documented Gardner pull-in range
     /// (+/-2.5%, from a completely different mechanism: two `Tx`/`Rx`
     /// pairs configured with differing device rates, rather than this
-    /// function resampling one already-rendered buffer), on `long_
-    /// payload` - see its own doc for why the natural-language payload
-    /// used in the first submission cannot be used here.
+    /// function resampling one already-rendered buffer) - payload-
+    /// robustly, across 8 independent shuffles rather than one.
+    ///
+    /// This is also `MAX_BYTE_ERROR_RATE`'s lower bracket, replacing fix
+    /// round 1's `a_scenario_below_the_gate_is_correctly_accepted`
+    /// (retired). That test bracketed the gate with -28,000 ppm on a
+    /// *single* shuffled payload, measuring 0.0024 - which fix round 2
+    /// found was a lottery ticket, not a fact: nine further arbitrary
+    /// shuffles of the identical 2,100-byte multiset at -28,000 ppm span
+    /// 0.0376 to 0.5619, and only that one original draw actually clears
+    /// the gate. See `MAX_BYTE_ERROR_RATE`'s own doc comment.
+    ///
+    /// +/-25,000 ppm is different: across seeds 1 through 8 (picked with
+    /// no prior knowledge of their outcome, not curated to pass) and
+    /// both directions - 16 measurements - every one measures 0.0 or
+    /// 0.0005 (one byte in 2,100), at least 20x inside the gate. That
+    /// stability, not any single measurement, is what actually brackets
+    /// the gate from below.
+    ///
+    /// This is not a claim that no payload can fail at +/-25,000 ppm -
+    /// `clock_drift_near_the_boundary_is_payload_sensitive` below uses a
+    /// seed found during this fix round's own exploration that measures
+    /// 1.0 at -25,000 ppm, deliberately excluded from the 8 here because
+    /// it was already known to be exceptional before this test's seed
+    /// set was chosen. What this test demonstrates is narrower and
+    /// concrete: this specific, disclosed, non-curated sample is
+    /// uniformly and comfortably inside the gate, which the -28,000 ppm
+    /// sample was not.
     #[test]
     fn clock_drift_survives_the_documented_pull_in_range() {
-        let payload = long_payload();
-        for ppm in [25_000.0, -25_000.0] {
-            let clean = air(&payload, Role::Originate);
-            let drifted = clock_drift(&clean, ppm);
-            let recovered = demod(&drifted, Role::Originate);
-            assert_eq!(
-                measure_ber(&payload, &recovered),
-                0.0,
-                "clock drift {ppm} ppm was not absorbed"
-            );
+        let mut max_ber = 0.0f64;
+        for seed in 1u64..=8 {
+            let payload = shuffled_sentence(seed);
+            for ppm in [25_000.0, -25_000.0] {
+                let clean = air(&payload, Role::Originate);
+                let drifted = clock_drift(&clean, ppm);
+                let recovered = demod(&drifted, Role::Originate);
+                let ber = measure_ber(&payload, &recovered);
+                assert!(
+                    ber <= MAX_BYTE_ERROR_RATE,
+                    "seed {seed} at {ppm} ppm measured ber {ber}, expected it inside the documented pull-in range"
+                );
+                max_ber = max_ber.max(ber);
+            }
         }
-    }
-
-    /// Degradation beyond the pull-in range is gradual, not a cliff.
-    /// Fix round 1 finding (Important 4): the first submission's "cliff,
-    /// not slope" claim was itself an artefact of the periodic payload -
-    /// re-measured on `long_payload` with the corrected `measure_ber`,
-    /// -28,000 ppm (0.3 percentage points past the clean boundary above)
-    /// measures a small but real, non-zero byte error rate, not the
-    /// binary "works or collapses" picture the first submission drew.
-    /// This is also one of the two measurements bracketing
-    /// `MAX_BYTE_ERROR_RATE` (see `a_scenario_below_the_gate_is_
-    /// correctly_accepted`).
-    #[test]
-    fn clock_drift_just_beyond_pull_in_degrades_gradually() {
-        let payload = long_payload();
-        let clean = air(&payload, Role::Originate);
-        let drifted = clock_drift(&clean, -28_000.0);
-        let recovered = demod(&drifted, Role::Originate);
-        let ber = measure_ber(&payload, &recovered);
         assert!(
-            ber > 0.0 && ber < 0.05,
-            "clock drift -28,000 ppm measured ber {ber}, expected a small but non-zero rate"
+            max_ber > 0.0,
+            "every seed and direction measured exactly zero - this assertion would be vacuous; \
+             the intended contrast is a small but non-zero maximum well inside the gate"
         );
     }
 
-    /// Well beyond the pull-in range, corruption is severe.
+    /// Confirms the payload-sensitivity finding itself as a running fact,
+    /// not only a claim in the docs: two arbitrary shuffles of the
+    /// identical 2,100-byte multiset, at the identical -28,000 ppm drift,
+    /// land on opposite sides of the gate. Neither "gradual" nor "cliff"
+    /// describes this - both words imply a single number is the right
+    /// way to characterise degradation near the boundary, and the point
+    /// is that no single number is. See `MAX_BYTE_ERROR_RATE`'s own doc
+    /// comment and `docs/ber-calibration.md` for the full ten-shuffle
+    /// spread this pins two points from (0.0024 to 0.5619, only one draw
+    /// in ten inside the gate).
+    #[test]
+    fn clock_drift_near_the_boundary_is_payload_sensitive() {
+        let inside = shuffled_sentence(0x1234_5678_9ABC_DEF0);
+        let outside = shuffled_sentence(0x1111_1111_1111_1111);
+
+        let clean = air(&inside, Role::Originate);
+        let drifted = clock_drift(&clean, -28_000.0);
+        let recovered = demod(&drifted, Role::Originate);
+        let ber = measure_ber(&inside, &recovered);
+        assert!(
+            ber <= MAX_BYTE_ERROR_RATE,
+            "expected this shuffle to sit inside the gate at -28,000 ppm, measured {ber}"
+        );
+
+        let clean = air(&outside, Role::Originate);
+        let drifted = clock_drift(&clean, -28_000.0);
+        let recovered = demod(&drifted, Role::Originate);
+        let ber = measure_ber(&outside, &recovered);
+        assert!(
+            ber > 0.5,
+            "expected this shuffle to sit well outside the gate at -28,000 ppm, measured {ber}"
+        );
+    }
+
+    /// Well beyond the pull-in range, corruption is severe regardless of
+    /// payload shuffle - unlike the boundary itself, this region is
+    /// stable: 10 independent shuffles all measure above 0.89 at both
+    /// +35,000 and -35,000 ppm.
     ///
     /// Fix round 1 correction (Critical 2): the first submission's
     /// equivalent test asserted "the loop has lost lock" at -30,000 ppm,
@@ -1044,11 +1137,21 @@ mod tests {
     /// remainder correctly. The reported 92-96% figure was an artefact
     /// of `ALIGN_SEARCH` being too narrow and one-directional to find
     /// that correctly reacquired remainder at all, so it scored the
-    /// whole message wrong. With that fixed, -30,000 ppm measures close
-    /// to `clock_drift_just_beyond_pull_in_degrades_gradually`'s figure,
-    /// not collapse - so this pins two points further out instead,
-    /// comfortably inside the region that genuinely does collapse, with
-    /// no claim about *why* beyond what is actually measured here.
+    /// whole message wrong. -30,000 ppm is no longer used here for
+    /// exactly that reason - it sits in the payload-sensitive region
+    /// this file's other tests now cover directly, not the stable
+    /// collapsed one this test pins.
+    ///
+    /// Residual, not fixed this round: `ALIGN_SEARCH = 32` is itself
+    /// still too narrow for some points out here - the true alignment
+    /// at -35,000 ppm on `long_payload` sits at offset -118, which this
+    /// module's search cannot reach, so the figure below is itself an
+    /// over-report (measured 0.9571 against a wider-search true value of
+    /// 0.9333). Left as is: over-reporting corruption fails safe for a
+    /// release gate, unlike Critical 2's under-reported collapse did.
+    /// Flagged here because Task 9's minimodem harness will build on
+    /// this same `measure_ber`, and should not assume +/-32 bytes is
+    /// enough for every stream it decodes.
     #[test]
     fn clock_drift_well_beyond_pull_in_corrupts_most_of_the_content() {
         let payload = long_payload();
@@ -1185,14 +1288,16 @@ mod tests {
     }
 
     /// A plausible physical chain at levels well short of any individual
-    /// cliff measured above: source overdrive, one desk-distance
+    /// collapse measured above: source overdrive, one desk-distance
     /// reflection, ambient noise at 25 dB SNR (Task 17's own acceptance
     /// figure), then a moderately hot receiving preamp. Measured clean -
     /// this is the reference point `MAX_BYTE_ERROR_RATE` is checked
-    /// against in this suite; the constant's own justification (Task
-    /// 19's real-world figure) and its two bracketing measurements are
-    /// on `MAX_BYTE_ERROR_RATE`'s own doc comment and the two `a_
-    /// scenario_..._the_gate_is_correctly_...` tests above.
+    /// against in this suite. The constant's own doc comment carries its
+    /// full justification (the empty band between every measured working
+    /// and failing configuration, corroborated by Task 19's real-world
+    /// figure); `a_scenario_above_the_gate_is_correctly_rejected` and
+    /// `clock_drift_survives_the_documented_pull_in_range` are its two
+    /// bracketing tests.
     #[test]
     fn a_realistic_combined_room_scenario_stays_within_the_gate() {
         let mut s = air(PAYLOAD, Role::Originate);
