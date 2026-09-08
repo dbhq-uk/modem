@@ -3,7 +3,7 @@
 The release gate for this modem. `modem-core::impair::MAX_BYTE_ERROR_RATE` is fixed by the measurements below and does not move upward afterwards - a later change that pushes the measured rate above it has made the modem worse, not the gate wrong.
 
 **Measured:** 8th September 2026 (fix round 3)
-**Commit:** see the task report for the exact commit this fix round lands on
+**Commit:** `dd368d8` (`fix(core): fix round 3 - brackets are existence claims, not universal ones`)
 **Toolchain:** rustc 1.98.1, cargo 1.98.1
 
 ## Fix round 3: a bracket is an existence claim, not a universal one
