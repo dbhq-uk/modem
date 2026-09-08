@@ -1,0 +1,130 @@
+name: deploy
+
+# Push to main -> modem.dbhq.uk is deployed, the edge cache purged, and the
+# result verified with a cache-buster. The purge is the step that gets
+# forgotten by hand, and forgetting it means the site silently serves stale
+# files. It is not optional.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "brand/**"
+      - "modem-wasm/**"
+      - "modem-core/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-modem
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # Actions pinned to commit SHAs, not tags - a hijacked tag would run
+      # with our Cloudflare credentials in scope.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      # The committed web/modem.wasm is what the page actually loads, so it is
+      # rebuilt here and compared rather than trusted. A stale artifact would
+      # ship a page running different DSP from the source beside it, which is
+      # exactly the kind of quiet drift this project keeps guarding against.
+      - name: Rebuild the worklet artifact and check it matches what is committed
+        run: |
+          set -euo pipefail
+          cargo build --release --target wasm32-unknown-unknown \
+            -p modem-wasm --no-default-features
+          BUILT=target/wasm32-unknown-unknown/release/modem_wasm.wasm
+          if ! cmp -s "$BUILT" web/modem.wasm; then
+            echo "web/modem.wasm does not match a fresh build of modem-wasm."
+            echo "Rebuild it and commit the result before deploying."
+            exit 1
+          fi
+          echo "committed wasm matches the source"
+
+      # The page loads brand/tokens.css and brand/icon.svg from a sibling
+      # directory, so the upload is the repo root minus everything that is not
+      # servable. Assembled explicitly rather than uploading the whole tree:
+      # this is a public repo and the source has no business being served.
+      - name: Assemble the upload
+        run: |
+          set -euo pipefail
+          mkdir -p dist/web dist/brand
+          cp web/*.html web/*.js web/*.css web/*.png web/*.wasm dist/web/ 2>/dev/null || true
+          # _headers has no extension, so it needs naming explicitly. It
+          # carries the CSP that permits WASM instantiation; without it the
+          # demo is blocked at the edge.
+          cp web/_headers dist/web/
+          cp brand/tokens.css brand/icon.svg brand/icon-*.png brand/favicon.ico dist/brand/
+          cp brand/wordmark.svg dist/brand/ 2>/dev/null || true
+          # The page is served at the root, not at /web/.
+          mv dist/web/* dist/
+          rmdir dist/web
+          ls -la dist
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler pages deploy dist --project-name modem --branch main
+
+      # The token goes in via env, not interpolated into the command line, so
+      # it cannot surface in a traced command or an error message.
+      - name: Purge the Cloudflare cache
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ZONE: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        run: |
+          set -euo pipefail
+          RESP=$(curl -sf -X POST \
+            -H "Authorization: Bearer ${CF_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/zones/${CF_ZONE}/purge_cache" \
+            --data '{"purge_everything":true}')
+          echo "$RESP"
+          echo "$RESP" | grep -q '"success":true'
+
+      # Cache-busted: a plain request can still be served a stale edge copy
+      # right after a purge.
+      - name: Verify the deploy is live
+        run: |
+          set -euo pipefail
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/?cb=${GITHUB_SHA}")
+          echo "modem.dbhq.uk -> $CODE"
+          [ "$CODE" = "200" ]
+
+      # The demo is the entire point of the page, and it cannot run without
+      # the WASM. A 200 on the HTML with a 404 on the payload is a page that
+      # looks fine and does nothing.
+      - name: The WASM payload must be serving
+        run: |
+          set -euo pipefail
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/modem.wasm?cb=${GITHUB_SHA}")
+          echo "modem.wasm -> $CODE"
+          [ "$CODE" = "200" ]
+
+      # AudioWorklet instantiation needs 'wasm-unsafe-eval' in script-src.
+      # Without it the demo fails at the edge and works perfectly in local
+      # testing, which is the worst possible way to find out.
+      - name: The CSP must permit WASM
+        run: |
+          set -euo pipefail
+          CSP=$(curl -sI "https://modem.dbhq.uk/?cb=${GITHUB_SHA}" \
+            | tr -d '\r' | grep -i '^content-security-policy:' || true)
+          echo "$CSP"
+          if [ -z "$CSP" ]; then
+            echo "::warning::no Content-Security-Policy header served"
+          elif ! grep -q "wasm-unsafe-eval" <<<"$CSP"; then
+            echo "CSP is present but does not permit wasm-unsafe-eval - the demo will not run"
+            exit 1
+          fi
