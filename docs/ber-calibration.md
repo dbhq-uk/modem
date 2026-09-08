@@ -17,7 +17,7 @@ Every figure below comes from the same harness (`modem-core/src/impair.rs`'s tes
 
 All noise is deterministic (xorshift64, explicitly seeded), so every figure here is exactly reproducible from the commit above.
 
-Two payloads are used: a 57-byte varied-ASCII string for anything where content divergence is the point (it shows up by byte index 2 - a short payload is enough), and a 2,200-byte payload (`"The quick brown fox. "` x100) for `clock_drift`, where cumulative drift over a long transmission is the actual thing under test.
+Two payloads are used: a 57-byte varied-ASCII string for anything where content divergence is the point (it shows up by byte index 2 - a short payload is enough), and a 2,100-byte payload (`"The quick brown fox. "` x100) for `clock_drift`, where cumulative drift over a long transmission is the actual thing under test.
 
 ## Results
 
