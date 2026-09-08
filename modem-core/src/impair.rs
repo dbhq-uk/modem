@@ -51,14 +51,14 @@ use crate::DSP_RATE;
 /// accommodate it.
 ///
 /// 0.01 (1%) sits in the empty band between every configuration this
-/// task measured working (at most 0.0005, one byte in 2,100 - see
-/// `docs/ber-calibration.md`'s payload-robust sweeps) and every one it
-/// measured failing (at least 0.018), and it coincides with Task 19's
-/// real-world desk-test figure ("under 1% of characters corrupted").
-/// Task 19's figure corroborates this constant; it does not carry it -
-/// Task 19 has not run yet, and a target that has not been checked
-/// against reality cannot distinguish "the gate was wrong" from "the
-/// modem got worse" on its own. The measured band can, today, and does.
+/// task measured working on a single, fixed, reproducible scenario
+/// (at most 0.0005, one byte in 2,100) and every one it measured
+/// failing (at least 0.018), and it coincides with Task 19's real-world
+/// desk-test figure ("under 1% of characters corrupted"). Task 19's
+/// figure corroborates this constant; it does not carry it - Task 19
+/// has not run yet, and a target that has not been checked against
+/// reality cannot distinguish "the gate was wrong" from "the modem got
+/// worse" on its own. The measured band can, today, and does.
 ///
 /// Fix round 1 tried to anchor this constant to one specific `clock_
 /// drift` measurement (+30,000 ppm on a periodic payload, measuring
@@ -68,16 +68,32 @@ use crate::DSP_RATE;
 ///
 /// Fix round 2 found the replacement anchor had the same disease one
 /// level up: -28,000 ppm on a *single* shuffled (non-periodic) payload
-/// measured 0.0024, comfortably inside the gate, but the identical
-/// 2,100-byte multiset under nine other arbitrary shuffles spans 0.0376
-/// to 0.56 at that same drift value - a 234x spread, and only one draw
-/// in ten actually clears the gate. A single shuffle is not a
-/// measurement here, it is a lottery ticket. `docs/ber-calibration.md`
-/// records the fix: sweep several shuffle seeds at the genuinely
-/// payload-robust +/-25,000 ppm boundary instead of the fragile
-/// -28,000 ppm one, and bracket on the *maximum* across seeds, which
-/// this module's own `clock_drift_survives_the_documented_pull_in_
-/// range` test does directly.
+/// measured 0.0024, but the identical 2,100-byte multiset under nine
+/// other arbitrary shuffles spans 0.0376 to 0.56 at that same drift
+/// value - a 234x spread, and only one draw in ten actually clears the
+/// gate. Fix round 2's own fix - sweep several seeds at +/-25,000 ppm
+/// and require the *maximum* across all of them to clear the gate -
+/// was itself wrong in the same way one level up again: it turned an
+/// existence claim into a universal one. A wider, independent sweep of
+/// 36 seeds found 4 collapse to `ber = 1.0` at -25,000 ppm (genuine
+/// collapses, confirmed with an unbounded alignment search, not a
+/// measurement artefact) - roughly an 11% rate, meaning fix round 2's
+/// own all-clean 8-seed draw had about a 40% chance of happening by
+/// luck.
+///
+/// Fix round 3: a bracket only needs to show *one* real, reproducible,
+/// non-vacuous scenario on each side of the gate - it does not need to
+/// hold for every possible payload, and asking it to invites exactly
+/// the lottery above. `clock_drift_survives_the_documented_pull_in_
+/// range` (seed 2, fixed) is the lower bracket; `a_scenario_above_the_
+/// gate_is_correctly_rejected` (AWGN at 0 dB on `long_payload`, stable
+/// across seeds because 2,100 bytes is enough for a noise process to
+/// average out, unlike the 55-byte `PAYLOAD` fix round 2 used there) is
+/// the upper one. Neither claims to be typical or universal; each is a
+/// concrete, disclosed, reproducible fact. See `docs/ber-calibration.md`
+/// for the full picture, including the honest one: no clock-offset
+/// tolerance figure at or above 2.5% is safe to quote as payload-
+/// independent, in either direction.
 pub const MAX_BYTE_ERROR_RATE: f64 = 0.01;
 
 // ---------------------------------------------------------------------
@@ -909,17 +925,32 @@ mod tests {
     // ------------------------------------------------------------------
 
     /// Task 5 measured wideband AWGN as flat down to 6 dB SNR across a 4x
-    /// range of loop gain. Confirmed again here, robustly: across 16
-    /// independent noise seeds, 6 dB measures exactly 0.0 every time.
+    /// range of loop gain. Reconfirmed here at the harness level: 40, 25,
+    /// 15 and 10 dB each with one reproducible seed (comfortably above
+    /// the floor, one seed is enough evidence), and 6 dB itself - the
+    /// boundary that actually needs more than one seed to trust - across
+    /// 8 independent seeds, all flat.
     ///
-    /// Fix round 2 correction: an earlier version of this test claimed
-    /// the flat floor extended one dB further, to 3 dB, based on a
-    /// single seed. It does not survive a wider sample - of 16 seeds
-    /// tested at 3 dB, 15 measure 0.0 but one measures 0.0182 (1 of 55
-    /// bytes wrong). Task 5's own 6 dB figure is the defensible floor;
-    /// this only reconfirms it rather than improving on it.
+    /// Fix round 2 published a 3 dB claim (one dB past Task 5's own
+    /// floor) based on a single seed; a wider sample of 16 seeds found
+    /// one exception (0.0182). Fix round 3 does not re-assert that
+    /// exception here - a test pinning "the modem is wrong in this
+    /// specific way" would have to be edited if a future change fixed
+    /// it, which is backwards for a regression suite. The exception is
+    /// recorded in `docs/ber-calibration.md` instead. 6 dB, Task 5's own
+    /// figure, is the only floor this test stands behind.
     #[test]
     fn awgn_is_flat_down_to_6db() {
+        for db in [40.0, 25.0, 15.0, 10.0] {
+            let mut s = air(PAYLOAD, Role::Originate);
+            add_awgn(&mut s, db, 0xC0FFEE);
+            let recovered = demod(&s, Role::Originate);
+            assert_eq!(
+                measure_ber(PAYLOAD, &recovered),
+                0.0,
+                "AWGN at {db} dB SNR was not flat"
+            );
+        }
         for seed in 1u64..=8 {
             let mut s = air(PAYLOAD, Role::Originate);
             add_awgn(&mut s, 6.0, seed);
@@ -932,44 +963,30 @@ mod tests {
         }
     }
 
-    /// The companion to the test above: 3 dB is not reliably flat, which
-    /// is why 6 dB (not 3 dB) is the figure this crate quotes. Seed 12
-    /// is one specific, disclosed exception found directly, not a
-    /// hypothetical - most seeds at 3 dB are still flat, but "most" is
-    /// not "flat", and Task 5's own 6 dB claim does not make that
-    /// promise in the first place.
-    #[test]
-    fn awgn_at_3db_is_not_reliably_flat() {
-        let mut s = air(PAYLOAD, Role::Originate);
-        add_awgn(&mut s, 3.0, 12);
-        let recovered = demod(&s, Role::Originate);
-        let ber = measure_ber(PAYLOAD, &recovered);
-        assert!(
-            ber > 0.0,
-            "expected seed 12 at 3 dB to be a real exception to the flat floor, measured exactly 0.0"
-        );
-    }
-
     /// The gate needs a real scenario it correctly rejects, or it is a
     /// free constant (fix round 1, Critical 3: setting MAX_BYTE_ERROR_RATE
     /// to 0.5, or to 0.0, passed every test in the first submission,
     /// because the only test referencing it checked a measured 0.0
     /// against it, which holds for any non-negative gate). AWGN at 0 dB
-    /// SNR with this specific seed measures 0.0182, comfortably above
-    /// the gate, and fails if MAX_BYTE_ERROR_RATE is ever raised to
-    /// accommodate a scenario like it.
+    /// SNR fails if MAX_BYTE_ERROR_RATE is ever raised to accommodate a
+    /// scenario like it.
     ///
-    /// Fix round 2 note: 0.0182 is not a typical figure for AWGN at
-    /// 0 dB - six seeds checked during that fix round span 0.018 to
-    /// 0.836 - so this is one specific, fixed, reproducible scenario
-    /// that clears the gate, not a claim about what AWGN at 0 dB
-    /// generally measures. See `docs/ber-calibration.md`.
+    /// Fix round 3 correction: fix round 2 ran this on the 55-byte
+    /// `PAYLOAD`, where six seeds checked spanned 0.018 to 0.836 - the
+    /// instability was a small-sample artefact, not a property of AWGN
+    /// at 0 dB. 55 bytes is too few for a noise process to average out
+    /// over; the same scenario on the 2,100-byte `long_payload` is
+    /// stable across seeds - the minimum across 8 checked is 0.82, over
+    /// 80x the gate, with no draw anywhere near it. Same mechanism, same
+    /// narrative, instability explained by payload length rather than
+    /// routed around by picking a different mechanism.
     #[test]
     fn a_scenario_above_the_gate_is_correctly_rejected() {
-        let mut s = air(PAYLOAD, Role::Originate);
+        let payload = long_payload();
+        let mut s = air(&payload, Role::Originate);
         add_awgn(&mut s, 0.0, 0xC0FFEE);
         let recovered = demod(&s, Role::Originate);
-        let ber = measure_ber(PAYLOAD, &recovered);
+        let ber = measure_ber(&payload, &recovered);
         assert!(
             ber > MAX_BYTE_ERROR_RATE,
             "AWGN at 0 dB measured ber {ber}, expected it to sit above the gate"
@@ -1036,59 +1053,45 @@ mod tests {
         assert_eq!(measure_ber(PAYLOAD, &recovered), 0.0);
     }
 
-    /// Cross-checks rx.rs's own documented Gardner pull-in range
-    /// (+/-2.5%, from a completely different mechanism: two `Tx`/`Rx`
-    /// pairs configured with differing device rates, rather than this
-    /// function resampling one already-rendered buffer) - payload-
-    /// robustly, across 8 independent shuffles rather than one.
+    /// A true existence claim, not a universal one - fix round 3
+    /// correction. Fix round 2 swept 8 shuffle seeds here and asserted
+    /// every one stayed inside the gate at +/-25,000 ppm, reframing
+    /// this as a claim about the *boundary*. Independent review swept
+    /// 36 further seeds and found 4 collapse to `ber = 1.0` at
+    /// -25,000 ppm - a genuine result (confirmed with an unbounded
+    /// alignment search: those seeds score 1.0 at offset zero, nothing
+    /// recovered anywhere, not a search-window artefact) at roughly an
+    /// 11% rate per seed. Round 2's own 8-seed draw had about a 40%
+    /// chance of coming up all-clean. Sweeping was the wrong fix - it
+    /// converted an existence claim (this specific, fixed, reproducible
+    /// scenario measures a real rate inside the gate) into a universal
+    /// one (no payload can fail here), which the wider sample falsifies.
+    /// See `MAX_BYTE_ERROR_RATE`'s own doc comment and `docs/ber-
+    /// calibration.md` for the corrected, payload-dependent picture -
+    /// no clock-offset tolerance figure at or above 2.5% is safe to
+    /// quote in either direction.
     ///
+    /// What this test claims is narrower and still true: seed 2's
+    /// shuffle measures a real, small, non-zero rate comfortably inside
+    /// the gate at both edges of the documented range, and that rate is
+    /// load-bearing - mutating `GARDNER_GAIN` from 0.15 to 0.03 fails
+    /// this assertion outright (see the task report's mutation proofs).
     /// This is also `MAX_BYTE_ERROR_RATE`'s lower bracket, replacing fix
-    /// round 1's `a_scenario_below_the_gate_is_correctly_accepted`
-    /// (retired). That test bracketed the gate with -28,000 ppm on a
-    /// *single* shuffled payload, measuring 0.0024 - which fix round 2
-    /// found was a lottery ticket, not a fact: nine further arbitrary
-    /// shuffles of the identical 2,100-byte multiset at -28,000 ppm span
-    /// 0.0376 to 0.5619, and only that one original draw actually clears
-    /// the gate. See `MAX_BYTE_ERROR_RATE`'s own doc comment.
-    ///
-    /// +/-25,000 ppm is different: across seeds 1 through 8 (picked with
-    /// no prior knowledge of their outcome, not curated to pass) and
-    /// both directions - 16 measurements - every one measures 0.0 or
-    /// 0.0005 (one byte in 2,100), at least 20x inside the gate. That
-    /// stability, not any single measurement, is what actually brackets
-    /// the gate from below.
-    ///
-    /// This is not a claim that no payload can fail at +/-25,000 ppm -
-    /// `clock_drift_near_the_boundary_is_payload_sensitive` below uses a
-    /// seed found during this fix round's own exploration that measures
-    /// 1.0 at -25,000 ppm, deliberately excluded from the 8 here because
-    /// it was already known to be exceptional before this test's seed
-    /// set was chosen. What this test demonstrates is narrower and
-    /// concrete: this specific, disclosed, non-curated sample is
-    /// uniformly and comfortably inside the gate, which the -28,000 ppm
-    /// sample was not.
+    /// round 2's 8-seed sweep and fix round 1's `a_scenario_below_the_
+    /// gate_is_correctly_accepted` (both retired).
     #[test]
     fn clock_drift_survives_the_documented_pull_in_range() {
-        let mut max_ber = 0.0f64;
-        for seed in 1u64..=8 {
-            let payload = shuffled_sentence(seed);
-            for ppm in [25_000.0, -25_000.0] {
-                let clean = air(&payload, Role::Originate);
-                let drifted = clock_drift(&clean, ppm);
-                let recovered = demod(&drifted, Role::Originate);
-                let ber = measure_ber(&payload, &recovered);
-                assert!(
-                    ber <= MAX_BYTE_ERROR_RATE,
-                    "seed {seed} at {ppm} ppm measured ber {ber}, expected it inside the documented pull-in range"
-                );
-                max_ber = max_ber.max(ber);
-            }
+        let payload = shuffled_sentence(2);
+        for ppm in [25_000.0, -25_000.0] {
+            let clean = air(&payload, Role::Originate);
+            let drifted = clock_drift(&clean, ppm);
+            let recovered = demod(&drifted, Role::Originate);
+            let ber = measure_ber(&payload, &recovered);
+            assert!(
+                ber > 0.0 && ber <= MAX_BYTE_ERROR_RATE,
+                "seed 2 at {ppm} ppm measured ber {ber}, expected a real but small rate inside the gate"
+            );
         }
-        assert!(
-            max_ber > 0.0,
-            "every seed and direction measured exactly zero - this assertion would be vacuous; \
-             the intended contrast is a small but non-zero maximum well inside the gate"
-        );
     }
 
     /// Confirms the payload-sensitivity finding itself as a running fact,
@@ -1194,6 +1197,18 @@ mod tests {
     /// a hard nearby surface - measured at 14.5% byte error rate. This is
     /// the dominant room effect the module doc names, and it is a real
     /// impairment, not a theoretical one.
+    ///
+    /// Fix round 3 addition: this scenario is fully deterministic (no
+    /// seed anywhere in `reverb`), reproducibly measures 0.145, and that
+    /// value sits usefully between `MAX_BYTE_ERROR_RATE` and the two
+    /// fragile gate mutants reviewed this round (0.0 and 0.5) - neither
+    /// of the dedicated gate-bracket tests happens to catch a gate
+    /// raised to 0.5, since both were narrowed this round to existence
+    /// claims near the gate itself. Asserting against the gate directly
+    /// here, rather than a separately-chosen 0.1, closes that: 0.145 is
+    /// not greater than 0.5, so this fails if the gate is ever raised
+    /// that far, while still demonstrating the real corruption this test
+    /// exists to show at the actual gate value.
     #[test]
     fn reverb_of_a_strong_close_reflection_corrupts_content() {
         let mut s = air(PAYLOAD, Role::Originate);
@@ -1201,8 +1216,8 @@ mod tests {
         let recovered = demod(&s, Role::Originate);
         let ber = measure_ber(PAYLOAD, &recovered);
         assert!(
-            ber > 0.1,
-            "expected the strong close reflection to corrupt content, got ber {ber}"
+            ber > MAX_BYTE_ERROR_RATE,
+            "expected the strong close reflection to corrupt content beyond the gate, got ber {ber}"
         );
     }
 
@@ -1223,7 +1238,7 @@ mod tests {
         let recovered = demod(&mixed, Role::Answer);
         let ber = measure_ber(answer_payload, &recovered);
         assert!(
-            ber > 0.5,
+            ber > MAX_BYTE_ERROR_RATE,
             "expected gain 3.0 with no distortion to corrupt the Answer direction, got ber {ber}"
         );
     }
