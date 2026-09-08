@@ -18,6 +18,7 @@ extern crate alloc;
 
 pub mod carrier;
 pub mod frame;
+pub mod impair;
 pub mod nco;
 pub mod resample;
 pub mod rx;

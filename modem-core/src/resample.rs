@@ -440,6 +440,35 @@ mod tests {
         );
     }
 
+    /// Task 8 fold-in: `CUTOFF_HZ` is pinned by the two tests above only
+    /// to within about 600 Hz - `tone_above_cutoff_does_not_alias_into_
+    /// band` probes 4500 -> 3500 Hz and `six_khz_does_not_alias_to_two_
+    /// khz` probes 6000 -> 2000 Hz, and a cutoff mutated to 4200.0 (600 Hz
+    /// above the real 3600 Hz) passes both: 4500 Hz is far enough into
+    /// that wrong filter's stopband to still fold at negligible
+    /// magnitude, and 6000 Hz is deeper still. The gap between the two
+    /// probes is real: at a 4200 Hz cutoff, a 4300 Hz tone folds onto
+    /// 3700 Hz - squarely inside the telephone band - at magnitude 0.205,
+    /// which neither existing probe would ever see. This adds a third
+    /// probe inside that gap. See mutation proof 6 in the task report for
+    /// `CUTOFF_HZ = 4200.0` reproducing 0.205 here.
+    #[test]
+    fn tone_just_above_cutoff_does_not_fold_into_band_either() {
+        let mut r = Resampler::new(48000.0, 8000.0);
+        let n_in = 48000;
+        let input = sine(4300.0, 48000.0, n_in);
+        let max_out = r.max_output_len(n_in);
+        let mut output = vec![0.0; max_out];
+        let n = r.process(&input, &mut output[..max_out]);
+        let win = cycle_window(3700.0, 8000.0, 4000);
+        let mag = goertzel(&output[n - win..n], 3700.0, 8000.0);
+        assert!(
+            mag < 0.05,
+            "4300 Hz at 48 kHz appeared at 3700 Hz with magnitude {mag} - \
+             CUTOFF_HZ is not excluding content in the gap between the other two probes"
+        );
+    }
+
     /// Round 1 review finding: the interpolation side's post-upsample
     /// filter (`resample.rs`'s `else { self.fir_push(y) }` branch) had no
     /// test at all - Mutation 1 only covers the decimation side. Naive
