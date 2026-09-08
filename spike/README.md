@@ -78,7 +78,7 @@ cp target/wasm32-unknown-unknown/release/modem_wasm.wasm spike/pkg-worklet/modem
 cd spike && python3 serve.py
 ```
 
-Then open `https://<machine>.<tailnet>.ts.net:8444/worklet.html` and click Start.
+Then open `https://<your-machine>.<your-tailnet>.ts.net:8444/worklet.html` and click Start.
 
 ## Status
 
