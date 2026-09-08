@@ -539,6 +539,20 @@ section {
   color: var(--modem-green-bright);
 }
 
+.endpoint select {
+  font-family: var(--modem-type-face);
+  background: var(--modem-ground);
+  color: var(--modem-white-bright);
+  border: 1px solid var(--modem-white-dim);
+  padding: var(--modem-space-xs);
+}
+
+.endpoint select:hover,
+.endpoint select:focus-visible {
+  border-color: var(--modem-green-bright);
+  color: var(--modem-green-bright);
+}
+
 /* ---------------------------------------------------------------------
  * mode-select - the live "one device" / "two devices" choice, offered
  * once the overture has played (the same staged design the microphone
@@ -587,6 +601,44 @@ section {
 
 .wired__panel--answer .wired__panel-bar {
   color: var(--modem-green-dim);
+}
+
+/* The shared phase line above both panels, and each panel's own status
+ * cut down to one word - see page.js's own doc on why the long combined
+ * status string now lives once, here, rather than twice, once per panel. */
+.wired__phase {
+  color: var(--modem-green-bright);
+  font-size: var(--modem-type-scale-base);
+  margin: 0 0 var(--modem-space-sm) 0;
+}
+
+.endpoint__status--short {
+  font-size: var(--modem-type-scale-small);
+  letter-spacing: 0.05em;
+}
+
+/* Compact transcripts for the two side-by-side (or stacked, on a phone -
+ * see the mobile layout section below) panels: enough height for a
+ * handful of lines, not the full 16em the single unified terminal above
+ * gets. Each panel scrolls to its own newest line on append (see
+ * appendTerminalLine), so what is visible without scrolling is always
+ * the last few lines, and scrolling up reveals the rest - the same
+ * "expand by scrolling" shape the generated frames use for width. */
+.terminal__output--compact {
+  min-height: 4.5em;
+  max-height: 8em;
+}
+
+.wired__waterfall-wrap {
+  margin: var(--modem-space-sm) 0;
+}
+
+.wired__waterfall {
+  aspect-ratio: 960 / 120;
+}
+
+.wired__composer select {
+  flex-shrink: 0;
 }
 
 .mode-badge {

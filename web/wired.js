@@ -38,6 +38,10 @@ export class WiredEndpoint extends EventTarget {
     super();
     this.ctx = null;
     this.node = null;
+    // The mixed signal that reaches the speakers, tapped for a page's own
+    // waterfall - see `init`'s own doc on why this sits between the node
+    // and the destination rather than the node connecting straight there.
+    this.analyser = null;
     this._resolveReady = null;
     this._rejectReady = null;
   }
@@ -93,8 +97,17 @@ export class WiredEndpoint extends EventTarget {
     await ready;
 
     // Always connected: an idle pair transmits silence, never anything
-    // unexpected, so nothing is gained by deferring this.
-    node.connect(ctx.destination);
+    // unexpected, so nothing is gained by deferring this. Routed through
+    // an AnalyserNode rather than straight to the destination, so a page
+    // can drive its own waterfall off the real mixed call audio - without
+    // this tap the node's output reaches the speakers but nothing else
+    // ever sees it, which is exactly the bug that left the "one device"
+    // demo's spectrogram dark: connecting straight to destination is not
+    // enough, an analyser has to sit in the graph to be read from.
+    this.analyser = ctx.createAnalyser();
+    this.analyser.fftSize = 2048;
+    node.connect(this.analyser);
+    this.analyser.connect(ctx.destination);
   }
 
   _handleWorkletMessage(msg) {

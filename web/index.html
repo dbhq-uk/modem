@@ -95,40 +95,47 @@
 
       <div class="endpoint wired" id="wired-panel" hidden aria-labelledby="wired-heading">
         <h3 class="scenario__label" id="wired-heading">One device - both ends live, right here</h3>
-        <p>Two real sessions, cross-wired in software exactly as the binary's own split-screen demo wires them - the link never crosses the air, so this is genuinely <span class="mode-badge">DEMO MODE</span>, the same honesty the terminal app's own status bar carries. Dial from the left, answer on the right, and watch both transcripts fill in while the handshake plays through your speakers.</p>
+        <p>Two real sessions, cross-wired in software exactly as the binary's own split-screen demo wires them - the link never crosses the air, so this is genuinely <span class="mode-badge">DEMO MODE</span>, the same honesty the terminal app's own status bar carries. Dial from originate; answer picks up by itself, nothing to type there - the same auto-answer a real <code>--answer</code> end runs at startup.</p>
+
+        <p class="wired__phase" id="wired-phase" role="status">IDLE - press ATDT to dial</p>
+
         <div class="wired__panels">
           <div class="wired__panel">
             <div class="wired__panel-bar">ORIGINATE &middot; 1270/1070 Hz</div>
-            <p class="endpoint__status" id="wired-status-a" role="status">IDLE</p>
-            <div class="terminal__output" id="wired-log-a" role="log" aria-label="Originate transcript"></div>
-            <div class="endpoint__row">
-              <label for="wired-digits">Digits</label>
-              <input type="text" id="wired-digits" value="01234567890" size="12" autocomplete="off">
-              <button type="button" id="wired-dial">ATDT (dial)</button>
-            </div>
-            <div class="endpoint__row">
-              <label for="wired-chat-a" class="sr-only">Message to send from originate</label>
-              <input type="text" id="wired-chat-a" placeholder="Type once CONNECTED" size="24" autocomplete="off" disabled>
-              <button type="button" id="wired-send-a" disabled>Send</button>
-            </div>
+            <p class="endpoint__status endpoint__status--short" id="wired-status-a" role="status">IDLE</p>
+            <div class="terminal__output terminal__output--compact" id="wired-log-a" role="log" aria-label="Originate transcript"></div>
           </div>
           <div class="wired__panel wired__panel--answer">
             <div class="wired__panel-bar">ANSWER &middot; 2225/2025 Hz</div>
-            <p class="endpoint__status" id="wired-status-b" role="status">IDLE</p>
-            <div class="terminal__output" id="wired-log-b" role="log" aria-label="Answer transcript"></div>
-            <div class="endpoint__row">
-              <button type="button" id="wired-answer">ATA (answer)</button>
-            </div>
-            <div class="endpoint__row">
-              <label for="wired-chat-b" class="sr-only">Message to send from answer</label>
-              <input type="text" id="wired-chat-b" placeholder="Type once CONNECTED" size="24" autocomplete="off" disabled>
-              <button type="button" id="wired-send-b" disabled>Send</button>
-            </div>
+            <p class="endpoint__status endpoint__status--short" id="wired-status-b" role="status">IDLE</p>
+            <div class="terminal__output terminal__output--compact" id="wired-log-b" role="log" aria-label="Answer transcript"></div>
           </div>
         </div>
-        <div class="endpoint__row">
-          <button type="button" id="wired-hangup" disabled>Hang up</button>
-          <button type="button" id="wired-stop">Stop</button>
+
+        <div class="waterfall-wrap wired__waterfall-wrap">
+          <canvas class="waterfall wired__waterfall" id="wired-waterfall" width="960" height="120" aria-hidden="true"></canvas>
+        </div>
+
+        <div class="wired__controls">
+          <div class="endpoint__row">
+            <label for="wired-digits">Digits</label>
+            <input type="text" id="wired-digits" value="01234567890" size="12" autocomplete="off">
+            <button type="button" id="wired-dial">ATDT (dial)</button>
+          </div>
+          <div class="endpoint__row wired__composer">
+            <label for="wired-send-side" class="sr-only">Send as</label>
+            <select id="wired-send-side">
+              <option value="a">Send as originate</option>
+              <option value="b">Send as answer</option>
+            </select>
+            <label for="wired-chat" class="sr-only">Message</label>
+            <input type="text" id="wired-chat" placeholder="Type once CONNECTED" size="24" autocomplete="off" disabled>
+            <button type="button" id="wired-send" disabled>Send</button>
+          </div>
+          <div class="endpoint__row">
+            <button type="button" id="wired-hangup" disabled>Hang up</button>
+            <button type="button" id="wired-stop">Stop</button>
+          </div>
         </div>
       </div>
 

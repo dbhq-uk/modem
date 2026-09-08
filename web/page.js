@@ -48,19 +48,19 @@ const canvas = document.getElementById('waterfall');
 const phaseListEl = document.getElementById('phase-list');
 
 const wiredPanel = document.getElementById('wired-panel');
+const wiredPhase = document.getElementById('wired-phase');
 const wiredStatusA = document.getElementById('wired-status-a');
 const wiredStatusB = document.getElementById('wired-status-b');
 const wiredLogA = document.getElementById('wired-log-a');
 const wiredLogB = document.getElementById('wired-log-b');
+const wiredCanvas = document.getElementById('wired-waterfall');
 const wiredDigits = document.getElementById('wired-digits');
 const wiredDialBtn = document.getElementById('wired-dial');
-const wiredAnswerBtn = document.getElementById('wired-answer');
 const wiredHangupBtn = document.getElementById('wired-hangup');
 const wiredStopBtn = document.getElementById('wired-stop');
-const wiredChatA = document.getElementById('wired-chat-a');
-const wiredChatSendA = document.getElementById('wired-send-a');
-const wiredChatB = document.getElementById('wired-chat-b');
-const wiredChatSendB = document.getElementById('wired-send-b');
+const wiredSendSide = document.getElementById('wired-send-side');
+const wiredChat = document.getElementById('wired-chat');
+const wiredSendBtn = document.getElementById('wired-send');
 
 function appendTerminalLine(container, text, { command = false } = {}) {
   const line = document.createElement('p');
@@ -149,6 +149,37 @@ function lerp(a, b, t) {
 }
 
 const waterfall = new Waterfall(canvas);
+// The "one device" live demo's own waterfall, driven off WiredEndpoint's
+// analyser tap (see wired.js's own doc on why that tap exists) rather
+// than the prerendered buffer this one reads from - the wired call is
+// live audio with no buffer to slice. Kept as a second Waterfall
+// instance, not a shared one: the two demos can be mid-animation at
+// once (nothing stops a visitor opening "one device" without having
+// pressed Dial first), and each owns its own canvas and fade state.
+const wiredWaterfall = new Waterfall(wiredCanvas);
+let wiredWaterfallRaf = null;
+
+function startWiredWaterfall(endpoint) {
+  stopWiredWaterfall();
+  const draw = () => {
+    try {
+      wiredWaterfall.frame(endpoint.analyser, endpoint.ctx.sampleRate);
+    } catch (err) {
+      console.error('wired waterfall draw failed', err);
+      return;
+    }
+    wiredWaterfallRaf = requestAnimationFrame(draw);
+  };
+  wiredWaterfallRaf = requestAnimationFrame(draw);
+}
+
+function stopWiredWaterfall() {
+  if (wiredWaterfallRaf !== null) {
+    cancelAnimationFrame(wiredWaterfallRaf);
+    wiredWaterfallRaf = null;
+  }
+  wiredWaterfall.reset();
+}
 
 // -----------------------------------------------------------------------
 // Prerendering the overture: the same modem-wasm build the real endpoint
@@ -263,9 +294,30 @@ function setActivePhaseRow(label) {
   }
 }
 
+// -----------------------------------------------------------------------
+// Exactly one clip plays at a time - the Dial button's full overture and
+// every phase-row's own slice all go through `playSlice`, and starting
+// any one of them stops whatever else was running first. Before this,
+// each phase button only disabled itself, so two phases (or a phase and
+// the full overture) could play over each other, both painting the one
+// waterfall and both talking over the same speakers.
+// -----------------------------------------------------------------------
+let currentPlayback = null;
+
+function stopCurrentPlayback() {
+  if (currentPlayback) {
+    const playing = currentPlayback;
+    currentPlayback = null;
+    playing.stop();
+  }
+}
+
 /** Plays `[startSample, endSample)` of the prerendered buffer through the
- * waterfall's analyser, resolving once playback ends. */
+ * waterfall's analyser, resolving once playback ends (naturally, or via
+ * `stopCurrentPlayback`). Pre-empts whatever else was already playing. */
 function playSlice({ audioBuffer, sampleRate }, startSample, endSample) {
+  stopCurrentPlayback();
+
   const ctx = ensureAudioContext();
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 2048;
@@ -285,9 +337,21 @@ function playSlice({ audioBuffer, sampleRate }, startSample, endSample) {
   const duration = (endSample - startSample) / sampleRate;
   source.start(0, offset, duration);
 
+  const token = {
+    stop() {
+      try {
+        source.stop();
+      } catch (_err) {
+        // Already stopped or never started - nothing left to do.
+      }
+    },
+  };
+  currentPlayback = token;
+
   return new Promise((resolve) => {
     source.onended = () => {
       cancelAnimationFrame(raf);
+      if (currentPlayback === token) currentPlayback = null;
       resolve();
     };
   });
@@ -295,6 +359,7 @@ function playSlice({ audioBuffer, sampleRate }, startSample, endSample) {
 
 async function playFullOverture() {
   dialBtn.disabled = true;
+  resetAllPhaseButtons();
   nowPlaying.textContent = 'Loading...';
   terminalOutput.innerHTML = '';
   waterfall.reset();
@@ -335,8 +400,20 @@ dialBtn.addEventListener('click', () => {
 
 // -----------------------------------------------------------------------
 // The explainer: one phase-row per stage, each playing its own slice of
-// the identical rendering the dial button uses.
+// the identical rendering the dial button uses. Exactly one plays at a
+// time (see `currentPlayback` above) - clicking a row's button while it
+// is the one playing stops it early; clicking a different row's button
+// switches to that clip instead of layering on top of the first.
 // -----------------------------------------------------------------------
+let activePhaseIndex = null;
+
+function resetAllPhaseButtons() {
+  phaseListEl.querySelectorAll('.phase-row__play').forEach((b) => {
+    b.textContent = 'Play';
+  });
+  activePhaseIndex = null;
+}
+
 PHASES.forEach((phase, index) => {
   const li = document.createElement('li');
   li.className = 'phase-row';
@@ -347,9 +424,16 @@ PHASES.forEach((phase, index) => {
   button.className = 'phase-row__play';
   button.textContent = 'Play';
   button.addEventListener('click', async () => {
-    button.disabled = true;
-    const original = button.textContent;
-    button.textContent = 'Playing';
+    if (activePhaseIndex === index) {
+      // Already the one playing - a second click stops it, and does not
+      // start anything new.
+      stopCurrentPlayback();
+      return;
+    }
+
+    resetAllPhaseButtons();
+    activePhaseIndex = index;
+    button.textContent = 'Stop';
     try {
       const rendered = await ensurePrerendered();
       const seg = rendered.stageSegments.get(index);
@@ -360,10 +444,15 @@ PHASES.forEach((phase, index) => {
     } catch (err) {
       console.error(err);
     } finally {
-      nowPlaying.textContent = 'Idle';
-      setActivePhaseRow(null);
-      button.textContent = original;
-      button.disabled = false;
+      // Guards against a preempted clip's own cleanup running after a
+      // newer one has already taken over - see playSlice's token
+      // handling, which is the other half of this same guard.
+      if (activePhaseIndex === index) {
+        nowPlaying.textContent = 'Idle';
+        setActivePhaseRow(null);
+        button.textContent = 'Play';
+        activePhaseIndex = null;
+      }
     }
   });
 
@@ -503,12 +592,52 @@ chatInput.addEventListener('keydown', (e) => {
 // WiredTransport. No microphone and no permission prompt: both ends
 // live in this page and the mixed signal plays through the visitor's
 // own speakers.
+//
+// Answer auto-answers, matching the binary: `modem --single --acoustic
+// --answer` answers at startup with nothing typed into it (see
+// modem-tui/src/app.rs's own module doc, "--answer picks receive mode,
+// and that end answers by itself"). There is no separate "ATA (answer)"
+// control here any more - `wired.answer()` is called as soon as the
+// session pair exists, before the panel is even shown, the same "nothing
+// to type on it" shape as a real answer-mode end sitting ready.
 // -----------------------------------------------------------------------
 let wired = null;
+let lastWiredA = null;
+let lastWiredB = null;
 
-function wiredStatusLine(status) {
-  const stageName = typeof status.stage === 'number' && status.stage >= 0 ? STAGE_NAMES[status.stage] : 'none';
-  return `${endpointStateName(status.state)} - stage: ${stageName} - turn: ${status.hasTurn ? 'yours' : 'not yours'} - carrier: ${status.carrier ? 'yes' : 'no'}`;
+/** One word for a panel's own status line - the long combined string
+ * (state/stage/turn/carrier) now lives only in the shared phase line
+ * below, so the two are not saying almost the same thing twice. */
+function wiredShortStatus(status) {
+  return endpointStateName(status.state);
+}
+
+/** The call's overall phase, shared above both panels rather than
+ * repeated inside each - "both ends live" is one story, not two. */
+function wiredPhaseLine(a, b) {
+  if (a.state === SessionState.CONNECTED && b.state === SessionState.CONNECTED) {
+    return 'CONNECTED';
+  }
+  // Answer auto-answers as soon as the pair exists (see this section's
+  // own doc), so it can be ANSWERING well before anyone has dialled -
+  // the call itself has not started until originate has, regardless of
+  // what state answer is already sitting in.
+  if (a.state === SessionState.IDLE) {
+    return 'IDLE - press ATDT to dial';
+  }
+  const stage = typeof a.stage === 'number' && a.stage >= 0 ? a.stage
+    : typeof b.stage === 'number' && b.stage >= 0 ? b.stage
+    : null;
+  const stageName = stage !== null ? STAGE_NAMES[stage] : 'connecting';
+  return `Handshake: ${stageName}`;
+}
+
+function updateWiredComposerEnablement() {
+  const bothConnected = !!lastWiredA && !!lastWiredB
+    && lastWiredA.state === SessionState.CONNECTED
+    && lastWiredB.state === SessionState.CONNECTED;
+  wiredChat.disabled = !bothConnected;
+  wiredSendBtn.disabled = !bothConnected;
 }
 
 modeOneBtn.addEventListener('click', async () => {
@@ -520,14 +649,12 @@ modeOneBtn.addEventListener('click', async () => {
 
     wired.addEventListener('status', (e) => {
       const { a, b } = e.detail;
-      wiredStatusA.textContent = wiredStatusLine(a);
-      wiredStatusB.textContent = wiredStatusLine(b);
-      const connectedA = a.state === SessionState.CONNECTED;
-      const connectedB = b.state === SessionState.CONNECTED;
-      wiredChatA.disabled = !connectedA;
-      wiredChatSendA.disabled = !connectedA;
-      wiredChatB.disabled = !connectedB;
-      wiredChatSendB.disabled = !connectedB;
+      lastWiredA = a;
+      lastWiredB = b;
+      wiredStatusA.textContent = wiredShortStatus(a);
+      wiredStatusB.textContent = wiredShortStatus(b);
+      wiredPhase.textContent = wiredPhaseLine(a, b);
+      updateWiredComposerEnablement();
       wiredHangupBtn.disabled = a.state === SessionState.IDLE && b.state === SessionState.IDLE;
     });
 
@@ -540,6 +667,10 @@ modeOneBtn.addEventListener('click', async () => {
       appendTerminalLine(wiredLogA, `error: ${e.detail}`);
     });
 
+    // Auto-answer - see this section's own doc above.
+    wired.answer();
+
+    startWiredWaterfall(wired);
     wiredPanel.hidden = false;
     modeSelect.hidden = true;
   } catch (err) {
@@ -558,12 +689,6 @@ wiredDialBtn.addEventListener('click', () => {
   appendTerminalLine(wiredLogA, `ATDT${digits}`, { command: true });
 });
 
-wiredAnswerBtn.addEventListener('click', () => {
-  if (!wired) return;
-  wired.answer();
-  appendTerminalLine(wiredLogB, 'ATA', { command: true });
-});
-
 wiredHangupBtn.addEventListener('click', () => {
   if (!wired) return;
   wired.hangup();
@@ -577,36 +702,31 @@ wiredStopBtn.addEventListener('click', async () => {
   if (!wired) return;
   await wired.stop();
   wired = null;
+  lastWiredA = null;
+  lastWiredB = null;
+  stopWiredWaterfall();
   wiredPanel.hidden = true;
   wiredLogA.innerHTML = '';
   wiredLogB.innerHTML = '';
   wiredStatusA.textContent = 'IDLE';
   wiredStatusB.textContent = 'IDLE';
+  wiredPhase.textContent = 'IDLE - press ATDT to dial';
+  updateWiredComposerEnablement();
   modeSelect.hidden = false;
   modeOneBtn.disabled = false;
   modeTwoBtn.disabled = false;
 });
 
-wiredChatSendA.addEventListener('click', () => {
-  if (!wired || !wiredChatA.value) return;
-  wired.send('a', wiredChatA.value);
-  appendTerminalLine(wiredLogA, `> ${wiredChatA.value}`);
-  wiredChatA.value = '';
+wiredSendBtn.addEventListener('click', () => {
+  if (!wired || !wiredChat.value) return;
+  const side = wiredSendSide.value === 'b' ? 'b' : 'a';
+  wired.send(side, wiredChat.value);
+  appendTerminalLine(side === 'a' ? wiredLogA : wiredLogB, `> ${wiredChat.value}`);
+  wiredChat.value = '';
 });
 
-wiredChatA.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') wiredChatSendA.click();
-});
-
-wiredChatSendB.addEventListener('click', () => {
-  if (!wired || !wiredChatB.value) return;
-  wired.send('b', wiredChatB.value);
-  appendTerminalLine(wiredLogB, `> ${wiredChatB.value}`);
-  wiredChatB.value = '';
-});
-
-wiredChatB.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') wiredChatSendB.click();
+wiredChat.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') wiredSendBtn.click();
 });
 
 // A page navigating away must not leave a live microphone, a live wired
