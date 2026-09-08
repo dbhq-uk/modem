@@ -649,6 +649,57 @@ mod tests {
         assert_eq!(far.receive(), b"go+++ahead");
     }
 
+    /// Mutation 3 target: the literal byte sequence `+++ATH0`, typed as one
+    /// unbroken burst with no guard time anywhere around it, is exactly
+    /// the "common shorthand" the task brief names and says is wrong -
+    /// `+++` is not a command, and `+++ATH0` is not a thing. With no
+    /// leading silence, none of it can be a real escape attempt (see this
+    /// module's own doc), so a correct implementation writes the whole
+    /// seven bytes straight through as ordinary data and the call stays
+    /// up. This is also this module's proof that no code path recognises
+    /// the shorthand as a unit: see the task report for the mutation that
+    /// makes this test fail - a version of `feed_data_byte` with an added
+    /// branch that pattern-matches the literal bytes `b"+++ATH0"` as they
+    /// arrive and hangs up immediately, which nothing in the actual
+    /// implementation does.
+    #[test]
+    fn mutation_3_the_shorthand_string_is_never_recognised() {
+        let mut local = Session::new(cfg(Role::Originate));
+        let mut far = Session::new(cfg(Role::Answer));
+        let mut at = AtProcessor::new();
+        feed_line(&mut at, &mut local, "ATDT1\r");
+        far.answer();
+        connect(&mut at, &mut local, &mut far);
+        settle(&mut local, &mut far);
+
+        // Fresh into data mode, idle is zero: no leading guard anywhere in
+        // this burst, so nothing here can be a genuine escape attempt.
+        for &b in b"+++ATH0" {
+            assert_eq!(at.feed(b, &mut local), None);
+        }
+        for _ in 0..40 {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+        }
+
+        assert!(
+            !at.in_command_mode(),
+            "the shorthand must not have escaped into command mode"
+        );
+        assert!(
+            local.carrier_detected(),
+            "the shorthand must not have hung up the call"
+        );
+        for _ in 0..500 {
+            pump(&mut local, &mut far);
+        }
+        assert_eq!(
+            far.receive(),
+            b"+++ATH0",
+            "the literal shorthand must have gone out as ordinary data, byte-exact"
+        );
+    }
+
     /// Required test / Mutation 2 target: `+++` with leading guard but no
     /// trailing guard does not escape. Covers both ways the trailing guard
     /// can fail to be satisfied: not enough silence yet (proves the guard
