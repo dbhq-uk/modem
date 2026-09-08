@@ -480,21 +480,77 @@ impl App {
         if area.width == 0 || area.height == 0 {
             return;
         }
-        draw::fill(buf, area, ' ', Style::default().bg(crate::theme::GROUND));
         let bright = Style::default().fg(self.theme.bright());
         let dim = Style::default().fg(self.theme.dim());
 
+        // The overlay is a panel drawn *inside* the frame, inset by one
+        // cell on every side and carrying its own single-line border.
+        // Writing at the frame's own coordinates put the header and the
+        // "no entries" line straight over the double-line rules, so an
+        // empty directory rendered with the box's own bars replaced by
+        // text. A panel laid over chrome has to bring its own edges.
+        // Exactly the focused pane's content rect - it already sits
+        // inside the frame's rails, so insetting further leaves a strip
+        // of the waterfall's own labels showing down the left of the
+        // panel.
+        let panel = area;
+        if panel.width < 6 || panel.height < 3 {
+            // Too small for a bordered panel: plain text in the area
+            // given, rather than a broken box.
+            draw::fill(buf, area, ' ', Style::default().bg(crate::theme::GROUND));
+            draw::text(buf, area, area.left(), area.top(), "directory", bright);
+            return;
+        }
+        draw::fill(buf, panel, ' ', Style::default().bg(crate::theme::GROUND));
+
         let header = if overlay.directory.skipped() > 0 {
             format!(
-                "dialling directory ({} skipped)",
+                " dialling directory ({} skipped) ",
                 overlay.directory.skipped()
             )
         } else {
-            "dialling directory".to_string()
+            " dialling directory ".to_string()
         };
-        draw::text(buf, area, area.left(), area.top(), &header, bright);
+        let span = panel.width.saturating_sub(2) as usize;
+        let title: String = header.chars().take(span).collect();
+        let rule = span - title.chars().count();
+        draw::text(
+            buf,
+            panel,
+            panel.left(),
+            panel.top(),
+            &format!("\u{250C}{title}{}\u{2510}", "\u{2500}".repeat(rule)),
+            bright,
+        );
+        for row in 1..panel.height.saturating_sub(1) {
+            let y = panel.top() + row;
+            draw::cell(buf, panel, panel.left(), y, '\u{2502}', bright);
+            draw::cell(
+                buf,
+                panel,
+                panel.right().saturating_sub(1),
+                y,
+                '\u{2502}',
+                bright,
+            );
+        }
+        draw::text(
+            buf,
+            panel,
+            panel.left(),
+            panel.bottom().saturating_sub(1),
+            &format!("\u{2514}{}\u{2518}", "\u{2500}".repeat(span)),
+            bright,
+        );
 
-        let mut y = area.top().saturating_add(1);
+        // Everything below writes inside the panel's own border.
+        let area = Rect {
+            x: panel.left().saturating_add(1),
+            y: panel.top().saturating_add(1),
+            width: panel.width.saturating_sub(2),
+            height: panel.height.saturating_sub(2),
+        };
+        let mut y = area.top();
         if overlay.directory.entries().is_empty() {
             // The one thing this format must never do is fail silently -
             // an empty overlay with no explanation reads as broken, not
@@ -1456,6 +1512,69 @@ mod tests {
 
     fn press(app: &mut App, code: KeyCode) {
         app.handle_key(KeyEvent::new(code, crossterm::event::KeyModifiers::NONE));
+    }
+
+    /// The overlay is drawn over the frame, so it must bring its own
+    /// edges rather than writing on the frame's. The first version wrote
+    /// at the frame's own coordinates, which replaced the double-line
+    /// rails with text and rendered an empty directory as
+    /// `-no entries - looked in ...-`. Asserted by position: every row
+    /// the overlay covers must still start and end with the frame's own
+    /// rail, and the overlay must have drawn its own corners.
+    #[test]
+    fn the_overlay_draws_its_own_border_and_never_over_the_frames() {
+        for directory in [three_entry_directory(), Directory::parse("")] {
+            let wired = modem_audio::WiredTransport::new(8000);
+            let mut app = App::single(pane(Role::Originate), &wired, Theme::default());
+            app.directory_overlay = Some(DirectoryOverlay {
+                directory,
+                path: PathBuf::from("/tmp/a-very-long-path-that-would-overflow-the-frame.tsv"),
+                selected: 0,
+            });
+
+            let mut buf = Buffer::empty(Rect::new(0, 0, 72, 24));
+            app.render_into(buf.area, &mut buf);
+
+            // Rows 1..22 are inside the frame's own box; row 0 is its top
+            // rule and row 22 its bottom, with the fkey bar on row 23.
+            // The frame's own left and right edge characters: a plain
+            // rail on a content row, a tee on one of its divider rows.
+            const EDGES: [char; 3] = ['\u{2551}', '\u{2560}', '\u{2563}'];
+            for y in 1..22u16 {
+                let row = row_text(&buf, y);
+                let first = row.chars().next().unwrap();
+                let last = row.chars().last().unwrap();
+                assert!(
+                    EDGES.contains(&first) && EDGES.contains(&last),
+                    "the overlay wrote over the frame's own edge on row {y}: {row:?}"
+                );
+            }
+
+            let all: String = (0..buf.area.height)
+                .map(|y| row_text(&buf, y))
+                .collect::<Vec<_>>()
+                .join("");
+            for corner in ['\u{250C}', '\u{2510}', '\u{2514}', '\u{2518}'] {
+                assert!(
+                    all.contains(corner),
+                    "the overlay did not draw its own {corner:?} corner"
+                );
+            }
+
+            // Nothing underneath shows through. The panel has to start in
+            // the very first column inside the frame's rail: insetting it
+            // by even one cell leaves a strip of the waterfall's own
+            // frequency labels visible down the panel's left edge.
+            const PANEL_EDGE: [char; 3] = ['\u{2502}', '\u{250C}', '\u{2514}'];
+            for y in 1..22u16 {
+                let row = row_text(&buf, y);
+                let inside = row.chars().nth(1).unwrap();
+                assert!(
+                    PANEL_EDGE.contains(&inside),
+                    "the pane underneath shows through beside the overlay on row {y}: {row:?}"
+                );
+            }
+        }
     }
 
     // Required test: wrapping over a full cycle, not a single step. The
