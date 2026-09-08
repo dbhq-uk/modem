@@ -4,9 +4,14 @@ The same `modem-core` the desktop binary runs, inside a Web Audio
 AudioWorklet - not a demo of the idea, a real Bell 103 endpoint that can
 hold a call with `modem --single --acoustic` on someone's desk.
 
-This directory does not yet hold the product page - that is Task 3. What
-is here:
+This directory also holds `modem.dbhq.uk`'s product page. What is here:
 
+- `index.html` / `style.css` - the product page: the browser demo, the
+  "Two ways to try this" split-screen/single-pane section, the
+  phase-by-phase explainer and downloads.
+- `_gen/frames.py` - regenerates the two rendered terminal frames inside
+  the "Two ways to try this" section - see that script's own doc and
+  "The generated frames" below.
 - `session.js` - a thin wrapper around modem-wasm's raw C-ABI worklet
   exports (`session_new`, `process_out`/`process_in`, `dial`/`answer`,
   `send`/`receive`, ...). Shared, unchanged, between the main thread and
@@ -23,6 +28,24 @@ is here:
   peak within three bins of 1270 Hz measured through a real
   `AnalyserNode`, now against the real Session's idle mark rather than a
   placeholder tone.
+
+## The generated frames
+
+The two terminal frames inside `index.html`'s "Two ways to try this"
+section, between `<!-- BEGIN generated: ... -->` / `<!-- END generated:
+... -->` markers, are **generated** - the same rule `brand/_gen/`
+follows for the icon and the design tokens. Never hand-edit the markup
+inside those markers; edit `web/_gen/frames.py` and/or
+`modem-tui/examples/mockup.rs` (the actual source of the rendered
+`<pre>` markup - see that example's own module doc) and regenerate:
+
+```bash
+python3 web/_gen/frames.py
+```
+
+Needs `cargo` on PATH. CI's `generated_assets` job runs this alongside
+every generator under `brand/_gen/` and fails on any diff, so a stale
+region cannot land unnoticed.
 
 ## Building the WASM module
 

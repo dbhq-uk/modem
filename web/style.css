@@ -420,6 +420,67 @@ section {
 }
 
 /* ---------------------------------------------------------------------
+ * scenarios - the two ways to try modem: one device (split screen, the
+ * default) and two devices (the real product). `win`/`bar`/`screen` name
+ * the terminal-window chrome the same way modem-tui/examples/mockup.rs
+ * names it for its own comparison page - same concept, same names, so
+ * it reads as one product in both places.
+ *
+ * The frames inside `.screen` are generated - see web/_gen/frames.py
+ * and the BEGIN/END markers around them in index.html - straight out
+ * of App::render_into. Every colour on a cell is inline and literal on
+ * purpose: it is the exact colour the real crate drew for that cell,
+ * not a page decoration, so no token stands in for it here. The window
+ * chrome around it is ordinary page furniture and uses tokens like
+ * everything else.
+ * ------------------------------------------------------------------- */
+.scenario {
+  margin-bottom: var(--modem-space-lg);
+}
+
+.scenario:last-child {
+  margin-bottom: 0;
+}
+
+.scenario__label {
+  margin-bottom: var(--modem-space-xs);
+}
+
+.win {
+  border: 1px solid var(--modem-white-dim);
+  background: var(--modem-ground);
+  max-width: 100%;
+  margin: var(--modem-space-sm) 0 0 0;
+}
+
+.bar {
+  background: var(--modem-ground);
+  border-bottom: 1px solid var(--modem-white-dim);
+  color: var(--modem-white-dim);
+  font-size: var(--modem-type-scale-small);
+  letter-spacing: 0.08em;
+  padding: var(--modem-space-xs) var(--modem-space-sm);
+}
+
+.screen {
+  overflow-x: auto;
+  padding: var(--modem-space-sm);
+}
+
+/* Fixed-width, real terminal output - reflowing it would break every
+   box-drawing alignment, so a narrow viewport scrolls the frame
+   sideways instead (same choice mockup.rs's own comparison page makes
+   for its `.row`) rather than shrinking it past legibility or letting
+   it overflow the page. */
+.screen pre {
+  margin: 0;
+  width: max-content;
+  font-family: var(--modem-type-face);
+  font-size: clamp(0.55rem, 1.6vw, 0.85rem);
+  line-height: 1.15;
+}
+
+/* ---------------------------------------------------------------------
  * phase-row - one handshake phase in the explainer: label, description,
  * play control.
  * ------------------------------------------------------------------- */
