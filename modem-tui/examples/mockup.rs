@@ -77,19 +77,24 @@ fn pane(role: Role) -> Pane {
     Pane::new(Config {
         sample_rate: 8000,
         role,
-        // Full duplex, deliberately: under `Duplex::HalfPingPong` an end
-        // without the turn transmits silence, the far end reads that as
-        // carrier loss and hangs the call up on the first hand-over. See
-        // this file's own note in the repo docs - the frames below would
-        // otherwise all show a dead call.
-        duplex: Duplex::Full,
+        // Half duplex - the mode the binary actually ships with by
+        // default. Before Task 17 this was Full, deliberately: an end
+        // without the turn transmitted silence, the far end read that as
+        // carrier loss, and the first hand-over hung the call up - every
+        // frame on this page would otherwise have shown a dead call.
+        // Task 17's idle-mark fix (see `session.rs`'s own module doc) is
+        // what makes half duplex viable to demonstrate here at all.
+        duplex: Duplex::HalfPingPong,
     })
 }
 
 /// Two ends mid-call: dialled, answered, connected, one line received and
 /// the reply half typed. The state every frame on the page is rendered
 /// from, and the audio every frame's waterfall is computed from - real
-/// samples from a real (wired) call, not a synthetic stand-in.
+/// samples from a real (wired) call, not a synthetic stand-in. Driven
+/// entirely through `Pane`'s own chat surface (`type_line`/`feed_char`),
+/// the same half-duplex turn-taking the binary's own event loop uses -
+/// not a raw `Session::send` bypassing it.
 fn call() -> (Pane, Pane, Vec<f32>) {
     let mut a = pane(Role::Originate);
     let mut b = pane(Role::Answer);
@@ -106,7 +111,24 @@ fn call() -> (Pane, Pane, Vec<f32>) {
         |a, b| a.carrier() && b.carrier() && a.history().iter().any(|l| l.contains("CONNECT")),
     );
 
-    b.session_mut().send(b"hello from the other side\n");
+    // Originate starts with the turn (see `session.rs`'s own module
+    // doc) but this mockup's own narrative has answer speaking first -
+    // so originate hands it over, with the settle every half-duplex
+    // exchange in this crate pumps before trusting the link with real
+    // data (see `session.rs`'s own convention).
+    pump(&mut a, &mut b, 10, &mut audio);
+    a.session_mut().yield_turn();
+    pump_until(
+        &mut a,
+        &mut b,
+        3000,
+        "the turn to reach answer",
+        &mut audio,
+        |_, b| b.has_turn(),
+    );
+    pump(&mut a, &mut b, 10, &mut audio);
+
+    b.type_line("hello from the other side");
     pump_until(
         &mut a,
         &mut b,
@@ -117,7 +139,11 @@ fn call() -> (Pane, Pane, Vec<f32>) {
     );
 
     // A few seconds on the clock, so the elapsed field reads as a call in
-    // progress rather than one that just started.
+    // progress rather than one that just started. Answer's own chat
+    // layer has already yielded the turn back to originate by now (see
+    // `Pane::try_flush_pending`'s own doc), which is what lets the
+    // composing below actually queue against a turn originate is about
+    // to hold, not one it is still waiting on.
     pump(&mut a, &mut b, 800, &mut audio);
 
     for c in "took you long enough".chars() {
@@ -479,7 +505,7 @@ fn page(
 {proposal_b}
 
 <h2>Now - what the crate renders today</h2>
-<p>For comparison, the same call in the current frame. The waterfall rows are empty because Task 16 builds the FFT that fills them. The call runs full duplex: under half duplex an idle end currently transmits silence, the far end reads that as carrier loss, and the first turn hand-over hangs the call up.</p>
+<p>For comparison, the same call in the current frame, waterfall included (Task 16) and now genuinely half duplex (Task 17) - the mode the binary actually ships with by default. Before Task 17 this had to run full duplex: an idle end transmitted silence, the far end read that as carrier loss, and the first turn hand-over hung the call up. The idle-mark fix is what makes half duplex viable to demonstrate at all.</p>
 {side_by_side}
 
 <h2>The two earlier proposals, for the record</h2>

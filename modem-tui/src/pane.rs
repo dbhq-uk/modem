@@ -203,6 +203,15 @@ impl Pane {
         self.session.carrier_detected()
     }
 
+    /// Whether this pane's own session currently holds permission to
+    /// transmit real data under `Duplex::HalfPingPong` - see
+    /// `Session::has_turn`'s own doc. An immutable read, unlike
+    /// `session_mut().has_turn()`, so a caller checking this (a redraw, a
+    /// status predicate) never needs a mutable borrow just to ask.
+    pub fn has_turn(&self) -> bool {
+        self.session.has_turn()
+    }
+
     pub fn elapsed_label(&self) -> String {
         let secs = self.elapsed.as_secs();
         format!(
