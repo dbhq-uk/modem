@@ -21,11 +21,41 @@
 //! fix: `Tx` transmits in `tones(cfg.role)` and `Rx` listens in
 //! `tones(cfg.role.listen())` (see `lib.rs`'s `Role` doc) - so one
 //! `Config`, naming one end, drives both halves onto the correct,
-//! opposite bands. Wiring two `Session`s together with two *different*
-//! `Config`s (one `Role::Originate`, one `Role::Answer`) is what a real
-//! two-party call looks like, and is exactly the shape this module's own
-//! tests use - never one shared `Config` for both ends, which is the
-//! self-consistency trap this whole task exists to close off.
+//! opposite bands.
+//!
+//! # The role follows the command, not the `Config` it started with (Task 19)
+//!
+//! Before Task 19, `Config.role` was fixed at construction and never
+//! touched again: `dial` and `answer` rebuilt `Tx`/`idle_tx`/`Rx` from
+//! `self.cfg`, but neither ever changed what `self.cfg.role` actually
+//! said. Two ends built from the *same* `Config` - exactly what happens
+//! when the same binary, with the same flags, runs on two machines -
+//! were therefore always the same role, always transmitting in the same
+//! band and always listening in the same band, and could never hear each
+//! other. Every test in this module built its two ends from two
+//! *different* `Config`s (one naming `Role::Originate`, one naming
+//! `Role::Answer`), which is the only shape that could ever work under
+//! the old design - so the defect stayed invisible until two genuinely
+//! independent, identically-configured ends had to talk for real. That
+//! is exactly the shape `modem-tui`'s `--single --acoustic` on two
+//! separate machines with no way to choose a role produced, and it is
+//! why the two-machine case - the actual product - could not work.
+//!
+//! The fix is the period-correct one, matching a real Hayes modem: `ATD`
+//! put you in originate mode and `ATA` put you in answer mode, not a
+//! switch set beforehand. `dial` now sets `self.cfg.role =
+//! Role::Originate` and `answer` sets `self.cfg.role = Role::Answer`,
+//! *before* rebuilding `Tx`, `idle_tx` and `Rx` from that same
+//! `self.cfg` - so both ends can be built from one identical `Config`
+//! and still land in opposite bands, purely because one of them dialled
+//! and the other answered. `Config.role` is now only ever the band an
+//! idle session - one that has never dialled or answered - starts in;
+//! [`Session::role`] is the one true answer to "which end is this,
+//! right now", and any caller that wants to display or reason about the
+//! current role (a title bar, a status line) must read it from there,
+//! never from a `Config` snapshotted at some earlier point - see
+//! `role`'s own doc for why a stale copy silently goes wrong the moment
+//! `dial`/`answer` is called.
 //!
 //! # Half duplex: silence is not the same as idle mark
 //!
@@ -127,7 +157,7 @@ use crate::link::{encode_packet, Packet, PacketKind, PacketReader, MAX_PAYLOAD};
 use crate::overture::{Overture, Stage};
 use crate::rx::Rx;
 use crate::tx::Tx;
-use crate::{Config, Duplex};
+use crate::{Config, Duplex, Role};
 
 /// Alternating training preamble queued at the start of every transmit
 /// burst. Two characters, matching the convention `rx.rs` and `impair.rs`
@@ -217,12 +247,23 @@ impl Session {
     /// own doc) - the far end always answers regardless of what is
     /// performed here.
     ///
+    /// Sets this session's role to [`Role::Originate`] *first*, then
+    /// rebuilds `Tx`, `idle_tx` and `Rx` from that role (see this
+    /// module's own doc, "The role follows the command") - so calling
+    /// `dial` always puts this end in the originate band, even on a
+    /// session built from a `Config` whose `role` said `Role::Answer`.
+    /// This is what lets two ends built from one identical `Config`
+    /// still land in opposite bands: whichever one dials becomes the
+    /// originate end, full stop, regardless of what either `Config`
+    /// happened to say beforehand.
+    ///
     /// The originate end starts with the turn: a fresh preamble is queued
     /// immediately (see this module's doc on acquisition), long before
     /// `Tx` is ever read from - it simply waits, untouched, in `tx`'s
     /// queue for the whole overture, and is the first thing that goes out
     /// once `Connected` begins reading from `tx`.
     pub fn dial(&mut self, digits: &str) {
+        self.cfg.role = Role::Originate;
         self.overture = Some(Overture::new(digits));
         self.overture_stage = None;
         self.tx = Some(Tx::new(self.cfg));
@@ -238,11 +279,20 @@ impl Session {
     /// Starts answering: waits for carrier, then comes up in the answer
     /// band. No overture plays on this end - see this module's doc.
     ///
+    /// Sets this session's role to [`Role::Answer`] *first*, then
+    /// rebuilds `Tx`, `idle_tx` and `Rx` from that role - the same fix
+    /// `dial` applies for `Role::Originate` (see this module's own doc,
+    /// "The role follows the command"), and for the identical reason: a
+    /// session built from a `Config` that still said `Role::Originate`
+    /// must answer in the answer band regardless, or two identically-
+    /// configured ends can never hear each other.
+    ///
     /// The answer end does not hold the turn until the originate end
     /// explicitly yields it (a [`PacketKind::Turn`] packet, decoded in
     /// [`Session::process_in`]), so `process_out` transmits silence here
     /// until that happens.
     pub fn answer(&mut self) {
+        self.cfg.role = Role::Answer;
         self.overture = None;
         self.overture_stage = None;
         self.tx = Some(Tx::new(self.cfg));
@@ -455,6 +505,19 @@ impl Session {
         self.state
     }
 
+    /// Which end of the call this session currently is. Not necessarily
+    /// the role the `Config` passed to [`Session::new`] named:
+    /// [`Session::dial`] and [`Session::answer`] both set this before
+    /// rebuilding `Tx`/`idle_tx`/`Rx` (see this module's own doc, "The
+    /// role follows the command"), so this is the one place to read
+    /// "which end is this, right now" from. A caller that instead keeps
+    /// its own earlier copy of the `Config` this session was built from -
+    /// a title bar, a status line - will silently go stale the moment
+    /// either method is called.
+    pub fn role(&self) -> Role {
+        self.cfg.role
+    }
+
     /// The overture stage that owned the most recently rendered sample,
     /// while dialling. `None` outside `SessionState::Dialling`.
     pub fn stage(&self) -> Option<Stage> {
@@ -664,6 +727,167 @@ mod tests {
             pump(&mut originate, &mut answer);
         }
         assert_eq!(originate.receive(), b"HELLO ORIGINATE");
+    }
+
+    /// The headline test Task 19 exists for. Both ends here are built
+    /// from the exact same `Config` - the shape that is actually broken
+    /// today: `modem --single --acoustic` on two separate machines, with
+    /// no way to say which one is which, hands both ends `Role::Originate`
+    /// by construction. If `dial`/`answer` did not each set *this* end's
+    /// own role, both sessions above would stay `Role::Originate`, both
+    /// would transmit on 1270/1070 and listen on 2225/2025, and neither
+    /// could ever hear the other - which is exactly the defect the brief
+    /// names.
+    ///
+    /// Two ends both reaching `Connected` proves nothing here - that is
+    /// exactly what happens today while they are deaf to each other (see
+    /// this module's own doc on half duplex for the established caution
+    /// against trusting `SessionState` alone) - so this is asserted on
+    /// real payload bytes actually crossing in both directions, the same
+    /// shape `two_sessions_exchange_data_in_both_directions` above uses,
+    /// just built from one `Config` instead of two.
+    ///
+    /// Mutation proof target: deleting `answer`'s `self.cfg.role =
+    /// Role::Answer` line leaves `answer` at `Role::Originate` - both
+    /// ends then share a band and this test's `connect` call hangs until
+    /// `MAX_ITERS` and panics. See the task report for the exact output.
+    #[test]
+    fn two_sessions_built_from_the_same_config_connect_and_exchange_data_once_one_dials_and_the_other_answers(
+    ) {
+        let shared = cfg(Role::Originate);
+        let mut originate = Session::new(shared);
+        let mut answer = Session::new(shared);
+
+        originate.dial("1");
+        answer.answer();
+        connect(&mut originate, &mut answer);
+        settle(&mut originate, &mut answer);
+
+        assert_eq!(
+            originate.role(),
+            Role::Originate,
+            "the end that dialled must be Originate"
+        );
+        assert_eq!(
+            answer.role(),
+            Role::Answer,
+            "the end that answered must be Answer, even though it started from the same \
+             Config as the end that dialled"
+        );
+
+        assert!(originate.has_turn(), "originate must start with the turn");
+        originate.send(b"HELLO ANSWER");
+        for _ in 0..500 {
+            pump(&mut originate, &mut answer);
+        }
+        assert_eq!(answer.receive(), b"HELLO ANSWER");
+
+        originate.yield_turn();
+        let mut turned = false;
+        for _ in 0..MAX_ITERS {
+            pump(&mut originate, &mut answer);
+            if answer.has_turn() {
+                turned = true;
+                break;
+            }
+        }
+        assert!(turned, "answer never received the turn");
+        settle(&mut originate, &mut answer);
+
+        answer.send(b"HELLO ORIGINATE");
+        for _ in 0..500 {
+            pump(&mut originate, &mut answer);
+        }
+        assert_eq!(originate.receive(), b"HELLO ORIGINATE");
+    }
+
+    /// `dial` and `answer` must each put *this* end's transmitter in the
+    /// correct band, proven the way this module insists on: the recovered
+    /// tone frequency of what `process_out` actually renders, never the
+    /// `Role` enum this test itself just read back. Each session is
+    /// deliberately built from a `Config` naming the *wrong* role for
+    /// what it is about to do (dial from a `Role::Answer` config, answer
+    /// from a `Role::Originate` one) - a session that already happened to
+    /// agree with its own destination role would pass this test even if
+    /// `dial`/`answer` never touched `self.cfg.role` at all, since
+    /// `Tx::new`/`Rx::new` would pick the right band from the unmodified
+    /// `Config` by coincidence.
+    ///
+    /// Mutation proof target: deleting `dial`'s `self.cfg.role =
+    /// Role::Originate` line leaves this end transmitting the answer
+    /// band's mark tone it was constructed with instead - see the task
+    /// report for the exact failure.
+    #[test]
+    fn dial_transmits_in_the_originate_band_and_answer_in_the_answer_band_regardless_of_the_config_they_started_with(
+    ) {
+        // dial(), from a Config that named Role::Answer.
+        let mut dialler = Session::new(cfg(Role::Answer));
+        dialler.dial("1");
+        let mut warmup = [0.0f32; 1];
+        let mut iters = 0usize;
+        while dialler.state() != SessionState::Connected {
+            dialler.process_out(&mut warmup);
+            iters += 1;
+            assert!(
+                iters < 8000 * 30,
+                "dial did not reach Connected within 30 s of audio"
+            );
+        }
+        // Past the two-character acquisition preamble (about 534 samples
+        // at 8 kHz) and settled onto continuous idle mark, so this block
+        // is not a mix of preamble and idle mark - see this module's own
+        // doc on why every burst needs its own preamble.
+        let mut drain = vec![0.0f32; 4096];
+        dialler.process_out(&mut drain);
+        let mut out = vec![0.0f32; 4096];
+        dialler.process_out(&mut out);
+        let s64: Vec<f64> = out.iter().map(|&x| x as f64).collect();
+        let originate_mark = goertzel(&s64, 1270.0, 8000.0);
+        let answer_mark = goertzel(&s64, 2225.0, 8000.0);
+        assert!(
+            originate_mark >= 0.9,
+            "dial() did not transmit the originate band's mark tone (1270 Hz): {originate_mark}"
+        );
+        assert!(
+            answer_mark <= 0.05,
+            "dial() leaked the answer band's mark tone (2225 Hz) instead of transmitting its \
+             own: {answer_mark}"
+        );
+
+        // answer(), from a Config that named Role::Originate. answer()
+        // transmits silence, not idle mark, until it actually reaches
+        // Connected (see process_out's own doc), so a real originate-band
+        // tone is fed straight in to raise carrier - the same pattern
+        // `answering_waits_for_carrier_and_carrier_detected_tracks_the_
+        // real_receiver` above uses.
+        let mut answerer = Session::new(cfg(Role::Originate));
+        answerer.answer();
+        let mut carrier_tx = Tx::new(cfg(Role::Originate));
+        let mut carrier_tone = vec![0.0f32; 8000];
+        carrier_tx.read(&mut carrier_tone);
+        for chunk in carrier_tone.chunks(256) {
+            answerer.process_in(chunk);
+        }
+        assert_eq!(
+            answerer.state(),
+            SessionState::Connected,
+            "answer() never reached Connected after a real originate-band tone"
+        );
+
+        let mut out2 = vec![0.0f32; 4096];
+        answerer.process_out(&mut out2);
+        let s64_2: Vec<f64> = out2.iter().map(|&x| x as f64).collect();
+        let answer_mark2 = goertzel(&s64_2, 2225.0, 8000.0);
+        let originate_mark2 = goertzel(&s64_2, 1270.0, 8000.0);
+        assert!(
+            answer_mark2 >= 0.9,
+            "answer() did not transmit the answer band's mark tone (2225 Hz): {answer_mark2}"
+        );
+        assert!(
+            originate_mark2 <= 0.05,
+            "answer() leaked the originate band's mark tone (1270 Hz) instead of transmitting \
+             its own: {originate_mark2}"
+        );
     }
 
     /// Round 1 review finding: deleting `grant_turn`'s
