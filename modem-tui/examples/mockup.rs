@@ -27,7 +27,13 @@ use ratatui::style::Color;
 /// what makes this a wire rather than an echo - feeding `a` from `b`
 /// before `b` has produced this block's samples would hand it the
 /// previous one and quietly halve the round trip.
-fn pump(a: &mut Pane, b: &mut Pane, blocks: usize) {
+///
+/// Also appends the combined signal - both ends' outgoing blocks summed,
+/// the actual mix a demo call plays to the speakers - onto `audio`, so
+/// the waterfall this example renders is built from real samples the
+/// call genuinely produced (dial tone, DTMF, ANSam, then both Bell 103
+/// carriers), not a synthetic stand-in.
+fn pump(a: &mut Pane, b: &mut Pane, blocks: usize, audio: &mut Vec<f32>) {
     const BLOCK: usize = 256;
     let dt = Duration::from_secs_f64(BLOCK as f64 / 8000.0);
     let mut from_a = [0.0f32; BLOCK];
@@ -35,6 +41,9 @@ fn pump(a: &mut Pane, b: &mut Pane, blocks: usize) {
     for _ in 0..blocks {
         a.session_mut().process_out(&mut from_a);
         b.session_mut().process_out(&mut from_b);
+        for i in 0..BLOCK {
+            audio.push(from_a[i] + from_b[i]);
+        }
         a.session_mut().process_in(&from_b);
         b.session_mut().process_in(&from_a);
         a.tick(dt);
@@ -52,13 +61,14 @@ fn pump_until(
     b: &mut Pane,
     cap: usize,
     what: &str,
+    audio: &mut Vec<f32>,
     done: impl Fn(&Pane, &Pane) -> bool,
 ) {
     for _ in 0..cap {
         if done(a, b) {
             return;
         }
-        pump(a, b, 1);
+        pump(a, b, 1, audio);
     }
     panic!("gave up waiting for {what} after {cap} blocks");
 }
@@ -78,16 +88,23 @@ fn pane(role: Role) -> Pane {
 
 /// Two ends mid-call: dialled, answered, connected, one line received and
 /// the reply half typed. The state every frame on the page is rendered
-/// from.
-fn call() -> (Pane, Pane) {
+/// from, and the audio every frame's waterfall is computed from - real
+/// samples from a real (wired) call, not a synthetic stand-in.
+fn call() -> (Pane, Pane, Vec<f32>) {
     let mut a = pane(Role::Originate);
     let mut b = pane(Role::Answer);
+    let mut audio = Vec::new();
 
     a.type_line("ATDT01234567890");
     b.type_line("ATA");
-    pump_until(&mut a, &mut b, 3000, "both ends to connect", |a, b| {
-        a.carrier() && b.carrier() && a.history().iter().any(|l| l.contains("CONNECT"))
-    });
+    pump_until(
+        &mut a,
+        &mut b,
+        3000,
+        "both ends to connect",
+        &mut audio,
+        |a, b| a.carrier() && b.carrier() && a.history().iter().any(|l| l.contains("CONNECT")),
+    );
 
     b.session_mut().send(b"hello from the other side\n");
     pump_until(
@@ -95,19 +112,20 @@ fn call() -> (Pane, Pane) {
         &mut b,
         3000,
         "the far end's line to arrive",
+        &mut audio,
         |a, _| a.history().iter().any(|l| l.contains("other side")),
     );
 
     // A few seconds on the clock, so the elapsed field reads as a call in
     // progress rather than one that just started.
-    pump(&mut a, &mut b, 800);
+    pump(&mut a, &mut b, 800, &mut audio);
 
     for c in "took you long enough".chars() {
         a.feed_char(c);
     }
-    pump(&mut a, &mut b, 20);
+    pump(&mut a, &mut b, 20, &mut audio);
 
-    (a, b)
+    (a, b, audio)
 }
 
 fn css(colour: Color) -> String {
@@ -126,36 +144,46 @@ fn escape(s: &str) -> String {
 }
 
 /// One rendered buffer as `<pre>` markup, one `<span>` per run of cells
-/// sharing a colour rather than one per cell - a 100x24 frame is 2400
-/// cells and a span each makes the page four times the size for no
-/// visible difference.
+/// sharing a (foreground, background) pair rather than one per cell - a
+/// 100x24 frame is 2400 cells and a span each makes the page four times
+/// the size for no visible difference.
+///
+/// Both colours matter, not just the foreground: the waterfall's
+/// half-block glyph carries its lower sub-band in the background colour
+/// (see `waterfall.rs`'s own doc), and the below-threshold four-tone axis
+/// paints its cells as a plain space on a coloured background with no
+/// foreground at all. A version keyed on `cell.fg` alone (Task 15's own,
+/// before there was any real waterfall data to lose) would render every
+/// four-tone cell and every lower sub-band as if it were empty.
 fn frame_html(buf: &Buffer) -> String {
     let mut out = String::new();
     for y in 0..buf.area.height {
         let mut run = String::new();
-        let mut run_colour: Option<Color> = None;
+        let mut run_colours: Option<(Color, Color)> = None;
         for x in 0..buf.area.width {
             let cell = &buf[(x, y)];
-            let colour = cell.fg;
-            if Some(colour) != run_colour {
-                if let Some(prev) = run_colour {
+            let colours = (cell.fg, cell.bg);
+            if Some(colours) != run_colours {
+                if let Some((fg, bg)) = run_colours {
                     let _ = write!(
                         out,
-                        "<span style=\"color:{}\">{}</span>",
-                        css(prev),
+                        "<span style=\"color:{};background-color:{}\">{}</span>",
+                        css(fg),
+                        css(bg),
                         escape(&run)
                     );
                 }
                 run.clear();
-                run_colour = Some(colour);
+                run_colours = Some(colours);
             }
             run.push_str(cell.symbol());
         }
-        if let Some(prev) = run_colour {
+        if let Some((fg, bg)) = run_colours {
             let _ = write!(
                 out,
-                "<span style=\"color:{}\">{}</span>",
-                css(prev),
+                "<span style=\"color:{};background-color:{}\">{}</span>",
+                css(fg),
+                css(bg),
                 escape(&run)
             );
         }
@@ -333,10 +361,15 @@ fn main() {
     let (proposal_a, proposal_b) = proposals();
 
     // Two windows, side by side, one machine - as the crate renders it
-    // today, in the new default phosphor.
-    let (a, b) = call();
-    let left = App::single(a, &wired, Theme::default());
-    let right = App::single(b, &wired, Theme::default());
+    // today, in the new default phosphor. Both windows are fed the same
+    // real mixed audio the call produced - the shared-air argument the
+    // split layout makes explicitly (rule 1) is just as true of two
+    // separate single-pane windows watching the same demo call.
+    let (a, b, audio) = call();
+    let mut left = App::single(a, &wired, Theme::default());
+    let mut right = App::single(b, &wired, Theme::default());
+    left.push_samples(&audio);
+    right.push_samples(&audio);
     let side_by_side = format!(
         "<div class=\"row\">{}{}</div>",
         window("originate", &render(&left, 72, 22)),
@@ -344,28 +377,26 @@ fn main() {
     );
 
     // One window, both ends in it - the split layout the crate builds.
-    let (a3, b3) = call();
-    let split = App::split(a3, b3, &wired, Theme::default());
+    let (a3, b3, audio3) = call();
+    let mut split = App::split(a3, b3, &wired, Theme::default());
+    split.push_samples(&audio3);
     let split_window = window("split screen", &render(&split, 100, 24));
 
     // The three phosphors, default first.
-    let (a4, _) = call();
-    let (a5, _) = call();
-    let (a6, _) = call();
+    let (a4, _, audio4) = call();
+    let (a5, _, audio5) = call();
+    let (a6, _, audio6) = call();
+    let mut app4 = App::single(a4, &wired, Theme::White);
+    let mut app5 = App::single(a5, &wired, Theme::Green);
+    let mut app6 = App::single(a6, &wired, Theme::Amber);
+    app4.push_samples(&audio4);
+    app5.push_samples(&audio5);
+    app6.push_samples(&audio6);
     let themes = format!(
         "<div class=\"row\">{}{}{}</div>",
-        window(
-            "white - the default",
-            &render(&App::single(a4, &wired, Theme::White), 62, 16)
-        ),
-        window(
-            "green",
-            &render(&App::single(a5, &wired, Theme::Green), 62, 16)
-        ),
-        window(
-            "amber",
-            &render(&App::single(a6, &wired, Theme::Amber), 62, 16)
-        ),
+        window("white - the default", &render(&app4, 62, 16)),
+        window("green", &render(&app5, 62, 16)),
+        window("amber", &render(&app6, 62, 16)),
     );
 
     print!(
