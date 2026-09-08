@@ -458,19 +458,23 @@ PHASES.forEach((phase, index) => {
     }
   });
 
-  const body = document.createElement('div');
-  body.className = 'phase-row__body';
+  // One header line (the control beside its own phase name), the
+  // description flowing full width beneath it - not the button run
+  // down the row's full height beside a text column it narrows.
+  const header = document.createElement('div');
+  header.className = 'phase-row__header';
   const h3 = document.createElement('h3');
   h3.className = 'phase-row__label';
   h3.textContent = phase.label;
+  header.appendChild(button);
+  header.appendChild(h3);
+
   const p = document.createElement('p');
   p.className = 'phase-row__description';
   p.textContent = phase.description;
-  body.appendChild(h3);
-  body.appendChild(p);
 
-  li.appendChild(button);
-  li.appendChild(body);
+  li.appendChild(header);
+  li.appendChild(p);
   phaseListEl.appendChild(li);
 });
 

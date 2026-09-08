@@ -263,7 +263,13 @@ p {
 .hero__image {
   display: block;
   width: 100%;
-  height: min(46vh, 380px);
+  /* clamp, not min: on a short viewport (a phone in landscape) 46vh
+     alone can shrink below what the wordmark and tagline need, and
+     .hero's own overflow: hidden would silently crop them rather than
+     let them push the box taller - 14rem is a floor comfortably above
+     their combined height at every viewport this clamp actually
+     reaches. */
+  height: clamp(14rem, 46vh, 380px);
   object-fit: cover;
   opacity: 0.55;
   /* web/hero.png was generated green at Dan's own request, and the icon
@@ -703,6 +709,15 @@ section {
   margin: var(--modem-space-sm) 0 0 0;
 }
 
+/* The narrower "one device" pair (two 72-column single panes) shown in
+ * place of the 100-column split below the mobile breakpoint - see the
+ * "Mobile" section at the end of this file. Hidden by default; the two
+ * frames are real, different renders (modem-tui/examples/mockup.rs's
+ * one-device-mobile-a/b), not the wide one scaled down. */
+.win-group--narrow {
+  display: none;
+}
+
 .bar {
   background: var(--modem-ground);
   border-bottom: 1px solid var(--modem-white-dim);
@@ -712,9 +727,33 @@ section {
   padding: var(--modem-space-xs) var(--modem-space-sm);
 }
 
+/* overflow-x: auto already clips cleanly at this container's own edge -
+ * .win's max-width: 100% above stops it ever growing past its parent,
+ * so a wide frame scrolls inside its own box rather than painting past
+ * it. The two background gradients are the classic CSS-only "scroll
+ * shadow": one pair scrolls with the content and simply paints over the
+ * ground colour at each edge, the other pair is fixed to the viewport
+ * and only shows through once the scrolled-with-content one has moved
+ * out of the way - so a shadow appears on whichever side still has more
+ * to reveal, and both disappear once nothing is left to scroll to. No
+ * JavaScript scroll-position tracking needed for what is otherwise a
+ * layout-only affordance. overscroll-behavior-x keeps a scroll that
+ * reaches either end from chaining into the page itself.
+ */
 .screen {
   overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
   padding: var(--modem-space-sm);
+  background:
+    linear-gradient(to right, var(--modem-ground) 30%, rgba(10, 10, 10, 0)) left,
+    linear-gradient(to left, var(--modem-ground) 30%, rgba(10, 10, 10, 0)) right,
+    linear-gradient(to right, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0)) left,
+    linear-gradient(to left, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0)) right;
+  background-repeat: no-repeat;
+  background-color: var(--modem-ground);
+  background-size: 2ch 100%, 2ch 100%, 1ch 100%, 1ch 100%;
+  background-attachment: local, local, scroll, scroll;
 }
 
 /* Fixed-width, real terminal output - reflowing it would break every
@@ -740,10 +779,14 @@ section {
   padding: 0;
 }
 
+/* One header line (the Play/Stop control beside its own phase name),
+ * the description flowing full width beneath it - not a control down
+ * one side with every paragraph squeezed into whatever width is left
+ * beside it, which is what this looked like before. Same shape at
+ * every viewport rather than a separate mobile-only layout: the
+ * problem (a narrow text column fighting the button for space) was
+ * never really a mobile-only one, just most visible there. */
 .phase-row {
-  display: flex;
-  gap: var(--modem-space-sm);
-  align-items: flex-start;
   padding: var(--modem-space-sm) 0;
   border-bottom: 1px solid var(--modem-white-dim);
 }
@@ -753,7 +796,17 @@ section {
 }
 
 .phase-row--active {
-  background: rgba(255, 176, 0, 0.08);
+  /* color-mix, not a hardcoded rgba - this was pinned to amber's own
+     literal RGB triplet before the page moved to green, invisible to
+     the earlier find-and-replace pass because it never went through
+     var(--modem-amber-bright) in the first place. */
+  background: color-mix(in srgb, var(--modem-green-bright) 8%, transparent);
+}
+
+.phase-row__header {
+  display: flex;
+  align-items: center;
+  gap: var(--modem-space-sm);
 }
 
 .phase-row__play {
@@ -777,10 +830,6 @@ section {
   color: var(--modem-white-dim);
   border-color: var(--modem-white-dim);
   cursor: not-allowed;
-}
-
-.phase-row__body {
-  flex: 1;
 }
 
 .phase-row__label {
@@ -845,4 +894,71 @@ section {
   padding: var(--modem-space-md) 0 var(--modem-space-lg) 0;
   font-size: var(--modem-type-scale-small);
   color: var(--modem-white-dim);
+}
+
+/* ---------------------------------------------------------------------
+ * Mobile - phones and small tablets. The threshold is 48rem (768px):
+ * the generated frame's own font-size clamp (.screen pre, above) is
+ * already pinned at its 0.6rem floor by about 738px, so below 768px
+ * there is nothing left to gain from the wide split frame - a phone
+ * gets the narrower real render instead (see .win-group--narrow above
+ * and modem-tui/examples/mockup.rs's one-device-mobile-a/b), not the
+ * same frame shrunk past legibility.
+ * ------------------------------------------------------------------- */
+@media (max-width: 48rem) {
+  /* Gutters: the page's own --modem-space-md (4ch, roughly 64px on a
+     16px root) is a comfortable desktop margin and a poor one on a
+     390px screen, where it alone eats a fifth of the width before any
+     content starts. --modem-space-sm is an existing token, not a new
+     hardcoded value - reusing it here rather than inventing a
+     "mobile gutter" token that would only ever apply to one media
+     query. */
+  main,
+  .hero__content {
+    padding-left: var(--modem-space-sm);
+    padding-right: var(--modem-space-sm);
+  }
+
+  /* The one-device frame: real render swap, not a CSS shrink - see the
+     banner comment above .win-group--narrow. */
+  .win--wide {
+    display: none;
+  }
+
+  .win-group--narrow {
+    display: flex;
+    flex-direction: column;
+    gap: var(--modem-space-sm);
+  }
+
+  /* The live wired demo: stacked, not side by side pressed down to an
+     unreadable column width. flex-basis: 320px on .wired__panel (see
+     above) is wider than a phone's own content width, so without this
+     the two panels would sit on one line, each squeezed far narrower
+     than 320px, rather than each getting the full width in turn. */
+  .wired__panels {
+    flex-direction: column;
+  }
+
+  .wired__panel {
+    flex-basis: auto;
+  }
+
+  /* Touch targets: 44px is the WCAG 2.2 / iOS minimum comfortable
+     target. 16px input/select text is not a style choice - below that,
+     iOS Safari zooms the whole page in on focus, which this rule
+     prevents outright rather than fighting after the fact. */
+  .dial-button,
+  .endpoint button,
+  .endpoint select,
+  .phase-row__play,
+  .download-row__link {
+    min-height: 44px;
+  }
+
+  .endpoint input[type="text"],
+  .endpoint select {
+    min-height: 44px;
+    font-size: 16px;
+  }
 }
