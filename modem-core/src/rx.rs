@@ -156,7 +156,12 @@ pub struct Rx {
 impl Rx {
     pub fn new(cfg: Config) -> Self {
         assert!(cfg.sample_rate > 0, "sample_rate must be greater than zero");
-        let (mark, space) = tones(cfg.role);
+        // The Task 12 Role fix: an Rx listens on the *other* end's
+        // transmit band, not its own role's. `tones(cfg.role)` would tune
+        // this receiver to the same band a `Tx` built from the identical
+        // `Config` transmits on - see `lib.rs`'s `Role` doc for the bug
+        // this replaced and why every prior test still passed with it.
+        let (mark, space) = tones(cfg.role.listen());
         let win = round(samples_per_symbol()) as usize;
         Self {
             win,
@@ -371,6 +376,75 @@ mod tests {
         }
     }
 
+    /// The Role fix, proven through the real wiring rather than asserted.
+    /// An originate `Tx` and an answer-configured `Rx` are two genuinely
+    /// independent ends built from two different `Config`s - not the one
+    /// shared `Config` every other loopback fixture in this file uses -
+    /// which is exactly the shape every other test in this project cannot
+    /// exercise: a `Tx` and an `Rx` sharing a `Config` always land on the
+    /// same band regardless of what `tones` does with `Role`, so a bug in
+    /// the mapping between "my role" and "the band I listen on" is
+    /// invisible to them by construction.
+    ///
+    /// Mutation 1 targets this test directly: revert `Rx::new` to
+    /// `tones(cfg.role)` (this crate's pre-fix behaviour) and an
+    /// originate-configured `Rx` decodes too, because it is now listening
+    /// on the *same* band the originate `Tx` transmits on instead of the
+    /// answer band a real originate receiver would use - see the task
+    /// report for the actual failure this produces.
+    #[test]
+    fn role_fix_an_originate_tx_is_heard_only_by_an_answer_configured_rx() {
+        let payload = b"CONNECT 300";
+        let tx_c = cfg(Role::Originate, 8000);
+
+        let mut tx = Tx::new(tx_c);
+        tx.write(payload);
+        let total = payload.len() * 10 * 8000 / 300 + 8000;
+        let mut air = vec![0.0f32; total];
+        tx.read(&mut air);
+
+        // Answer-configured: listens on tones(Answer.listen()) ==
+        // tones(Originate), the band the Tx above actually transmitted on.
+        let mut correct_rx = Rx::new(cfg(Role::Answer, 8000));
+        let mut got = Vec::new();
+        let mut buf = [0u8; 256];
+        for chunk in air.chunks(733) {
+            correct_rx.write(chunk);
+            let n = correct_rx.read(&mut buf);
+            got.extend_from_slice(&buf[..n]);
+        }
+        assert_same(
+            &got,
+            payload,
+            "an answer-configured Rx must decode an originate Tx",
+        );
+
+        // Originate-configured: listens on tones(Originate.listen()) ==
+        // tones(Answer) - the wrong band for this Tx. This must not
+        // recover the real payload. It is not asserted empty: carrier.rs's
+        // own module doc measures that a loud enough full-scale signal
+        // leaks through a mismatched correlator by a bounded but nonzero
+        // fraction (its own figures are 62x-86x suppression, not
+        // infinite), and this fixture's full-amplitude "CONNECT 300"
+        // reproduces exactly that - a handful of garbled bytes, never the
+        // real content. Demanding literal silence here would be asserting
+        // something this crate's own documented physics says is not true.
+        let mut wrong_rx = Rx::new(cfg(Role::Originate, 8000));
+        let mut got_wrong = Vec::new();
+        let mut buf = [0u8; 256];
+        for chunk in air.chunks(733) {
+            wrong_rx.write(chunk);
+            let n = wrong_rx.read(&mut buf);
+            got_wrong.extend_from_slice(&buf[..n]);
+        }
+        assert_ne!(
+            got_wrong, payload,
+            "an originate-configured Rx decoded an originate Tx's own transmission \
+             byte-exact - it is listening on its own transmit band instead of the \
+             far end's"
+        );
+    }
+
     /// Modulates payload, demodulates it, returns what came back.
     ///
     /// The lead-in is real: 100 ms of idle mark is read out of `tx` and
@@ -385,10 +459,20 @@ mod tests {
     /// Block size is deliberately awkward - 733 samples is never a whole
     /// number of symbols at any rate here, so nothing can accidentally
     /// depend on a block boundary landing on a symbol boundary.
+    ///
+    /// `role` is the transmitting end's role, matching every call site's
+    /// naming (`loopback(payload, Role::Originate, ...)` reads as
+    /// "Originate sends this"). Post Role-fix, `Rx::new` listens on
+    /// `tones(cfg.role.listen())`, so the receiver here is built from
+    /// `role.listen()` - the *other* role - which makes its listen band
+    /// `tones(role.listen().listen()) == tones(role)`, the same band `tx`
+    /// transmits on. Building both ends from `role` directly (the
+    /// pre-fix shape) would now put this fixture's own receiver on the
+    /// wrong band; this is the one fix point for every call site below,
+    /// which is why the call sites themselves are unchanged.
     fn loopback(payload: &[u8], role: Role, rate: u32, block: usize) -> Vec<u8> {
-        let c = cfg(role, rate);
-        let mut tx = Tx::new(c);
-        let mut rx = Rx::new(c);
+        let mut tx = Tx::new(cfg(role, rate));
+        let mut rx = Rx::new(cfg(role.listen(), rate));
 
         let mut out = Vec::new();
         let mut buf = vec![0.0f32; block];
@@ -534,7 +618,12 @@ mod tests {
         for amplitude in [1.0f32, 0.1, 10.0] {
             for tx_rate in [8160u32, 7840] {
                 let mut tx = Tx::new(cfg(Role::Originate, tx_rate));
-                let mut rx = Rx::new(cfg(Role::Originate, 8000));
+                // Role-fix call-site audit: this Tx transmits Originate's
+                // band, so the Rx that listens for it must be configured
+                // Answer - tones(Answer.listen()) == tones(Originate).
+                // Building both from Role::Originate (as before the fix)
+                // would now tune this Rx to the Answer band instead.
+                let mut rx = Rx::new(cfg(Role::Answer, 8000));
 
                 let mut out = Vec::new();
                 let mut buf = vec![0.0f32; 733];
@@ -615,6 +704,10 @@ mod tests {
     #[test]
     fn receiver_joining_mid_symbol_recovers_byte_alignment() {
         let c = cfg(Role::Originate, 8000);
+        // Role-fix call-site audit: `tx` below transmits Originate's band,
+        // so the receiver that listens for it must be configured Answer -
+        // tones(Answer.listen()) == tones(Originate).
+        let rx_c = cfg(Role::Answer, 8000);
         let payload = b"The quick brown fox jumps over the lazy dog. 0123456789";
 
         fn emit(tx: &mut Tx, air: &mut Vec<f32>, n: usize) {
@@ -633,7 +726,7 @@ mod tests {
         emit(&mut tx, &mut air, payload.len() * 10 * 8000 / 300 + 8000);
 
         for skip in 0..54 {
-            let mut rx = Rx::new(c);
+            let mut rx = Rx::new(rx_c);
             let mut out = Vec::new();
             let mut got = [0u8; 256];
             let mut i = skip;
@@ -694,8 +787,12 @@ mod tests {
     /// above demand. It only surfaces when something finally arrives.
     #[test]
     fn silence_is_read_as_idle_mark() {
-        let c = cfg(Role::Originate, 8000);
-        let mut rx = Rx::new(c);
+        let tx_c = cfg(Role::Originate, 8000);
+        // Role-fix call-site audit: `rx` here must listen on whatever
+        // band the `Tx` created further down (Originate) transmits on, so
+        // it is built Answer - tones(Answer.listen()) == tones(Originate).
+        let rx_c = cfg(Role::Answer, 8000);
+        let mut rx = Rx::new(rx_c);
         let quiet = vec![0.0f32; 800];
         let mut got = [0u8; 256];
         let mut bytes = 0;
@@ -711,7 +808,7 @@ mod tests {
         );
 
         let payload = b"CONNECT 300";
-        let mut tx = Tx::new(c);
+        let mut tx = Tx::new(tx_c);
         let mut buf = vec![0.0f32; 733];
         let mut sent = 0;
         while sent < 800 {
@@ -739,9 +836,9 @@ mod tests {
     /// else here would notice the queue never draining.
     #[test]
     fn read_drains_what_it_returns() {
-        let c = cfg(Role::Originate, 8000);
-        let mut tx = Tx::new(c);
-        let mut rx = Rx::new(c);
+        let mut tx = Tx::new(cfg(Role::Originate, 8000));
+        // Role-fix call-site audit: Answer, to listen on Originate's band.
+        let mut rx = Rx::new(cfg(Role::Answer, 8000));
         tx.write(b"AB");
 
         let mut buf = vec![0.0f32; 733];
@@ -807,7 +904,10 @@ mod tests {
     fn clean_loopback_has_no_framing_errors() {
         let c = cfg(Role::Originate, 8000);
         let mut tx = Tx::new(c);
-        let mut rx = Rx::new(c);
+        // Role-fix call-site audit: this Rx must listen on Originate's
+        // band, so it is built Answer - tones(Answer.listen()) ==
+        // tones(Originate).
+        let mut rx = Rx::new(cfg(Role::Answer, 8000));
         tx.write(b"The quick brown fox jumps over the lazy dog");
 
         let mut buf = vec![0.0f32; 733];
@@ -828,7 +928,10 @@ mod tests {
     fn carrier_rises_on_signal_and_falls_on_silence() {
         let c = cfg(Role::Originate, 8000);
         let mut tx = Tx::new(c);
-        let mut rx = Rx::new(c);
+        // Role-fix call-site audit: this Rx must listen on Originate's
+        // band, so it is built Answer - tones(Answer.listen()) ==
+        // tones(Originate).
+        let mut rx = Rx::new(cfg(Role::Answer, 8000));
 
         let mut buf = vec![0.0f32; 8000];
         tx.read(&mut buf);
@@ -851,7 +954,10 @@ mod tests {
     fn carrier_holds_through_a_short_gap() {
         let c = cfg(Role::Originate, 8000);
         let mut tx = Tx::new(c);
-        let mut rx = Rx::new(c);
+        // Role-fix call-site audit: this Rx must listen on Originate's
+        // band, so it is built Answer - tones(Answer.listen()) ==
+        // tones(Originate).
+        let mut rx = Rx::new(cfg(Role::Answer, 8000));
 
         let mut buf = vec![0.0f32; 8000];
         tx.read(&mut buf);
@@ -866,7 +972,10 @@ mod tests {
     fn carrier_emits_events_in_order() {
         let c = cfg(Role::Originate, 8000);
         let mut tx = Tx::new(c);
-        let mut rx = Rx::new(c);
+        // Role-fix call-site audit: this Rx must listen on Originate's
+        // band, so it is built Answer - tones(Answer.listen()) ==
+        // tones(Originate).
+        let mut rx = Rx::new(cfg(Role::Answer, 8000));
 
         let mut buf = vec![0.0f32; 8000];
         tx.read(&mut buf);
@@ -890,7 +999,10 @@ mod tests {
     fn carrier_up_does_not_imply_symbol_lock() {
         let c = cfg(Role::Originate, 8000);
         let mut tx = Tx::new(c);
-        let mut rx = Rx::new(c);
+        // Role-fix call-site audit: this Rx must listen on Originate's
+        // band, so it is built Answer - tones(Answer.listen()) ==
+        // tones(Originate).
+        let mut rx = Rx::new(cfg(Role::Answer, 8000));
         let mut buf = vec![0.0f32; 8000];
         tx.read(&mut buf); // idle mark only, no transitions
         rx.write(&buf);
@@ -919,7 +1031,10 @@ mod tests {
     fn events_queue_drops_the_oldest_not_the_newest_when_full() {
         let c = cfg(Role::Originate, 8000);
         let mut tx = Tx::new(c);
-        let mut rx = Rx::new(c);
+        // Role-fix call-site audit: this Rx must listen on Originate's
+        // band, so it is built Answer - tones(Answer.listen()) ==
+        // tones(Originate).
+        let mut rx = Rx::new(cfg(Role::Answer, 8000));
 
         let mut carrier_buf = vec![0.0f32; 800]; // 100 ms, ample to rise
         let silence_buf = vec![0.0f32; 4800]; // 600 ms, clears the 500 ms hold-off
@@ -969,7 +1084,12 @@ mod tests {
     fn two_tones_at_equal_strength_raise_carrier() {
         let c = cfg(Role::Originate, 8000);
         let mut rx = Rx::new(c);
-        let (mark, space) = tones(Role::Originate);
+        // Role-fix call-site audit: there is no Tx here, but the buffer
+        // below is synthesised directly at a chosen tone pair, so it must
+        // match whatever `rx` actually listens on - tones(c.role.listen())
+        // - rather than tones(c.role), which was the pre-fix (and, until
+        // this line, still-correct-by-coincidence) band.
+        let (mark, space) = tones(c.role.listen());
         let buf: Vec<f32> = (0..16_000)
             .map(|i| {
                 let t = i as f64 / DSP_RATE;
@@ -1002,7 +1122,21 @@ mod tests {
     #[test]
     fn noise_on_a_dead_line_produces_no_bytes() {
         for amplitude in [1e-4f32, 1e-3, 5e-3, 1e-2, 0.0126, 0.02] {
-            let c = cfg(Role::Originate, 8000);
+            // Role-fix call-site audit: there is no Tx here, but this
+            // sweep's top amplitude (0.02) sits right against the
+            // documented cold-start ceiling (`carrier.rs`'s
+            // `INITIAL_FLOOR` doc: passes at 0.0205, fails at 0.021) -
+            // measured, implicitly, at the band `Role::Originate` resolved
+            // to *before* the Role fix, tones(Originate) == 1270/1070.
+            // Deterministic PRNG noise is not spectrally flat, so a
+            // different correlator band can read genuinely different
+            // energy from the identical byte stream: post-fix,
+            // `Rx::new(cfg(Role::Originate, ..))` moved to 2225/2025 and
+            // this exact amplitude started fabricating bytes there.
+            // Role::Answer keeps this test (and the figures it is cited
+            // from) pinned to the original, documented band -
+            // tones(Answer.listen()) == tones(Originate) == 1270/1070.
+            let c = cfg(Role::Answer, 8000);
             let mut rx = Rx::new(c);
 
             // Deterministic noise, no carrier anywhere, scaled per sweep
@@ -1053,9 +1187,10 @@ mod tests {
     #[test]
     fn carrier_detection_sensitivity_window() {
         fn clean_loopback_detects(amplitude: f32) -> bool {
-            let c = cfg(Role::Originate, 8000);
-            let mut tx = Tx::new(c);
-            let mut rx = Rx::new(c);
+            let mut tx = Tx::new(cfg(Role::Originate, 8000));
+            // Role-fix call-site audit: Answer, to listen on Originate's
+            // band.
+            let mut rx = Rx::new(cfg(Role::Answer, 8000));
             tx.write(b"CONNECT 300");
             let mut buf = vec![0.0f32; 733];
             let mut got = [0u8; 256];
@@ -1105,8 +1240,10 @@ mod tests {
     /// two sides of the same mechanism and both have to keep passing.
     #[test]
     fn floor_adapts_downward_during_a_quiet_settle_period() {
-        let c = cfg(Role::Originate, 8000);
-        let mut rx = Rx::new(c);
+        // Role-fix call-site audit: `rx` must listen on whatever band the
+        // `Tx` created below (Originate) transmits on, so it is built
+        // Answer - tones(Answer.listen()) == tones(Originate).
+        let mut rx = Rx::new(cfg(Role::Answer, 8000));
 
         let quiet = vec![0.0f32; 733];
         let mut sent = 0;
@@ -1116,7 +1253,7 @@ mod tests {
             sent += 733;
         }
 
-        let mut tx = Tx::new(c);
+        let mut tx = Tx::new(cfg(Role::Originate, 8000));
         tx.write(b"CONNECT 300");
         let mut buf = vec![0.0f32; 733];
         let mut got = [0u8; 256];

@@ -887,10 +887,21 @@ mod tests {
     /// means this same harness shape will work unmodified on a stream
     /// that carries no training convention of this crate's own at all,
     /// which is exactly what Task 9's minimodem cross-validation decodes.
+    ///
+    /// Role-fix call-site audit: `role` here names the transmitting end,
+    /// matching every call site's convention (`demod(&s, Role::Originate)`
+    /// reads as "decode what Originate sent"), the same convention `air`
+    /// uses. Post Role-fix, `Rx::new` listens on `tones(cfg.role.listen())`,
+    /// so this function's own `Rx` is built from `role.listen()` - the
+    /// *other* role - which makes its listen band
+    /// `tones(role.listen().listen()) == tones(role)`, the same band
+    /// `air(_, role)`'s `Tx` transmitted on. This is the one fix point for
+    /// every `demod` call site in this file, which is why none of them
+    /// needed to change.
     fn demod(samples: &[f32], role: Role) -> Vec<u8> {
         let c = Config {
             sample_rate: DSP_RATE as u32,
-            role,
+            role: role.listen(),
             duplex: Duplex::HalfPingPong,
         };
         let mut rx = Rx::new(c);

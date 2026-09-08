@@ -273,9 +273,17 @@ fn we_decode_minimodem_tx() {
          doc relies on has changed"
     );
 
+    // Role-fix call-site audit: minimodem was told to transmit at
+    // `--mark 1270 --space 1070` (MARK_HZ/SPACE_HZ, Originate's own band),
+    // independent of this crate's `Role` enum. Post Role-fix, `Rx::new`
+    // listens on `tones(cfg.role.listen())`, so to listen on 1270/1070
+    // this `Rx` must be configured `Role::Answer` -
+    // tones(Answer.listen()) == tones(Originate) == 1270/1070. Before the
+    // fix, `Role::Originate` here happened to work only because `Rx::new`
+    // wrongly used `tones(cfg.role)` directly.
     let cfg = Config {
         sample_rate: rate,
-        role: Role::Originate,
+        role: Role::Answer,
         duplex: Duplex::HalfPingPong,
     };
     let mut rx = Rx::new(cfg);
