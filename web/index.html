@@ -101,7 +101,7 @@
       <div class="scenario">
         <h3 class="scenario__label">One device</h3>
         <p>Run <code>modem</code> with no flags and both ends open in one window, originate on the left and answer on the right, sharing one spectrum. The link between them is wired in software rather than crossing the air, so the status bar says <code>[DEMO MODE]</code> - not an apology, the same honesty this whole project runs on. It appears whenever the link is not acoustic, and only then.</p>
-        <div class="win">
+        <div class="win" aria-hidden="true">
           <div class="bar">modem - split screen</div>
           <div class="screen">
             <!-- BEGIN generated: one-device frame (web/_gen/frames.py - do not hand-edit) -->
@@ -138,7 +138,7 @@
       <div class="scenario">
         <h3 class="scenario__label">Two devices</h3>
         <p>The real thing needs one machine per end, speakers and microphone facing. Like a real modem, you choose which end you are: the calling machine runs <code>modem --single --acoustic</code>, the receiving machine runs <code>modem --single --acoustic --answer</code> and waits for a call. Dial from the calling machine with <code>ATDT&lt;digits&gt;</code>. Whichever end dials becomes originate and whichever end answers becomes answer, so the two land in opposite Bell 103 bands automatically - originate on 1270/1070 Hz, answer on 2225/2025 Hz - and each can hear the other, exactly as a Hayes modem's own originate/answer switch worked.</p>
-        <div class="win">
+        <div class="win" aria-hidden="true">
           <div class="bar">modem - originate</div>
           <div class="screen">
             <!-- BEGIN generated: two-device frame (web/_gen/frames.py - do not hand-edit) -->
