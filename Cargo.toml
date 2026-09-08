@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["modem-core", "modem-wasm", "modem-audio"]
+members = ["modem-core", "modem-wasm", "modem-audio", "modem-tui"]
 
 [workspace.package]
 version = "0.1.0"

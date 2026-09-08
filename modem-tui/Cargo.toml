@@ -1,0 +1,13 @@
+[package]
+name = "modem-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+crossterm = "0.29.0"
+modem-audio = { path = "../modem-audio" }
+modem-core = { path = "../modem-core" }
+ratatui = "0.30.2"
