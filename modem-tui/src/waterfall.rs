@@ -39,11 +39,14 @@
 //! magnitude in dB relative to a full-scale tone, quantised into
 //! [`RAMP_STEPS`] discrete steps from the ground colour (silence) up to
 //! full brightness (0 dB). Older columns fade toward the floor as they
-//! scroll left, over a [`DECAY_COLUMNS`]-column time constant - the
-//! "brand token" the design spec's `tokens.json` generator (plan 2, not
-//! this repo) will eventually own; pinned here as a literal in the
-//! meantime, the same judgement call `theme.rs` already makes for the
-//! phosphor palette itself.
+//! scroll left, over a [`DECAY_COLUMNS`]-column time constant.
+//!
+//! **That constant is derived, not chosen here.** `brand/tokens.json`
+//! owns phosphor decay and authors it in seconds, so the page's canvas
+//! can animate on the same number; [`DECAY_COLUMNS`] divides it by
+//! [`COLUMN_SECONDS`]. Decay is the strongest CRT cue there is, and it
+//! is the one value that has to agree between this renderer and the page
+//! or the two surfaces read as different products.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -101,9 +104,22 @@ pub const RAMP_STEPS: u8 = 8;
 /// cell is fully at the floor colour.
 const FLOOR_DB: f32 = -48.0;
 
+/// How long one waterfall column represents: one analysis block at the
+/// sample rate the whole project baselines on. This is the bridge
+/// between the brand token, which is authored in **seconds** so a CSS
+/// animation on the page can use the same number, and this renderer,
+/// which counts in **columns**.
+pub const COLUMN_SECONDS: f32 = modem_core::analyse::fft_size_for(8000) as f32 / 8000.0;
+
 /// How many columns of scroll it takes a lit cell's brightness to decay
 /// toward the floor - see this module's own doc.
-pub const DECAY_COLUMNS: f32 = 40.0;
+///
+/// **Derived from the brand token, never pinned here.** Phosphor decay
+/// is the single strongest CRT cue there is, and it is the one value
+/// that has to match between this renderer and the page's canvas or the
+/// two surfaces read as different products. A literal here would drift
+/// from `brand/tokens.json` the first time anybody tuned one of them.
+pub const DECAY_COLUMNS: f32 = crate::tokens::PHOSPHOR_DECAY_SECONDS / COLUMN_SECONDS;
 
 /// The overture's stages, as the axis footer names them - unchanged by
 /// Task 16, which owns the frequency axis, not this footer. See Task 15's

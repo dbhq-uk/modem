@@ -378,3 +378,29 @@ fn theme_rs_colour_constants_match_tokens_json_exactly() {
         json["colour"]["phosphor"]["default"].as_str().unwrap()
     );
 }
+
+/// Phosphor decay is authored once, in seconds, and the terminal derives
+/// its own column count from it. The brief's own reason: decay is the
+/// strongest CRT cue there is, and if the terminal and the page's canvas
+/// disagree the two surfaces read as different products.
+///
+/// What this can and cannot prove, stated plainly: it cannot tell a
+/// derivation from a literal that happens to equal the same value today,
+/// because at runtime both are just `40.0`. What it does guarantee is
+/// the thing that actually matters - **change the token and this fails
+/// unless the renderer follows.** Verified by mutation: setting
+/// `phosphor_decay_seconds` to 5.12 and regenerating fails this test
+/// while `DECAY_COLUMNS` stays pinned.
+#[test]
+fn the_waterfalls_decay_is_derived_from_the_token_not_pinned_beside_it() {
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string("../brand/tokens.json").unwrap()).unwrap();
+    let seconds = json["crt"]["phosphor_decay_seconds"].as_f64().unwrap() as f32;
+
+    let expected = seconds / modem_tui::waterfall::COLUMN_SECONDS;
+    assert!(
+        (modem_tui::waterfall::DECAY_COLUMNS - expected).abs() < 1e-4,
+        "DECAY_COLUMNS is {} but the token implies {expected}",
+        modem_tui::waterfall::DECAY_COLUMNS
+    );
+}
