@@ -136,6 +136,19 @@ impl CpalTransport {
     /// here, loudly, as [`TransportError::RateMismatch`], is the whole
     /// point: it is a real, reportable failure, not something to paper
     /// over by building two `Session`s at two different rates.
+    ///
+    /// The input range is also filtered to ones that can deliver `f32`
+    /// (every `SupportedInputConfigs` entry pins one native sample
+    /// format, and a real interface routinely exposes several side by
+    /// side - confirmed by hand: this crate always builds an `f32`
+    /// stream regardless of which range gets picked, so a range whose
+    /// only fault is a different native format is exactly as unusable as
+    /// a rate mismatch, not a detail `build_input_stream` can quietly
+    /// paper over), then - among those - prefers one whose channel count
+    /// matches the output's own, since some real duplex devices (also
+    /// confirmed by hand) reject a channel-count mismatch between their
+    /// own playback and capture sides even when each count is
+    /// independently listed as supported.
     pub fn new(acoustic: bool) -> Result<Self, TransportError> {
         let host = cpal::default_host();
         let output_device = host
@@ -150,13 +163,14 @@ impl CpalTransport {
         let output_config = output_supported.config();
         let output_channels = output_config.channels as usize;
 
-        let input_range = input_device
-            .supported_input_configs()
-            .map_err(device_err)?
-            .find(|c| c.min_sample_rate() <= sample_rate && sample_rate <= c.max_sample_rate())
-            .ok_or(TransportError::RateMismatch {
-                output_rate: sample_rate,
-            })?;
+        let input_range = choose_input_range(
+            input_device.supported_input_configs().map_err(device_err)?,
+            sample_rate,
+            output_channels,
+        )
+        .ok_or(TransportError::RateMismatch {
+            output_rate: sample_rate,
+        })?;
         let input_config = input_range.with_sample_rate(sample_rate).config();
         let input_channels = input_config.channels as usize;
 
@@ -323,6 +337,51 @@ impl Transport for CpalTransport {
     }
 }
 
+/// Picks which of `candidates` (the input device's own reported ranges)
+/// [`CpalTransport::new`] should build its input stream from, given the
+/// output device's already-negotiated `sample_rate` and `output_channels`.
+/// A standalone function - rather than inline in `new` - specifically so
+/// this selection can be unit-tested with synthetic ranges: `new` itself
+/// can never run in CI (see this module's doc), so without this split the
+/// logic a real hand-verification found broken would stay untested.
+///
+/// Two rules, in order:
+/// 1. Only a range that can deliver `f32` at `sample_rate` is even a
+///    candidate - `build_input_stream::<f32, _, _>` always asks for `f32`
+///    regardless of which range gets picked, so a range whose only fault
+///    is a different native sample format (common on real interfaces,
+///    which often expose several side by side - confirmed by hand: a
+///    real duplex device's own capture side enumerated i16/i24/i32/f32
+///    variants together) must never win by simply appearing first. The
+///    version this replaced picked by rate alone and failed with an
+///    opaque `UnsupportedConfig` from `build_input_stream` itself.
+/// 2. Among the `f32` candidates, prefer one whose channel count matches
+///    `output_channels` - confirmed by hand against a real duplex device
+///    that rejects a channel-count mismatch between its own playback and
+///    capture sides even though each count is independently listed as
+///    supported - falling back to whichever `f32` candidate comes first
+///    when no such match exists, since plenty of real mic/speaker pairs
+///    (a mono microphone feeding a stereo speaker, say) have no reason to
+///    agree on channels at all.
+fn choose_input_range(
+    candidates: impl Iterator<Item = cpal::SupportedStreamConfigRange>,
+    sample_rate: u32,
+    output_channels: usize,
+) -> Option<cpal::SupportedStreamConfigRange> {
+    let f32_candidates: Vec<_> = candidates
+        .filter(|c| {
+            c.sample_format() == cpal::SampleFormat::F32
+                && c.min_sample_rate() <= sample_rate
+                && sample_rate <= c.max_sample_rate()
+        })
+        .collect();
+    f32_candidates
+        .iter()
+        .find(|c| c.channels() as usize == output_channels)
+        .or(f32_candidates.first())
+        .cloned()
+}
+
 /// The input stream's entire callback body, the same discipline as
 /// [`fill_output`](crate::transport::fill_output). Downmixes to mono by
 /// averaging - the same convention `wav::read_wav` already uses - and
@@ -359,6 +418,100 @@ mod tests {
             role,
             duplex,
         }
+    }
+
+    fn range(
+        channels: u16,
+        min_rate: u32,
+        max_rate: u32,
+        format: cpal::SampleFormat,
+    ) -> cpal::SupportedStreamConfigRange {
+        cpal::SupportedStreamConfigRange::new(
+            channels,
+            min_rate,
+            max_rate,
+            cpal::SupportedBufferSize::Range { min: 1, max: 4096 },
+            format,
+        )
+    }
+
+    /// Mutation-proof for the actual hand-verification finding: a real
+    /// duplex device (confirmed with `snd-aloop`) enumerated an i16 mono
+    /// range *before* its f32 stereo range for the same rate. Picking by
+    /// rate alone (the version this replaced) chose the i16 range and
+    /// `build_input_stream::<f32, _, _>` then failed with an opaque
+    /// `UnsupportedConfig` - reproduced here with synthetic ranges in the
+    /// same order, no real device required.
+    #[test]
+    fn choose_input_range_skips_a_non_f32_range_even_when_it_comes_first() {
+        let candidates = vec![
+            range(1, 8000, 192000, cpal::SampleFormat::I16),
+            range(2, 8000, 192000, cpal::SampleFormat::F32),
+        ];
+        let chosen = choose_input_range(candidates.into_iter(), 48000, 2)
+            .expect("an f32 candidate exists and must be chosen");
+        assert_eq!(
+            chosen.sample_format(),
+            cpal::SampleFormat::F32,
+            "chose a range that cannot deliver f32, which build_input_stream::<f32, _, _> always asks for"
+        );
+    }
+
+    /// The other half: among several f32-capable ranges, the one whose
+    /// channel count matches the output's own must win, even when a
+    /// different channel count is listed first - confirmed by hand
+    /// against a real duplex device that rejected the mismatched-channel
+    /// choice with the same opaque `UnsupportedConfig`, despite each
+    /// count being independently listed as supported.
+    #[test]
+    fn choose_input_range_prefers_a_channel_count_matching_the_output() {
+        let candidates = vec![
+            range(1, 8000, 192000, cpal::SampleFormat::F32),
+            range(2, 8000, 192000, cpal::SampleFormat::F32),
+            range(3, 8000, 192000, cpal::SampleFormat::F32),
+        ];
+        let chosen = choose_input_range(candidates.into_iter(), 48000, 2)
+            .expect("a channel-matching f32 candidate exists and must be chosen");
+        assert_eq!(
+            chosen.channels(),
+            2,
+            "did not prefer the range whose channel count matches the output's own"
+        );
+    }
+
+    /// When no f32 candidate's channel count matches the output's own,
+    /// falling back to the first f32 candidate is still correct - many
+    /// real mic/speaker pairs (a mono microphone feeding a stereo
+    /// speaker) have no reason to agree on channels at all, so this must
+    /// not be treated as failure.
+    #[test]
+    fn choose_input_range_falls_back_to_first_f32_candidate_when_no_channel_match_exists() {
+        let candidates = vec![
+            range(1, 8000, 192000, cpal::SampleFormat::F32),
+            range(4, 8000, 192000, cpal::SampleFormat::F32),
+        ];
+        let chosen = choose_input_range(candidates.into_iter(), 48000, 2)
+            .expect("an f32 candidate exists even with no channel match, and must still be chosen");
+        assert_eq!(
+            chosen.channels(),
+            1,
+            "did not fall back to the first f32 candidate when no channel count matched"
+        );
+    }
+
+    /// No candidate at all - wrong rate, wrong format, or an empty
+    /// device - must report `None` rather than panicking, so `new` can
+    /// turn it into a clean `TransportError::RateMismatch`.
+    #[test]
+    fn choose_input_range_returns_none_when_nothing_matches() {
+        let candidates = vec![
+            range(2, 8000, 44100, cpal::SampleFormat::F32),
+            range(2, 8000, 192000, cpal::SampleFormat::I16),
+        ];
+        assert!(
+            choose_input_range(candidates.into_iter(), 48000, 2).is_none(),
+            "returned a candidate despite none supporting f32 at the requested rate"
+        );
     }
 
     /// Required test: `is_acoustic()` is true for cpal (and false for

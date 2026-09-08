@@ -215,10 +215,17 @@ pub enum TransportError {
     NoOutputDevice,
     /// No input device was found on this host.
     NoInputDevice,
-    /// The input device has no configuration able to run at the output
-    /// device's negotiated rate. Reported rather than silently building
-    /// two `Session`s at two different rates - see this module's doc on
-    /// why that is exactly the bug this crate exists to make impossible.
+    /// The input device has no configuration able to deliver `f32` at the
+    /// output device's negotiated rate - either no range covers that rate
+    /// at all, or every range that does is a different native sample
+    /// format (`cpal_device.rs`'s `CpalTransport::new` always builds an
+    /// `f32` stream regardless of which range it picks, so a
+    /// format-incompatible range is exactly as unusable as a rate
+    /// mismatch). Reported rather than silently building two `Session`s
+    /// at two different rates, or letting an incompatible range fail
+    /// later with `cpal`'s own opaque `UnsupportedConfig` - see this
+    /// module's doc on why a rate mismatch is exactly the bug this crate
+    /// exists to make impossible.
     RateMismatch { output_rate: u32 },
     /// Any other failure `cpal` itself reported, stringified so this type
     /// does not have to track `cpal`'s own, larger error surface.
