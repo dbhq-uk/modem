@@ -6,3 +6,4 @@
 /spike/pkg-browser
 /spike/pkg-worklet
 /web/modem.wasm
+.wrangler/
