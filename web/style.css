@@ -304,26 +304,6 @@ p {
   gap: var(--modem-space-xs);
 }
 
-.kicker {
-  margin: 0;
-  font-size: var(--modem-type-scale-base);
-  color: var(--modem-white-bright);
-  display: flex;
-  align-items: center;
-  gap: var(--modem-space-xs);
-  flex-wrap: wrap;
-}
-
-.kicker__placeholder-tag {
-  color: var(--modem-ground);
-  background: var(--modem-error);
-  font-size: var(--modem-type-scale-small);
-  padding: 0 var(--modem-space-xs);
-  border-radius: 2px;
-  font-weight: bold;
-  letter-spacing: 0.05em;
-}
-
 .wordmark {
   margin: 0;
   font-size: clamp(2.5rem, 10vw, 5rem);
