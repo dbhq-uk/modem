@@ -95,6 +95,12 @@ const TURN_SETTLE: Duration = Duration::from_millis(200);
 /// One end of a call: the protocol state (`Session`, `AtProcessor`) plus
 /// the terminal-emulation state a comms package needs on top of it.
 pub struct Pane {
+    /// The `Config` this pane was constructed with. Only ever used for
+    /// `duplex` (which never changes) and as the template for
+    /// `run_transport`'s throwaway placeholder session - **not** for
+    /// `role`, which `dial`/`answer` can change after construction (Task
+    /// 19). Read the live role from `session.role()` instead; see
+    /// [`Pane::role_name`]'s own doc.
     cfg: Config,
     session: Session,
     at: AtProcessor,
@@ -145,8 +151,14 @@ impl Pane {
     }
 
     /// `ORIGINATE` or `ANSWER`, matching the mockups' own capitalisation.
+    ///
+    /// Reads [`Session::role`] (Task 19), not this pane's own `Config`
+    /// snapshot: `dial`/`answer` can change which role the session
+    /// actually is after this pane was constructed, and a title bar that
+    /// kept reading the original `Config` would keep claiming `ORIGINATE`
+    /// on an end that has since answered.
     pub fn role_name(&self) -> &'static str {
-        match self.cfg.role {
+        match self.session.role() {
             Role::Originate => "ORIGINATE",
             Role::Answer => "ANSWER",
         }
@@ -154,9 +166,10 @@ impl Pane {
 
     /// The mark/space pair this end *transmits* in, e.g. `(1270.0,
     /// 1070.0)` - see `modem_core::tones`'s own doc for why this is the
-    /// transmit band, not necessarily the band this end listens on.
+    /// transmit band, not necessarily the band this end listens on. Reads
+    /// [`Session::role`] for the same reason [`Pane::role_name`] does.
     pub fn band(&self) -> (f64, f64) {
-        tones(self.cfg.role)
+        tones(self.session.role())
     }
 
     /// `"1270/1070"` - the band, formatted for the title bar. Whole
@@ -524,6 +537,32 @@ mod tests {
         let answer = Pane::new(cfg(Role::Answer));
         assert_eq!(answer.role_name(), "ANSWER");
         assert_eq!(answer.band_label(), "2225/2025");
+    }
+
+    /// Required test (Task 19): the title bar must follow the session's
+    /// actual role once it dials or answers, never stay pinned to
+    /// whatever `Config` the `Pane` happened to be constructed with. Both
+    /// panes here are deliberately built the "wrong" way round -
+    /// answering from an `Originate` config, dialling from an `Answer`
+    /// one - so this can only pass if `role_name`/`band_label` genuinely
+    /// read the session, not `self.cfg`; a version that still read
+    /// `self.cfg.role` would report `ORIGINATE`/`1270-1070` for the pane
+    /// that has actually answered.
+    #[test]
+    fn role_name_and_band_follow_the_session_once_it_dials_or_answers_not_the_panes_own_config() {
+        let mut answered_from_originate_cfg = Pane::new(half_cfg(Role::Originate));
+        answered_from_originate_cfg.session_mut().answer();
+        assert_eq!(
+            answered_from_originate_cfg.role_name(),
+            "ANSWER",
+            "the frame must not keep claiming ORIGINATE on an end that answered"
+        );
+        assert_eq!(answered_from_originate_cfg.band_label(), "2225/2025");
+
+        let mut dialled_from_answer_cfg = Pane::new(half_cfg(Role::Answer));
+        dialled_from_answer_cfg.session_mut().dial("1");
+        assert_eq!(dialled_from_answer_cfg.role_name(), "ORIGINATE");
+        assert_eq!(dialled_from_answer_cfg.band_label(), "1270/1070");
     }
 
     #[test]

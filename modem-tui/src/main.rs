@@ -38,6 +38,29 @@
 //! silently promoted to a layout nobody asked for or left to panic
 //! later inside `App::step_wired`.
 //!
+//! # `--answer` only sets where an idle `--single` end starts (Task 19)
+//!
+//! Before Task 19, a `--single` pane was always built `Role::Originate` -
+//! there was no way to run the answering end at all, so two machines
+//! both running `--single --acoustic` both transmitted on 1270/1070 and
+//! both listened on 2225/2025, and neither could ever hear the other.
+//! That is fixed at the `modem_core::session::Session` layer, not here:
+//! `Session::dial` now sets its own role to `Role::Originate` and
+//! `Session::answer` sets `Role::Answer`, each rebuilding that end's
+//! transmitter and receiver in the right band regardless of what
+//! `Config` it was built from (see `session.rs`'s own module doc, "The
+//! role follows the command"). So a `--single` pane built here with
+//! `Role::Originate` and then typed `ATA` into genuinely answers in the
+//! answer band; this binary's own choice of role only matters for the
+//! handful of samples before anyone has typed anything at all.
+//!
+//! `--answer` exists purely to choose that starting band - which
+//! `role_name`/`band` (see `pane.rs`) report on an idle end that has
+//! never yet dialled or answered - rather than leaving it hardcoded to
+//! `Role::Originate`. It has nothing to add to `--split`, where both
+//! ends already start in opposite bands by construction, so it is
+//! rejected there the same way `--single` without `--acoustic` is.
+//!
 //! # Terminal restoration on every exit path
 //!
 //! `ratatui::run` (see its own doc) initialises the terminal, installs a
@@ -62,16 +85,32 @@ use modem_tui::{App, Pane, RequestedLayout, Theme};
 /// keystrokes without spinning the CPU.
 const TICK: Duration = Duration::from_millis(20);
 
+#[derive(Debug, PartialEq)]
 struct Args {
     layout: RequestedLayout,
     acoustic: bool,
+    /// The role a `--single` end starts idle in, before anyone has typed
+    /// `ATDT` or `ATA` - see this module's own doc, "`--answer` only sets
+    /// where an idle `--single` end starts". Ignored for `--split`, which
+    /// always builds one end of each role regardless.
+    role: Role,
 }
 
+/// Reads real process arguments. A thin wrapper over
+/// [`parse_args_from`] so the actual parsing and validation logic can be
+/// unit-tested against a literal argument list, never the real, global
+/// `std::env::args()`.
 fn parse_args() -> Result<Args, String> {
+    parse_args_from(std::env::args().skip(1))
+}
+
+fn parse_args_from(args: impl IntoIterator<Item = String>) -> Result<Args, String> {
     let mut layout = RequestedLayout::default();
     let mut acoustic = false;
     let mut single_requested = false;
-    for arg in std::env::args().skip(1) {
+    let mut role = Role::Originate;
+    let mut answer_requested = false;
+    for arg in args {
         match arg.as_str() {
             "--single" => {
                 layout = RequestedLayout::Single;
@@ -79,6 +118,10 @@ fn parse_args() -> Result<Args, String> {
             }
             "--split" => layout = RequestedLayout::Split,
             "--acoustic" => acoustic = true,
+            "--answer" => {
+                role = Role::Answer;
+                answer_requested = true;
+            }
             "-h" | "--help" => {
                 print_help();
                 std::process::exit(0);
@@ -94,16 +137,33 @@ fn parse_args() -> Result<Args, String> {
                 .to_string(),
         );
     }
-    Ok(Args { layout, acoustic })
+    if answer_requested && layout != RequestedLayout::Single {
+        return Err(
+            "--answer only means something for --single - it picks which band a single idle \
+             end starts in before anyone types ATDT or ATA. Pass --single --acoustic --answer, \
+             or drop --answer for the two-pane demo, which already starts one end in each band."
+                .to_string(),
+        );
+    }
+    Ok(Args {
+        layout,
+        acoustic,
+        role,
+    })
 }
 
 fn print_help() {
     println!("modem - a Bell 103 acoustic modem simulator\n");
-    println!("Usage: modem [--single | --split] [--acoustic]\n");
+    println!("Usage: modem [--single | --split] [--acoustic] [--answer]\n");
     println!("  --split      both ends on one machine, for demonstration (default)");
     println!("  --single     one end, connected to another machine over a real device");
     println!("               (needs --acoustic)");
     println!("  --acoustic   use the real sound card instead of the wired demo transport");
+    println!("  --answer     a --single end starts idle in the answer band instead of");
+    println!("               originate - only changes what it shows before you type");
+    println!("               ATDT or ATA, since dialling or answering sets the band for");
+    println!("               real either way. Two machines: run --single --acoustic on");
+    println!("               both, ATDT<digits> on one and ATA on the other.");
     println!();
     println!("Dial with ATDT<digits>, answer with ATA - typed into either pane, followed");
     println!("by Enter. F2 opens the dialling directory (Up/Down to pick, Enter to dial,");
@@ -143,7 +203,7 @@ fn run(
 
     let mut app = match args.layout {
         RequestedLayout::Single => {
-            let pane = Pane::new(transport.config_for(Role::Originate, Duplex::HalfPingPong));
+            let pane = Pane::new(transport.config_for(args.role, Duplex::HalfPingPong));
             App::single(pane, &*transport, Theme::default())
         }
         RequestedLayout::Split => {
@@ -179,5 +239,89 @@ fn run(
         app.tick(dt);
 
         terminal.draw(|f| f.render_widget(&app, f.area()))?;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// No flags at all: split, wired demo, and a role that only matters
+    /// once `--single` is also given.
+    #[test]
+    fn no_flags_defaults_to_split_wired_originate() {
+        let parsed = parse_args_from(args(&[])).expect("no flags is valid");
+        assert_eq!(
+            parsed,
+            Args {
+                layout: RequestedLayout::Split,
+                acoustic: false,
+                role: Role::Originate,
+            }
+        );
+    }
+
+    /// `--single --acoustic` alone, with no `--answer`, must still default
+    /// to `Role::Originate` - this is the exact scenario the brief names
+    /// as broken: two machines running this with no way to choose a role
+    /// both need to be able to dial or answer, and originate is the
+    /// sensible default for "nothing decided yet".
+    #[test]
+    fn single_acoustic_without_answer_defaults_to_originate() {
+        let parsed =
+            parse_args_from(args(&["--single", "--acoustic"])).expect("single+acoustic is valid");
+        assert_eq!(parsed.role, Role::Originate);
+    }
+
+    /// The new flag this task adds: `--answer` picks the answer band for
+    /// a single idle end, before anyone has typed `ATDT` or `ATA`.
+    #[test]
+    fn single_acoustic_answer_selects_the_answer_band() {
+        let parsed = parse_args_from(args(&["--single", "--acoustic", "--answer"]))
+            .expect("single+acoustic+answer is valid");
+        assert_eq!(parsed.role, Role::Answer);
+        assert_eq!(parsed.layout, RequestedLayout::Single);
+        assert!(parsed.acoustic);
+    }
+
+    #[test]
+    fn single_without_acoustic_is_rejected() {
+        let err = parse_args_from(args(&["--single"])).unwrap_err();
+        assert!(
+            err.contains("--acoustic"),
+            "error should explain --single needs --acoustic: {err}"
+        );
+    }
+
+    /// `--answer` names which band a *single idle end* starts in - it has
+    /// nothing to say without `--single`, so it is rejected the same way
+    /// `--single` without `--acoustic` is, rather than silently doing
+    /// nothing.
+    #[test]
+    fn answer_without_single_is_rejected() {
+        let err = parse_args_from(args(&["--answer"])).unwrap_err();
+        assert!(
+            err.contains("--single"),
+            "error should explain --answer only means something with --single: {err}"
+        );
+    }
+
+    #[test]
+    fn answer_with_split_is_rejected() {
+        let err = parse_args_from(args(&["--split", "--answer"])).unwrap_err();
+        assert!(
+            err.contains("--single"),
+            "error should explain --answer only means something with --single: {err}"
+        );
+    }
+
+    #[test]
+    fn unrecognised_argument_is_rejected() {
+        let err = parse_args_from(args(&["--bogus"])).unwrap_err();
+        assert!(err.contains("--bogus"));
     }
 }
