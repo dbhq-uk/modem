@@ -16,7 +16,7 @@ use std::fmt::Write as _;
 use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use modem_audio::WiredTransport;
+use modem_audio::{Transport, WiredTransport};
 use modem_core::{Config, Duplex, Role};
 use modem_tui::{App, Pane, Theme};
 use ratatui::buffer::Buffer;
@@ -87,6 +87,37 @@ fn pane(role: Role) -> Pane {
         // what makes half duplex viable to demonstrate here at all.
         duplex: Duplex::HalfPingPong,
     })
+}
+
+/// A transport that reports `is_acoustic() == true` without touching a
+/// real sound card - the same pattern `modem-tui`'s own `FakeTransport`
+/// test helper uses (see `app.rs`'s test module), needed again here
+/// because that one is private and this example cannot reach it.
+///
+/// Used for exactly one frame: the "two devices" scenario on
+/// `modem.dbhq.uk`, where a single pane must render with `[DEMO MODE]`
+/// genuinely absent. `App::single`/`App::split` read that flag from
+/// `Transport::is_acoustic()` alone at construction (see `app.rs`'s own
+/// module doc, rule 2) and never call `run` themselves - only a real
+/// event loop does that, via `App::run_transport`, which this example
+/// never runs - so `run` here is unreachable, not merely unimplemented.
+struct FakeAcousticTransport;
+
+impl Transport for FakeAcousticTransport {
+    fn run(
+        &mut self,
+        _ends: &mut [modem_core::session::Session],
+    ) -> Result<modem_audio::transport::RunStats, modem_audio::transport::TransportError> {
+        unreachable!("mockup only renders frames; it never drives the transport loop")
+    }
+
+    fn sample_rate(&self) -> u32 {
+        8000
+    }
+
+    fn is_acoustic(&self) -> bool {
+        true
+    }
 }
 
 /// Two ends mid-call: dialled, answered, connected, one line received and
@@ -482,6 +513,42 @@ fn main() {
         window("F2, directory.tsv not found", &dir_empty),
     );
 
+    // modem.dbhq.uk's "Two ways to try this" section pulls these two
+    // frames verbatim - see web/_gen/frames.py, which greps this
+    // example's stdout for the two `id`s below and splices the `<pre>`
+    // it finds straight into web/index.html between marked regions.
+    // Shown here too, wrapped the same as everything else above, so a
+    // reviewer of this comparison page sees exactly what lands on the
+    // real site.
+    //
+    // "One device" reuses `split_window`'s own render byte for byte -
+    // same App, same call, same [DEMO MODE] because the transport
+    // genuinely is `wired`. "Two devices" is a fresh single pane wrapped
+    // in `FakeAcousticTransport` (see its own doc), so [DEMO MODE] is
+    // genuinely absent - the real product's frame, one end talking to a
+    // second machine, not a fabricated one.
+    let (a7, _, audio7) = call();
+    let acoustic = FakeAcousticTransport;
+    let mut single_acoustic = App::single(a7, &acoustic, Theme::default());
+    single_acoustic.push_samples(&audio7);
+    let web_frames = format!(
+        "<div class=\"row\">{}{}</div>",
+        window(
+            "web-frame-one-device: split screen",
+            &format!(
+                "<div id=\"web-frame-one-device\">{}</div>",
+                render(&split, 100, 24)
+            ),
+        ),
+        window(
+            "web-frame-two-device: originate",
+            &format!(
+                "<div id=\"web-frame-two-device\">{}</div>",
+                render(&single_acoustic, 72, 22)
+            ),
+        ),
+    );
+
     print!(
         "{}",
         page(
@@ -491,6 +558,7 @@ fn main() {
             &split_window,
             &themes,
             &directory_section,
+            &web_frames,
         )
     );
 }
@@ -502,6 +570,7 @@ fn page(
     split: &str,
     themes: &str,
     directory: &str,
+    web_frames: &str,
 ) -> String {
     format!(
         r#"<!doctype html>
@@ -582,6 +651,10 @@ fn page(
 <h2>Task 18 - the dialling directory</h2>
 <p>F2 opens the directory as an overlay over the focused pane, reading a tab-separated <code>directory.tsv</code> fresh from disk every time it opens. Both frames below are driven through the real F2/Down key path, not fabricated: the left one genuinely loaded a temp fixture and moved the selection down once (Bob highlighted, not Alice); the right one points at a file that does not exist, and the overlay says so rather than showing an empty box.</p>
 {directory}
+
+<h2>modem.dbhq.uk - the two scenarios</h2>
+<p>The two frames the web page's own "Two ways to try this" section embeds, unchanged - see <code>web/_gen/frames.py</code>, which greps this page for the two <code>id</code>s below and splices the <code>&lt;pre&gt;</code> it finds into <code>web/index.html</code>. Left is <code>split_window</code> from above, byte for byte, wired transport, <code>[DEMO MODE]</code> genuinely present. Right is a fresh single pane wrapped in a transport that genuinely reports <code>is_acoustic() == true</code>, so <code>[DEMO MODE]</code> is genuinely absent.</p>
+{web_frames}
 
 <footer>modem is a DBHQ experiment</footer>
 </body>
