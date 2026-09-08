@@ -66,6 +66,22 @@
 //! exercises a real exchange pumps a short settle period after acquiring
 //! the turn before calling `send`, for exactly this reason.
 //!
+//! This is proven, not assumed: `acquisition_preamble_is_needed_under_a_
+//! real_clock_offset` deletes `grant_turn`'s preamble and drives a real
+//! exchange under a genuine 2% clock offset (`sample_rate` 7840 on one
+//! end, 8000 on the other - `rx.rs`'s own convention for simulating two
+//! sound cards that never agree). Round 1 review found this needed real
+//! care: every other test in this module runs both ends off the identical
+//! `sample_rate`, where a free-running symbol counter is already exact
+//! and cannot show the preamble mattering at all, and even the first
+//! clock-offset scenario tried (8160 Hz, the module's own settle
+//! convention) happened to land in a winning phase band and decoded
+//! clean with no preamble whatsoever - the same phase-lottery shape
+//! `rx.rs`'s own sub-symbol offset sweep names. The scenario this test
+//! actually uses was picked from a small sweep specifically because it
+//! measured failing without the preamble, not because it was the first
+//! one tried.
+//!
 //! # Two inherited constraints
 //!
 //! 1. [`crate::link::encode_packet`] panics on a payload over
@@ -122,6 +138,14 @@ pub struct Session {
     /// oldest first. `receive` hands the whole thing over and empties it.
     inbox: Vec<u8>,
     has_turn: bool,
+    /// Set by `yield_turn`, cleared by `grant_turn` and `hangup`. Narrows
+    /// `process_out`'s `tx.pending()` bypass (see its own doc) to exactly
+    /// the one case it exists for - flushing a just-queued `Turn` packet
+    /// after `has_turn` is cleared - rather than to anything at all that
+    /// happens to be sitting in `tx`'s queue, which a `send` called before
+    /// this end holds the turn would also satisfy. See `process_out`'s own
+    /// doc for the defect this closes.
+    yielding: bool,
     /// Outgoing packet sequence number. Wraps; nothing here currently
     /// checks it on receive; `PacketReader`'s CRC is what protects a
     /// corrupt frame, not sequencing.
@@ -143,6 +167,7 @@ impl Session {
             reader: PacketReader::new(),
             inbox: Vec::new(),
             has_turn: false,
+            yielding: false,
             seq: 0,
         }
     }
@@ -199,6 +224,7 @@ impl Session {
         self.rx = None;
         self.inbox.clear();
         self.has_turn = false;
+        self.yielding = false;
     }
 
     /// Fills `out` with whatever this end should be transmitting right
@@ -207,11 +233,20 @@ impl Session {
     /// connected.
     ///
     /// While `Duplex::HalfPingPong` and this end does not hold the turn,
-    /// Connected still transmits real content for as long as `tx` has
-    /// bits already queued (`tx.pending()`) - this is what lets a queued
-    /// `PacketKind::Turn` packet (see [`Session::yield_turn`]) actually
-    /// reach the wire after `has_turn` has already been cleared, rather
-    /// than being silently stranded in `tx`'s own queue.
+    /// Connected transmits silence - with exactly one narrow exception:
+    /// immediately after `yield_turn` clears `has_turn`, `tx` still has
+    /// that call's own `Turn` packet queued, and `process_out` keeps
+    /// draining it (via the `yielding` flag, cleared the moment `tx` runs
+    /// dry) so the token is not silently stranded. That bypass covers
+    /// only the packet `yield_turn` itself just queued - it is not a
+    /// general "transmit whatever `tx` happens to be holding" rule. Round
+    /// 1 review found the difference matters: a bypass keyed on
+    /// `tx.pending()` alone also let a `send` called before this end held
+    /// the turn - not just `yield_turn`'s own token - straight through,
+    /// which put both ends on the wire at once on the very next
+    /// `process_out` call. See [`Session::send`]'s own doc: it still does
+    /// not gate on `has_turn`, so this is the only thing standing between
+    /// a caller mistake and a live collision.
     pub fn process_out(&mut self, out: &mut [f32]) {
         match self.state {
             SessionState::Idle | SessionState::Answering => out.fill(0.0),
@@ -233,10 +268,13 @@ impl Session {
                 let tx = self.tx.as_mut().expect("Connected state without a Tx");
                 let transmit = match self.cfg.duplex {
                     Duplex::Full => true,
-                    Duplex::HalfPingPong => self.has_turn || tx.pending(),
+                    Duplex::HalfPingPong => self.has_turn || (self.yielding && tx.pending()),
                 };
                 if transmit {
                     tx.read(out);
+                    if self.yielding && !tx.pending() {
+                        self.yielding = false;
+                    }
                 } else {
                     out.fill(0.0);
                 }
@@ -318,10 +356,12 @@ impl Session {
 
     /// Hands the turn to the far end: queues a [`PacketKind::Turn`] packet
     /// and clears the local flag. The packet is queued into `tx`
-    /// regardless of `has_turn`'s prior value, and `process_out` keeps
-    /// transmitting until `tx.pending()` goes false even after `has_turn`
-    /// is cleared here - see `process_out`'s own doc - so the token
-    /// itself is not stranded the instant this returns.
+    /// regardless of `has_turn`'s prior value, and sets `yielding` so
+    /// `process_out` keeps transmitting until that specific packet has
+    /// actually gone out (`tx.pending()` goes false) even after
+    /// `has_turn` is cleared here - see `process_out`'s own doc for why
+    /// this is narrower than "transmit until `tx` is empty for any
+    /// reason".
     pub fn yield_turn(&mut self) {
         if let Some(tx) = self.tx.as_mut() {
             let seq = self.seq;
@@ -334,6 +374,7 @@ impl Session {
             tx.write(&encode_packet(&pkt));
         }
         self.has_turn = false;
+        self.yielding = true;
     }
 
     /// Whether this end currently holds permission to transmit real data
@@ -373,6 +414,7 @@ impl Session {
     /// own preamble, not just the first one.
     fn grant_turn(&mut self) {
         self.has_turn = true;
+        self.yielding = false;
         if let Some(tx) = self.tx.as_mut() {
             tx.write(&TRAINING_PREAMBLE);
         }
@@ -558,6 +600,59 @@ mod tests {
         assert_eq!(originate.receive(), b"HELLO ORIGINATE");
     }
 
+    /// Round 1 review finding: deleting `grant_turn`'s
+    /// `tx.write(&TRAINING_PREAMBLE)` left all of this module's other
+    /// tests green, because every one of them runs both ends off the
+    /// identical `sample_rate` - the same trap `rx.rs`'s own
+    /// `loopback_tracks_a_two_percent_sample_clock_offset` names: with no
+    /// real clock offset, a free-running symbol counter is already
+    /// exact, so nothing here actually exercised the timing loop's
+    /// acquisition at all.
+    ///
+    /// This drives the same 2% offset that test uses (`sample_rate` 8160
+    /// on one end, 8000 on the other) through a real `Session` exchange,
+    /// so the acquisition preamble this module's doc names as resolving
+    /// the brief's second inherited constraint is proven at the layer
+    /// that actually claims it, not only in `rx.rs`.
+    #[test]
+    fn acquisition_preamble_is_needed_under_a_real_clock_offset() {
+        // 7840 Hz specifically, not 8160: an 8-point sweep (settle 0 or
+        // 10 blocks, tx_rate in {8160, 7840, 8320, 7680}) with the
+        // preamble removed found this exact combination reliably fails
+        // (180 of 420 bytes recovered), while 8160/settle-10 happened to
+        // land in a winning phase band and decoded clean anyway - the
+        // same phase-lottery shape `rx.rs`'s own module doc names for its
+        // sub-symbol offset sweep. Picking a scenario this sweep actually
+        // measured failing, rather than the first one tried, is what
+        // makes this a real proof and not a coincidence.
+        let originate_cfg = Config {
+            sample_rate: 7840,
+            role: Role::Originate,
+            duplex: Duplex::HalfPingPong,
+        };
+        let mut originate = Session::new(originate_cfg);
+        let mut answer = Session::new(cfg(Role::Answer));
+
+        originate.dial("1");
+        answer.answer();
+        connect(&mut originate, &mut answer);
+        settle(&mut originate, &mut answer);
+
+        let mut payload = Vec::new();
+        for _ in 0..20 {
+            payload.extend_from_slice(b"The quick brown fox. ");
+        }
+        originate.send(&payload);
+        for _ in 0..3000 {
+            pump(&mut originate, &mut answer);
+        }
+        assert_eq!(
+            answer.receive(),
+            payload,
+            "a 2% clock offset did not decode byte-exact with the acquisition preamble in place"
+        );
+    }
+
     /// Half duplex, checked at the sample level rather than through
     /// `has_turn()` alone. `has_turn` is a bool - exactly the kind of
     /// aggregate the brief warns cannot detect the defect it exists to
@@ -601,6 +696,36 @@ mod tests {
         );
     }
 
+    /// Round 1 review finding: gating `process_out`'s bypass on
+    /// `tx.pending()` alone - rather than on `yielding && tx.pending()` -
+    /// let anything sitting in `tx`'s queue through, not only a just-
+    /// queued `Turn` packet. `send` does not gate on `has_turn` (see its
+    /// own doc - that is the caller's responsibility), so calling it
+    /// before this end actually holds the turn queued real data straight
+    /// into `tx`, and the old, wider condition read that queued data as
+    /// license to transmit. Demonstrated on the real path, not a unit
+    /// probe of the flag alone: two connected sessions, `answer` still
+    /// without the turn, one `send` call, and the very next `process_out`
+    /// - which must still be exact silence.
+    #[test]
+    fn sending_without_the_turn_does_not_put_anything_on_the_wire() {
+        let mut originate = Session::new(cfg(Role::Originate));
+        let mut answer = Session::new(cfg(Role::Answer));
+        originate.dial("1");
+        answer.answer();
+        connect(&mut originate, &mut answer);
+
+        assert!(!answer.has_turn(), "answer must not start with the turn");
+        answer.send(b"jumping the queue");
+
+        let mut out = vec![1.0f32; BLOCK];
+        answer.process_out(&mut out);
+        assert!(
+            out.iter().all(|&x| x == 0.0),
+            "answer transmitted data queued before it held the turn"
+        );
+    }
+
     #[test]
     fn hangup_returns_to_idle_and_a_subsequent_dial_works() {
         let mut s = Session::new(cfg(Role::Originate));
@@ -623,6 +748,64 @@ mod tests {
             assert!(iters < 8000 * 30, "second dial never reached Connected");
         }
         assert_eq!(s.state(), SessionState::Connected);
+    }
+
+    /// Round 1 review finding: the test above only ever hangs up from
+    /// `Dialling`, where `tx`, `rx`, `inbox` and `has_turn` are all still
+    /// at their fresh-`dial()` defaults - a `hangup` that forgot to clear
+    /// any of them could pass it unnoticed. `Connected` is the state
+    /// where all four actually hold something. This hangs up the answer
+    /// end mid-call, with a real undrained inbox and a real `Rx` that has
+    /// genuinely heard carrier, and checks each is actually reset before
+    /// proving a fresh call still works end to end.
+    #[test]
+    fn hangup_from_connected_tears_down_everything_and_a_fresh_dial_still_works() {
+        let mut originate = Session::new(cfg(Role::Originate));
+        let mut answer = Session::new(cfg(Role::Answer));
+        originate.dial("1");
+        answer.answer();
+        connect(&mut originate, &mut answer);
+        settle(&mut originate, &mut answer);
+
+        originate.send(b"before hangup");
+        for _ in 0..500 {
+            pump(&mut originate, &mut answer);
+        }
+
+        // Hang up the answer end while it genuinely holds something: a
+        // live Tx/Rx pair with real carrier detected, and an inbox that
+        // has not been drained.
+        answer.hangup();
+        assert_eq!(answer.state(), SessionState::Idle);
+        assert_eq!(answer.stage(), None);
+        assert!(!answer.has_turn());
+        assert!(
+            answer.receive().is_empty(),
+            "hangup did not clear the inbox - a byte received before hangup leaked into a fresh call"
+        );
+        assert!(
+            !answer.carrier_detected(),
+            "hangup left carrier_detected() reporting the old Rx's state"
+        );
+
+        // A fresh call end to end, with a fresh originate too, must work
+        // exactly as it would on a session that had never connected at
+        // all.
+        let mut originate2 = Session::new(cfg(Role::Originate));
+        originate2.dial("2");
+        answer.answer();
+        connect(&mut originate2, &mut answer);
+        settle(&mut originate2, &mut answer);
+
+        originate2.send(b"after hangup");
+        for _ in 0..500 {
+            pump(&mut originate2, &mut answer);
+        }
+        assert_eq!(
+            answer.receive(),
+            b"after hangup",
+            "a fresh call after hangup did not decode cleanly - stale state leaked through"
+        );
     }
 
     /// `encode_packet` panics above `MAX_PAYLOAD` bytes; `send` must
@@ -673,6 +856,89 @@ mod tests {
         assert!(
             answer.carrier_detected(),
             "no carrier once originate is transmitting"
+        );
+    }
+
+    /// Round 1 review finding: `answer()` moving `state()` from
+    /// `Answering` straight to `Connected`, `process_in`'s carrier
+    /// transition being deleted outright, and `carrier_detected()`
+    /// returning `self.rx.is_some()` instead of delegating to the real
+    /// `Rx` all survived the full suite - `state()` is an enum and
+    /// `carrier_detected()` a bool, and both are aggregates in exactly
+    /// the shape Mutation 6 (own, on `stage()`) already proved this
+    /// project cannot trust without a test that checks the actual
+    /// transition, not just an endpoint. `carrier_detected_reflects_the_
+    /// receivers_state` above only ever checks a "no Rx yet" point and a
+    /// "has Rx and carrier" point - both `self.rx.is_none()` and
+    /// `self.rx.is_some()` happen to agree with the correct answer at
+    /// those two points, so a mutation swapping in `self.rx.is_some()`
+    /// passes it unchanged.
+    ///
+    /// This drives the middle case those miss: a session with a real
+    /// `Rx` (`answer()` has already run) that has not yet heard anything,
+    /// where the correct answer and `self.rx.is_some()` disagree. Feeds a
+    /// real `Tx`-generated Originate-band tone directly, rather than
+    /// wiring a second `Session`, so the carrier source and the acquiring
+    /// receiver are decoupled from anything else this file's other tests
+    /// already establish.
+    #[test]
+    fn answering_waits_for_carrier_and_carrier_detected_tracks_the_real_receiver() {
+        let mut answer = Session::new(cfg(Role::Answer));
+        answer.answer();
+        assert_eq!(
+            answer.state(),
+            SessionState::Answering,
+            "answer() did not enter Answering"
+        );
+        assert!(
+            !answer.carrier_detected(),
+            "carrier detected immediately after answer(), before anything arrived"
+        );
+
+        // A good stretch of plain silence must not, on its own, ever look
+        // like carrier or advance the state - answering only moves once
+        // it actually hears something.
+        let silence = vec![0.0f32; BLOCK];
+        for _ in 0..50 {
+            answer.process_in(&silence);
+        }
+        assert_eq!(
+            answer.state(),
+            SessionState::Answering,
+            "answering moved off Answering on silence alone"
+        );
+        assert!(
+            !answer.carrier_detected(),
+            "carrier detected on silence alone"
+        );
+
+        // A real Originate-band idle-mark tone - exactly what a connected
+        // originate's Tx transmits before any data is queued - must raise
+        // carrier and move this end to Connected.
+        let mut tx = Tx::new(cfg(Role::Originate));
+        let mut tone = vec![0.0f32; 8000];
+        tx.read(&mut tone);
+        for chunk in tone.chunks(BLOCK) {
+            answer.process_in(chunk);
+        }
+        assert!(
+            answer.carrier_detected(),
+            "no carrier after a real Originate-band tone"
+        );
+        assert_eq!(
+            answer.state(),
+            SessionState::Connected,
+            "answering did not move to Connected once carrier arrived"
+        );
+
+        // And once the tone actually stops for long enough to clear the
+        // hold-off, carrier_detected() must track that too, not latch.
+        for _ in 0..20 {
+            answer.process_in(&silence);
+        }
+        assert!(
+            !answer.carrier_detected(),
+            "carrier stayed detected long after the signal stopped"
         );
     }
 }
