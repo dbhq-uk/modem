@@ -88,10 +88,6 @@ pub fn decide_layout(requested: RequestedLayout, area: Rect) -> LayoutMode {
     }
 }
 
-/// How many rows the waterfall's frequency-label bars occupy, before any
-/// extra furniture on top of them.
-const WATERFALL_BAR_ROWS: u16 = waterfall::FREQUENCY_LABELS.len() as u16;
-
 /// The comms-package application. See this module's own doc for the
 /// three rules this type exists to enforce.
 pub struct App {
@@ -100,6 +96,10 @@ pub struct App {
     focus: usize,
     demo_mode: bool,
     spectrum: Spectrum,
+    /// Raw samples accumulated by [`App::push_samples`] until there are
+    /// enough for one FFT - see that method's own doc.
+    sample_buffer: Vec<f32>,
+    fft_size: usize,
     theme: Theme,
 }
 
@@ -108,12 +108,15 @@ impl App {
     /// is read from `transport.is_acoustic()`, never supplied directly -
     /// see this module's own doc, rule 2.
     pub fn single(pane: Pane, transport: &dyn Transport, theme: Theme) -> Self {
+        let sample_rate = transport.sample_rate();
         App {
             requested: RequestedLayout::Single,
             panes: vec![pane],
             focus: 0,
             demo_mode: !transport.is_acoustic(),
-            spectrum: Spectrum::silent(WATERFALL_BAR_ROWS as usize),
+            spectrum: Spectrum::new(sample_rate),
+            sample_buffer: Vec::new(),
+            fft_size: modem_core::analyse::fft_size_for(sample_rate),
             theme,
         }
     }
@@ -122,12 +125,15 @@ impl App {
     /// from `transport.is_acoustic()`, never supplied directly - see this
     /// module's own doc, rule 2.
     pub fn split(a: Pane, b: Pane, transport: &dyn Transport, theme: Theme) -> Self {
+        let sample_rate = transport.sample_rate();
         App {
             requested: RequestedLayout::Split,
             panes: vec![a, b],
             focus: 0,
             demo_mode: !transport.is_acoustic(),
-            spectrum: Spectrum::silent(WATERFALL_BAR_ROWS as usize),
+            spectrum: Spectrum::new(sample_rate),
+            sample_buffer: Vec::new(),
+            fft_size: modem_core::analyse::fft_size_for(sample_rate),
             theme,
         }
     }
@@ -148,11 +154,35 @@ impl App {
         &self.panes
     }
 
-    /// Replaces the one spectrum both panes render from - Task 16 calls
-    /// this once per tick with the real FFT output. See this module's
-    /// own doc, rule 1: there is deliberately no per-pane equivalent.
-    pub fn set_spectrum(&mut self, spectrum: Spectrum) {
-        self.spectrum = spectrum;
+    pub fn spectrum(&self) -> &Spectrum {
+        &self.spectrum
+    }
+
+    /// Pushes a whole magnitude column onto the one spectrum both panes
+    /// render from - see this module's own doc, rule 1: there is
+    /// deliberately no per-pane equivalent. Mostly useful for tests and
+    /// anything that has already run `modem_core::analyse::magnitudes`
+    /// itself; [`App::push_samples`] is the usual way in from raw audio.
+    pub fn push_spectrum_column(&mut self, column: Vec<f32>) {
+        self.spectrum.push(column);
+    }
+
+    /// Feeds raw samples in, accumulating until there are enough for one
+    /// FFT (`fft_size_for(sample_rate)`, decided once at construction from
+    /// the transport's own rate) and pushing a column each time the
+    /// buffer fills - the waterfall's link back to real audio. A caller
+    /// with acoustic samples, or (as the mockup example does) the actual
+    /// sample blocks a wired demo call is exchanging, can feed them here
+    /// unmodified; the accumulation and windowing is this crate's job, not
+    /// the caller's.
+    pub fn push_samples(&mut self, samples: &[f32]) {
+        self.sample_buffer.extend_from_slice(samples);
+        while self.sample_buffer.len() >= self.fft_size {
+            let window: Vec<f32> = self.sample_buffer.drain(0..self.fft_size).collect();
+            let mut mags = vec![0.0f32; self.fft_size / 2];
+            modem_core::analyse::magnitudes(&window, &mut mags);
+            self.spectrum.push(mags);
+        }
     }
 
     pub fn layout_mode(&self, area: Rect) -> LayoutMode {
@@ -263,9 +293,9 @@ impl App {
 
         let pane_count = if split { 2 } else { 1 };
         let desired_waterfall_rows = if split {
-            WATERFALL_BAR_ROWS
+            waterfall::DESIRED_ROWS
         } else {
-            WATERFALL_BAR_ROWS + 1 // + the stage-axis footer row
+            waterfall::DESIRED_ROWS + 1 // + the stage-axis footer row
         };
         let layout = frame::layout(frame_area, pane_count, desired_waterfall_rows);
 
@@ -340,7 +370,19 @@ impl App {
                 height: rows.waterfall_rows,
                 ..col
             };
-            let bar_rows = waterfall_area.height.min(WATERFALL_BAR_ROWS);
+            // Single-pane mode reserves exactly one row for the
+            // stage-axis footer, when there is more than one row to
+            // spare; split mode has no footer at all (see the design
+            // spec's own split mockup) and gives every row to the bars.
+            // Unlike Task 15's placeholder, the waterfall itself is not
+            // capped to a fixed row count - more height is genuinely
+            // better frequency resolution, not wasted space.
+            let footer_rows: u16 = if !split && waterfall_area.height > 1 {
+                1
+            } else {
+                0
+            };
+            let bar_rows = waterfall_area.height - footer_rows;
             let bar_area = Rect {
                 height: bar_rows,
                 ..waterfall_area
@@ -352,10 +394,10 @@ impl App {
                 style,
                 Style::default().fg(self.theme.dim()),
             );
-            if waterfall_area.height > bar_rows {
+            if footer_rows > 0 {
                 let footer_area = Rect {
                     y: waterfall_area.y + bar_rows,
-                    height: waterfall_area.height - bar_rows,
+                    height: footer_rows,
                     ..waterfall_area
                 };
                 waterfall::render_stage_axis(buf, footer_area, style);
@@ -778,12 +820,10 @@ mod tests {
             &wired,
             Theme::Amber,
         );
-        // A non-uniform spectrum, so a bug that swapped or zeroed one
-        // side would actually change what is drawn - an all-zero or
-        // all-equal spectrum could pass by coincidence.
-        app.set_spectrum(Spectrum {
-            bins: vec![0.1, 0.9, 0.3, 1.0, 0.05, 0.6],
-        });
+        // A non-uniform column, so a bug that swapped or zeroed one side
+        // would actually change what is drawn - an all-zero or all-equal
+        // spectrum could pass by coincidence.
+        app.push_spectrum_column(vec![0.1, 0.9, 0.3, 1.0, 0.05, 0.6, 0.2, 0.8]);
         // 101, not 100: `frame::layout` gives the left column the extra
         // cell on an odd usable width, so a width that leaves both
         // columns *equal* is what makes a byte-for-byte comparison
@@ -793,11 +833,7 @@ mod tests {
         let mut buf = Buffer::empty(Rect::new(0, 0, 101, 24));
         app.render_into(buf.area, &mut buf);
 
-        let layout = frame::layout(
-            Rect::new(0, 0, 101, 23),
-            2,
-            waterfall::FREQUENCY_LABELS.len() as u16,
-        );
+        let layout = frame::layout(Rect::new(0, 0, 101, 23), 2, waterfall::DESIRED_ROWS);
         assert_eq!(
             layout.columns[0].width, layout.columns[1].width,
             "test precondition: both columns must be the same width"
@@ -806,11 +842,7 @@ mod tests {
         let left = layout.columns[0];
         let right = layout.columns[1];
         let top = rows.waterfall_top.expect("waterfall must have rows here");
-        for y in top..top
-            + rows
-                .waterfall_rows
-                .min(waterfall::FREQUENCY_LABELS.len() as u16)
-        {
+        for y in top..top + rows.waterfall_rows.min(waterfall::DESIRED_ROWS) {
             let left_bar: String = (left.left()..left.right())
                 .map(|x| buf[(x, y)].symbol().to_string())
                 .collect();
