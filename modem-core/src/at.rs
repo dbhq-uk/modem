@@ -100,6 +100,19 @@
 //! Nothing in the command table or the required tests asks for it, and
 //! [`Response`] only carries result lines, so this module does not
 //! implement it.
+//!
+//! # Carrier loss is debounced, not instant (Task 17)
+//!
+//! [`AtProcessor::poll_carrier`] does not hang up the instant
+//! `Session::carrier_detected` reads false - it only does so once that has
+//! been continuously true for [`DCD_HOLD_TIME`] (about 700 ms, register
+//! S10's default), which sits on top of `Session::carrier_detected`'s own
+//! shorter internal hold-off. Task 17's `session.rs` fix means an idle
+//! half-duplex end now transmits continuous mark rather than silence, so
+//! an ordinary turn hand-over should never trip this at all - this is the
+//! secondary, belt-and-braces defence for a momentary dropout (line
+//! noise, a genuine glitch) that should not be allowed to hang up a call
+//! that is still live, not the primary fix for hand-overs.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -114,6 +127,20 @@ use crate::session::Session;
 /// silence required before the first plus and the silence required after
 /// the third.
 const GUARD_TIME: Duration = Duration::from_secs(1);
+
+/// Register S10's default: how long carrier must be absent before a call
+/// is considered genuinely dropped and `NO CARRIER` fires. About 700 ms -
+/// a real modem's own factory default is commonly 7 (tenths of a
+/// second). This sits on top of, not instead of, [`Session::carrier_
+/// detected`]'s own shorter hold-off (`carrier.rs`'s `HOLDOFF_SECONDS`,
+/// 500 ms): that one guards the raw signal against a brief dip; this one
+/// guards the *call* against a momentary carrier dropout - a burst of
+/// line noise, or a half-duplex hand-over that glitches - that would
+/// otherwise hang up a link that is still genuinely live. Task 17's own
+/// idle-mark fix (see `session.rs`) is what makes a hand-over itself
+/// silent to this detector in the first place; this is the secondary,
+/// belt-and-braces defence on top of it.
+const DCD_HOLD_TIME: Duration = Duration::from_millis(700);
 
 /// One AT command's result, or an unprompted line, as the lines a terminal
 /// would print, in order. A `Response` is deliberately just a list of
@@ -165,6 +192,12 @@ pub struct AtProcessor {
     /// checked, so `advance_time` can tell a genuine transition (the event
     /// worth reporting) from carrier merely continuing to be up or down.
     carrier_up: bool,
+    /// How long `session.carrier_detected()` has read continuously false
+    /// since `carrier_up` was last true - see [`DCD_HOLD_TIME`]. Reset to
+    /// zero the instant carrier is seen up again; meaningless (and left
+    /// untouched) while `carrier_up` is already false, since there is
+    /// nothing to be holding off from.
+    carrier_down_for: Duration,
 }
 
 impl Default for AtProcessor {
@@ -183,6 +216,7 @@ impl AtProcessor {
             idle: Duration::ZERO,
             plus_count: 0,
             carrier_up: false,
+            carrier_down_for: Duration::ZERO,
         }
     }
 
@@ -230,7 +264,7 @@ impl AtProcessor {
                 self.in_command_mode = true;
             }
         }
-        self.poll_carrier(session)
+        self.poll_carrier(d, session)
     }
 
     /// Checks `session.carrier_detected()` against the last known state
@@ -239,26 +273,45 @@ impl AtProcessor {
     /// noticed while already back in command mode - because the far end
     /// connected while this end was mid-escape, an unlikely but possible
     /// ordering - is not the `ATDT`/`ATA` connect announcement and is not
-    /// reported). A falling edge always matters, in either mode: a call
-    /// that drops is worth reporting whether or not the DTE happened to be
-    /// online at that exact moment, and always hangs up cleanly on this
-    /// end too, so a dead `Session` is never left half-connected.
-    fn poll_carrier(&mut self, session: &mut Session) -> Option<Response> {
+    /// reported) and always clears [`Self::carrier_down_for`] - carrier is
+    /// genuinely up, so there is nothing left to be holding off from.
+    ///
+    /// A falling edge does not hang up the instant it is seen: `d` -
+    /// `advance_time`'s own tick duration - accumulates in `carrier_down_for`
+    /// while carrier reads continuously false, and only once that reaches
+    /// [`DCD_HOLD_TIME`] does this actually hang up and report `NO CARRIER`.
+    /// A falling edge always matters once the hold time genuinely elapses,
+    /// in either mode: a call that drops is worth reporting whether or not
+    /// the DTE happened to be online at that exact moment, and always
+    /// hangs up cleanly on this end too, so a dead `Session` is never left
+    /// half-connected.
+    fn poll_carrier(&mut self, d: Duration, session: &mut Session) -> Option<Response> {
         let up = session.carrier_detected();
-        if up && !self.carrier_up {
-            self.carrier_up = true;
-            if !self.in_command_mode {
-                return Some(Response::one("CONNECT 300"));
+        if up {
+            self.carrier_down_for = Duration::ZERO;
+            if !self.carrier_up {
+                self.carrier_up = true;
+                if !self.in_command_mode {
+                    return Some(Response::one("CONNECT 300"));
+                }
             }
-        } else if !up && self.carrier_up {
-            self.carrier_up = false;
-            session.hangup();
-            self.in_command_mode = true;
-            self.plus_count = 0;
-            self.idle = Duration::ZERO;
-            return Some(Response::one("NO CARRIER"));
+            return None;
         }
-        None
+
+        if !self.carrier_up {
+            return None;
+        }
+        self.carrier_down_for = self.carrier_down_for.saturating_add(d);
+        if self.carrier_down_for < DCD_HOLD_TIME {
+            return None;
+        }
+        self.carrier_up = false;
+        self.carrier_down_for = Duration::ZERO;
+        session.hangup();
+        self.in_command_mode = true;
+        self.plus_count = 0;
+        self.idle = Duration::ZERO;
+        Some(Response::one("NO CARRIER"))
     }
 
     /// Accumulates one command-mode byte, executing on CR. LF is ignored
@@ -1091,5 +1144,314 @@ mod tests {
 
         let resp = feed_line(&mut at, &mut local, "ATH0\r").expect("ATH0 must respond");
         assert_eq!(resp.lines, vec!["OK".to_string(), "NO CARRIER".to_string()]);
+    }
+
+    // --- Task 17: the half-duplex idle-mark fix, proven at the layer the
+    // real defect was observable through. `session.rs`'s own tests cover
+    // the raw sample-level property (RMS, recovered tone frequency); a
+    // bare `Session` has no mechanism to hang a call up on carrier loss
+    // at all - only `AtProcessor::poll_carrier` does that - so the actual
+    // observable defect (a live call torn down) can only be reproduced
+    // here, with a real `AtProcessor` driving each end. `Duplex::Half
+    // PingPong`, unlike every other test above in this file - see
+    // `half_cfg`'s own doc.
+
+    /// `Duplex::HalfPingPong`, unlike this module's own `cfg` above - see
+    /// `cfg`'s own doc for why every other test in this file deliberately
+    /// runs `Duplex::Full` instead. This is the one deliberate exception:
+    /// Task 17's fix is specifically about the half-duplex link this
+    /// crate actually ships, and the tests below exist to exercise
+    /// exactly that link, not the full-duplex one the rest of this file
+    /// uses for unrelated AT-command coverage.
+    fn half_cfg(role: Role) -> Config {
+        Config {
+            sample_rate: 8000,
+            role,
+            duplex: Duplex::HalfPingPong,
+        }
+    }
+
+    /// The Task 17 fix's own required test. Before the fix, the first
+    /// `yield_turn` made the yielding end transmit silence, the far end's
+    /// receiver read that as carrier loss, and `poll_carrier` correctly
+    /// (for a genuinely dropped call) hung up - tearing every half-duplex
+    /// call down on its first hand-over. Five hand-overs, not one: a fix
+    /// that survives the first and not the second is a different bug
+    /// wearing the same clothes.
+    ///
+    /// Checked at every round: both ends' `state()` really is still
+    /// `Connected` - one of the rare places that assertion is meaningful,
+    /// since the old bug's whole observable effect *was* an unwanted
+    /// transition out of `Connected`, driven by a real `hangup()` call,
+    /// not a coincidental non-event a broken clock could also produce -
+    /// and, not instead, that round's own message actually arrived
+    /// byte-exact at the far end. Across the whole five-round exchange,
+    /// `CONNECT 300` must have been reported exactly once per end and
+    /// `NO CARRIER` never at all.
+    ///
+    /// Mutation 1 target: put the zero-fill back in `session.rs`'s
+    /// `process_out` (delete the `idle_tx` read and restore
+    /// `out.fill(0.0)` in the `else` branch) - this test fails at round 0,
+    /// well before the fifth hand-over, because both ends drop to `Idle`
+    /// the moment the first `yield_turn`'s own Turn packet finishes
+    /// draining and the yielding end goes genuinely silent. See the task
+    /// report for the actual failing output.
+    #[test]
+    fn five_hand_overs_hold_the_call_up_and_connect_reports_exactly_once_each_end() {
+        let mut local = Session::new(half_cfg(Role::Originate));
+        let mut far = Session::new(half_cfg(Role::Answer));
+        let mut at_local = AtProcessor::new();
+        let mut at_far = AtProcessor::new();
+        let mut local_responses = Vec::new();
+        let mut far_responses = Vec::new();
+
+        // One audio block, ticking *both* ends' `AtProcessor` clocks every
+        // single time - never a bare `pump()` on its own anywhere in this
+        // test. A gap where only `pump` runs and `advance_time` is not
+        // polled is exactly where a real carrier drop could hide from
+        // this test: the underlying `Session`s would still see it (their
+        // own receiver state updates regardless), but nothing would ever
+        // act on it or record it, which is precisely the shape that would
+        // let the "put the zero-fill back" mutation slip through
+        // unnoticed during a long send-and-wait window.
+        fn tick(
+            local: &mut Session,
+            far: &mut Session,
+            at_local: &mut AtProcessor,
+            at_far: &mut AtProcessor,
+            local_responses: &mut Vec<Response>,
+            far_responses: &mut Vec<Response>,
+        ) {
+            pump(local, far);
+            if let Some(r) = at_local.advance_time(block_duration(), local) {
+                local_responses.push(r);
+            }
+            if let Some(r) = at_far.advance_time(block_duration(), far) {
+                far_responses.push(r);
+            }
+        }
+
+        feed_line(&mut at_local, &mut local, "ATDT1\r");
+        // `ATA`, not a direct `far.answer()` call - both ends need their
+        // own `AtProcessor` genuinely in data mode for this test's own
+        // per-round `feed`/`advance_time` calls (and its far-side
+        // `CONNECT 300` assertion) to mean anything.
+        feed_line(&mut at_far, &mut far, "ATA\r");
+
+        // Waits on `state()`, not `carrier_detected()` - see the task
+        // brief's own disclosed, not-yet-chased finding: the answering
+        // end's receiver can trip on originate's off-hook transient
+        // within 32 ms of `ATA`, well before originate has even finished
+        // dialling. Under this fix, that false-early "Connected" makes
+        // far genuinely start transmitting its own idle mark, which then
+        // genuinely (not falsely) reaches local's own receiver too -
+        // so a `carrier_detected()`-based wait here would exit before
+        // local has actually finished its own overture, same as
+        // `session.rs`'s own `connect` helper is careful to avoid. This
+        // is exactly the "reaching Connected proves nothing" trap in
+        // reverse: waiting on the wrong signal here would let the test
+        // proceed on a call that is not really up yet, not merely fail
+        // to prove one that is.
+        let mut connected = false;
+        for _ in 0..MAX_ITERS {
+            tick(
+                &mut local,
+                &mut far,
+                &mut at_local,
+                &mut at_far,
+                &mut local_responses,
+                &mut far_responses,
+            );
+            if local.state() == SessionState::Connected && far.state() == SessionState::Connected {
+                connected = true;
+                break;
+            }
+        }
+        assert!(
+            connected,
+            "both ends never reached Connected under half duplex"
+        );
+        for _ in 0..10 {
+            tick(
+                &mut local,
+                &mut far,
+                &mut at_local,
+                &mut at_far,
+                &mut local_responses,
+                &mut far_responses,
+            );
+        }
+
+        let mut holder_is_local = true; // originate (local) starts with the turn
+        for round in 0..5 {
+            assert_eq!(
+                local.state(),
+                SessionState::Connected,
+                "local dropped before round {round}"
+            );
+            assert_eq!(
+                far.state(),
+                SessionState::Connected,
+                "far dropped before round {round}"
+            );
+
+            let message = alloc::format!("round {round} over and out").into_bytes();
+            if holder_is_local {
+                assert!(
+                    local.has_turn(),
+                    "local should hold the turn at round {round}"
+                );
+                for &b in &message {
+                    assert_eq!(at_local.feed(b, &mut local), None);
+                }
+            } else {
+                assert!(far.has_turn(), "far should hold the turn at round {round}");
+                for &b in &message {
+                    assert_eq!(at_far.feed(b, &mut far), None);
+                }
+            }
+            for _ in 0..500 {
+                tick(
+                    &mut local,
+                    &mut far,
+                    &mut at_local,
+                    &mut at_far,
+                    &mut local_responses,
+                    &mut far_responses,
+                );
+            }
+            let received = if holder_is_local {
+                far.receive()
+            } else {
+                local.receive()
+            };
+            assert_eq!(
+                received, message,
+                "round {round}: message did not arrive byte-exact"
+            );
+
+            if holder_is_local {
+                local.yield_turn();
+            } else {
+                far.yield_turn();
+            }
+
+            let mut turned = false;
+            for _ in 0..MAX_ITERS {
+                tick(
+                    &mut local,
+                    &mut far,
+                    &mut at_local,
+                    &mut at_far,
+                    &mut local_responses,
+                    &mut far_responses,
+                );
+                let now_holder = if holder_is_local {
+                    far.has_turn()
+                } else {
+                    local.has_turn()
+                };
+                if now_holder {
+                    turned = true;
+                    break;
+                }
+            }
+            assert!(
+                turned,
+                "the turn never actually changed hands at round {round}"
+            );
+            // A long settle, not the usual short one: this is the window
+            // where the previous holder now genuinely has no turn and no
+            // queued Turn packet either, so this is where a zero-fill
+            // regression would show up as a sustained silence long enough
+            // to clear both hold-offs (~1.2 s total) - see this test's own
+            // `tick` doc.
+            for _ in 0..100 {
+                tick(
+                    &mut local,
+                    &mut far,
+                    &mut at_local,
+                    &mut at_far,
+                    &mut local_responses,
+                    &mut far_responses,
+                );
+            }
+            holder_is_local = !holder_is_local;
+
+            assert_eq!(
+                local.state(),
+                SessionState::Connected,
+                "local dropped after round {round}"
+            );
+            assert_eq!(
+                far.state(),
+                SessionState::Connected,
+                "far dropped after round {round}"
+            );
+        }
+
+        assert_eq!(
+            local_responses,
+            vec![Response::one("CONNECT 300")],
+            "local must see exactly one CONNECT 300, unprompted, and no NO CARRIER across five \
+             hand-overs"
+        );
+        assert_eq!(
+            far_responses,
+            vec![Response::one("CONNECT 300")],
+            "far must see exactly one CONNECT 300, unprompted, and no NO CARRIER across five \
+             hand-overs"
+        );
+    }
+
+    /// The other half of the same fix: a genuine hangup - the far end
+    /// truly stops transmitting anything at all, not merely yields the
+    /// turn - must still report `NO CARRIER`. The idle-mark fix must not
+    /// make real carrier loss undetectable, which is the obvious way to
+    /// make the five-hand-over test above pass without actually fixing
+    /// anything (e.g. an `idle_tx` that is somehow always heard as
+    /// carrier by the far end regardless of whether `far` itself has
+    /// really hung up).
+    ///
+    /// Mutation 3 target: make `poll_carrier` never report a falling edge
+    /// (e.g. delete its "carrier genuinely down" branch entirely) - `reported`
+    /// stays `None` for the whole iteration budget and this test fails
+    /// outright. See the task report for the actual failing output.
+    #[test]
+    fn a_genuine_hangup_under_half_duplex_still_reports_no_carrier() {
+        let mut local = Session::new(half_cfg(Role::Originate));
+        let mut far = Session::new(half_cfg(Role::Answer));
+        let mut at = AtProcessor::new();
+        feed_line(&mut at, &mut local, "ATDT1\r");
+        far.answer();
+
+        // `.state()`, not `carrier_detected()` - see the sibling
+        // five-hand-over test's own doc for why.
+        let mut connected = false;
+        for _ in 0..MAX_ITERS {
+            pump(&mut local, &mut far);
+            at.advance_time(block_duration(), &mut local);
+            if local.state() == SessionState::Connected && far.state() == SessionState::Connected {
+                connected = true;
+                break;
+            }
+        }
+        assert!(connected, "never reached Connected under half duplex");
+        settle(&mut local, &mut far);
+
+        far.hangup();
+        let mut reported = None;
+        for _ in 0..MAX_ITERS {
+            pump(&mut local, &mut far);
+            if let Some(r) = at.advance_time(block_duration(), &mut local) {
+                reported = Some(r);
+                break;
+            }
+        }
+        assert_eq!(reported, Some(Response::one("NO CARRIER")));
+        assert!(
+            !local.carrier_detected(),
+            "the shadow flag must be reporting a real transition, not a stale one"
+        );
     }
 }

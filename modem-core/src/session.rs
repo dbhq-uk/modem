@@ -29,14 +29,45 @@
 //!
 //! # Half duplex: silence is not the same as idle mark
 //!
-//! [`Tx::read`] idles on mark when it has nothing queued - that is a real
-//! transmitted tone, not silence, and it is what raises carrier on a
-//! listening receiver. A half-duplex end that does not hold the turn must
-//! not transmit *anything*, mark included, or the far end's receiver
-//! never sees a clean carrier drop and the two ends can never agree on
-//! whose turn it is. `process_out` therefore fills the block with exact
-//! zero silence while `Duplex::HalfPingPong` and this end lacks the turn,
-//! rather than delegating to `Tx` and trusting it to be quiet.
+//! **This was wrong, and it tore every half-duplex call down on the
+//! first turn hand-over.** An earlier version of this module reasoned
+//! that a half-duplex end without the turn "must not transmit
+//! *anything*, mark included, or the far end's receiver never sees a
+//! clean carrier drop" - and filled the block with exact zero silence
+//! while `Duplex::HalfPingPong` and this end lacked the turn. That is
+//! backwards from how a real modem behaves, and it is fatal: a real
+//! modem holds its carrier up for the *entire call* and sits on idle
+//! mark - a genuine transmitted tone - whenever it has nothing to send;
+//! ping-pong governs who sends *data*, not who transmits at all. Zero
+//! silence, by contrast, is exactly what a *dropped call* looks like to
+//! the far end's receiver ([`crate::carrier::CarrierDetector`] reads it
+//! as energy below the noise floor), so the very first hand-over -
+//! `dial`'s originate end yields the turn the moment it has said
+//! anything at all - made the answer end's receiver declare carrier
+//! loss on the originate direction, [`crate::at::AtProcessor::poll_carrier`]
+//! correctly hangs up on exactly that signal, and the call was torn down
+//! before a single real exchange completed. Traced end to end on 8 Sep
+//! 2026 with two [`Session`]s wired together: connect, yield the turn,
+//! both ends `Idle` within a second, the message never arrives. This
+//! also explains two symptoms that looked separate and were not: the
+//! `CARRIER` lamp flickering off on an otherwise healthy call, and
+//! `CONNECT 300` never arriving at the originate end at all (it never
+//! gets to see the answer end's carrier stay up long enough to report
+//! it).
+//!
+//! The fix is the period-accurate one: `process_out` now transmits
+//! continuous idle mark from this end's **own** [`Tx`] - the same tone
+//! [`Tx::read`] already generates whenever its bit queue runs dry, so a
+//! turn hand-over is inaudible from the wire's point of view - instead
+//! of the real `tx`, which cannot be reused directly for this: `send`
+//! does not gate on `has_turn` (see its own doc), so anything a caller
+//! incorrectly queued before actually holding the turn already sits in
+//! `tx`'s bit queue, and reading from `tx` here would drain and
+//! transmit it early. A second, dedicated `Tx` - `idle_tx`, built from
+//! the same [`Config`] alongside the real one and never written to, so
+//! its own bit queue is permanently empty - is used instead: reading
+//! from it can only ever produce this end's own idle mark, never real
+//! data, regardless of what a misbehaving caller has queued into `tx`.
 //!
 //! # Every burst needs its own acquisition preamble
 //!
@@ -132,6 +163,14 @@ pub struct Session {
     /// also `None` the instant the overture finishes - see `process_out`.
     overture_stage: Option<Stage>,
     tx: Option<Tx>,
+    /// A second transmitter, built from the same [`Config`] as `tx` and
+    /// never written to, so its bit queue is permanently empty and
+    /// reading it can only ever produce this end's own idle mark. Used
+    /// by `process_out` under `Duplex::HalfPingPong` while this end does
+    /// not hold the turn - see this module's own doc for why `tx` itself
+    /// cannot be reused for that without risking whatever a caller
+    /// queued into it before actually holding the turn.
+    idle_tx: Option<Tx>,
     rx: Option<Rx>,
     reader: PacketReader,
     /// Payload bytes drained from completed `PacketKind::Data` packets,
@@ -163,6 +202,7 @@ impl Session {
             overture: None,
             overture_stage: None,
             tx: None,
+            idle_tx: None,
             rx: None,
             reader: PacketReader::new(),
             inbox: Vec::new(),
@@ -186,6 +226,7 @@ impl Session {
         self.overture = Some(Overture::new(digits));
         self.overture_stage = None;
         self.tx = Some(Tx::new(self.cfg));
+        self.idle_tx = Some(Tx::new(self.cfg));
         self.rx = Some(Rx::new(self.cfg));
         self.reader = PacketReader::new();
         self.inbox.clear();
@@ -205,6 +246,7 @@ impl Session {
         self.overture = None;
         self.overture_stage = None;
         self.tx = Some(Tx::new(self.cfg));
+        self.idle_tx = Some(Tx::new(self.cfg));
         self.rx = Some(Rx::new(self.cfg));
         self.reader = PacketReader::new();
         self.inbox.clear();
@@ -221,6 +263,7 @@ impl Session {
         self.overture = None;
         self.overture_stage = None;
         self.tx = None;
+        self.idle_tx = None;
         self.rx = None;
         self.inbox.clear();
         self.has_turn = false;
@@ -233,20 +276,23 @@ impl Session {
     /// connected.
     ///
     /// While `Duplex::HalfPingPong` and this end does not hold the turn,
-    /// Connected transmits silence - with exactly one narrow exception:
-    /// immediately after `yield_turn` clears `has_turn`, `tx` still has
-    /// that call's own `Turn` packet queued, and `process_out` keeps
-    /// draining it (via the `yielding` flag, cleared the moment `tx` runs
-    /// dry) so the token is not silently stranded. That bypass covers
-    /// only the packet `yield_turn` itself just queued - it is not a
-    /// general "transmit whatever `tx` happens to be holding" rule. Round
-    /// 1 review found the difference matters: a bypass keyed on
-    /// `tx.pending()` alone also let a `send` called before this end held
-    /// the turn - not just `yield_turn`'s own token - straight through,
-    /// which put both ends on the wire at once on the very next
-    /// `process_out` call. See [`Session::send`]'s own doc: it still does
-    /// not gate on `has_turn`, so this is the only thing standing between
-    /// a caller mistake and a live collision.
+    /// Connected transmits continuous idle mark from `idle_tx` - not
+    /// silence, see this module's own doc - with exactly one narrow
+    /// exception: immediately after `yield_turn` clears `has_turn`, `tx`
+    /// still has that call's own `Turn` packet queued, and `process_out`
+    /// keeps draining the *real* `tx` (via the `yielding` flag, cleared
+    /// the moment `tx` runs dry) so the token is not silently stranded.
+    /// That bypass covers only the packet `yield_turn` itself just
+    /// queued - it is not a general "transmit whatever `tx` happens to be
+    /// holding" rule. Round 1 review found the difference matters: a
+    /// bypass keyed on `tx.pending()` alone also let a `send` called
+    /// before this end held the turn - not just `yield_turn`'s own token -
+    /// straight through, which put both ends on the wire at once on the
+    /// very next `process_out` call. See [`Session::send`]'s own doc: it
+    /// still does not gate on `has_turn`, so this is the only thing
+    /// standing between a caller mistake and a live collision - and it is
+    /// exactly why the idle path below reads from `idle_tx`, which that
+    /// same caller mistake can never reach, rather than from `tx` itself.
     pub fn process_out(&mut self, out: &mut [f32]) {
         match self.state {
             SessionState::Idle | SessionState::Answering => out.fill(0.0),
@@ -265,18 +311,37 @@ impl Session {
                 }
             }
             SessionState::Connected => {
-                let tx = self.tx.as_mut().expect("Connected state without a Tx");
                 let transmit = match self.cfg.duplex {
                     Duplex::Full => true,
-                    Duplex::HalfPingPong => self.has_turn || (self.yielding && tx.pending()),
+                    Duplex::HalfPingPong => {
+                        self.has_turn
+                            || (self.yielding
+                                && self
+                                    .tx
+                                    .as_ref()
+                                    .expect("Connected state without a Tx")
+                                    .pending())
+                    }
                 };
                 if transmit {
+                    let tx = self.tx.as_mut().expect("Connected state without a Tx");
                     tx.read(out);
                     if self.yielding && !tx.pending() {
                         self.yielding = false;
                     }
                 } else {
-                    out.fill(0.0);
+                    // Half duplex and this end does not hold the turn:
+                    // continuous idle mark, never silence - see this
+                    // module's own doc for the defect this closes.
+                    // `idle_tx` is never written to, so this can only
+                    // ever produce this end's own mark tone, regardless
+                    // of whatever a caller may have incorrectly queued
+                    // into the real `tx` before actually holding the
+                    // turn.
+                    self.idle_tx
+                        .as_mut()
+                        .expect("Connected state without an idle Tx")
+                        .read(out);
                 }
             }
         }
@@ -430,6 +495,7 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nco::goertzel;
     use crate::Role;
     use alloc::vec;
 
@@ -653,14 +719,36 @@ mod tests {
         );
     }
 
-    /// Half duplex, checked at the sample level rather than through
-    /// `has_turn()` alone. `has_turn` is a bool - exactly the kind of
-    /// aggregate the brief warns cannot detect the defect it exists to
-    /// catch: Mutation 2 (`process_out` ignoring the turn) still reports
-    /// `has_turn() == false` correctly on the end that lacks it, so only
-    /// inspecting the actual samples `process_out` writes catches it.
+    /// The Task 17 fix's own central test, checked at the sample level
+    /// rather than through `has_turn()` alone. `has_turn` is a bool -
+    /// exactly the kind of aggregate the brief warns cannot detect the
+    /// defect it exists to catch: a `process_out` that ignores the turn
+    /// entirely still reports `has_turn() == false` correctly on the end
+    /// that lacks it, so only inspecting the actual samples `process_out`
+    /// writes catches a regression here.
+    ///
+    /// Before this task, the end without the turn transmitted exact
+    /// silence, which the far end's receiver reads as carrier loss - see
+    /// this module's own doc for the call this tore down on the very
+    /// first hand-over. The fix is continuous idle mark instead, checked
+    /// two ways that a bare "any nonzero sample" scan cannot tell apart
+    /// from a defect: RMS (a single stray spike, or a DC offset, would
+    /// also read as "not all zero" but would not clear a real sine's RMS)
+    /// and the recovered tone frequency being answer's *own* mark
+    /// (2225 Hz), not originate's (1270 Hz) and not merely "some energy
+    /// somewhere".
+    ///
+    /// Mutation 1 target: put the zero-fill back in `process_out` (delete
+    /// the `idle_tx` read and restore `out.fill(0.0)` in the `else`
+    /// branch) - the RMS assertion below fails outright. Mutation 2
+    /// target: build `idle_tx` from the *far* end's role (e.g.
+    /// `self.cfg.role.listen()`) instead of this end's own - `own_mark`
+    /// drops near zero and `far_mark` clears 0.9 instead, failing the
+    /// frequency assertions specifically while leaving RMS untouched -
+    /// see the task report for the actual failing output either mutation
+    /// produces.
     #[test]
-    fn half_duplex_end_without_turn_transmits_exact_silence() {
+    fn half_duplex_end_without_turn_transmits_continuous_idle_mark_not_silence() {
         let mut originate = Session::new(cfg(Role::Originate));
         let mut answer = Session::new(cfg(Role::Answer));
         originate.dial("1");
@@ -668,13 +756,28 @@ mod tests {
         connect(&mut originate, &mut answer);
 
         assert!(!answer.has_turn(), "answer must not start with the turn");
-        // Pre-filled with a non-zero value so an untouched buffer would
-        // also be caught, not only one actively overwritten with tone.
-        let mut out = vec![1.0f32; BLOCK];
+        let mut out = vec![0.0f32; BLOCK];
         answer.process_out(&mut out);
+
+        let rms =
+            (out.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>() / out.len() as f64).sqrt();
         assert!(
-            out.iter().all(|&x| x == 0.0),
-            "answer transmitted while it did not hold the turn"
+            rms > 0.3,
+            "answer's idle output has implausibly low RMS ({rms}) for a full-amplitude tone - \
+             a DC offset or a single spike would also satisfy a bare non-zero check"
+        );
+
+        let s64: Vec<f64> = out.iter().map(|&x| x as f64).collect();
+        let own_mark = goertzel(&s64, 2225.0, 8000.0);
+        let far_mark = goertzel(&s64, 1270.0, 8000.0);
+        assert!(
+            own_mark >= 0.9,
+            "answer's idle output is not its own mark tone (2225 Hz): {own_mark}"
+        );
+        assert!(
+            far_mark <= 0.05,
+            "answer's idle output leaked the far end's mark tone (1270 Hz) instead of its own: \
+             {far_mark}"
         );
 
         originate.yield_turn();
@@ -703,12 +806,19 @@ mod tests {
     /// own doc - that is the caller's responsibility), so calling it
     /// before this end actually holds the turn queued real data straight
     /// into `tx`, and the old, wider condition read that queued data as
-    /// license to transmit. Demonstrated on the real path, not a unit
-    /// probe of the flag alone: two connected sessions, `answer` still
-    /// without the turn, one `send` call, and the very next `process_out`
-    /// - which must still be exact silence.
+    /// license to transmit.
+    ///
+    /// Task 17 changed what the *correct* output looks like here: real
+    /// modems never go silent while connected, so the fix reads idle
+    /// output from a second, dedicated `idle_tx` that is never written to
+    /// (see this module's own doc) rather than from `tx` - which means
+    /// this scenario's correct output is now idle mark, not silence, and
+    /// this test's own job is proving the two stay genuinely independent:
+    /// the queued data must never reach the wire while answer still lacks
+    /// the turn, no matter how long it waits, even though the output is
+    /// no longer silent either.
     #[test]
-    fn sending_without_the_turn_does_not_put_anything_on_the_wire() {
+    fn sending_without_the_turn_transmits_idle_mark_not_the_queued_data() {
         let mut originate = Session::new(cfg(Role::Originate));
         let mut answer = Session::new(cfg(Role::Answer));
         originate.dial("1");
@@ -718,11 +828,24 @@ mod tests {
         assert!(!answer.has_turn(), "answer must not start with the turn");
         answer.send(b"jumping the queue");
 
-        let mut out = vec![1.0f32; BLOCK];
+        let mut out = vec![0.0f32; BLOCK];
         answer.process_out(&mut out);
+        let s64: Vec<f64> = out.iter().map(|&x| x as f64).collect();
+        let own_mark = goertzel(&s64, 2225.0, 8000.0);
         assert!(
-            out.iter().all(|&x| x == 0.0),
-            "answer transmitted data queued before it held the turn"
+            own_mark >= 0.9,
+            "answer must still transmit its own idle mark, not the data queued before it held \
+             the turn: {own_mark}"
+        );
+
+        // The queued data must never reach the wire while answer still
+        // lacks the turn - a long pump, with originate never yielding.
+        for _ in 0..2000 {
+            pump(&mut originate, &mut answer);
+        }
+        assert!(
+            originate.receive().is_empty(),
+            "data queued before the turn was ever held leaked onto the wire"
         );
     }
 
