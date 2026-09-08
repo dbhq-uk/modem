@@ -5,3 +5,4 @@
 !testdata/*.wav
 /spike/pkg-browser
 /spike/pkg-worklet
+/web/modem.wasm

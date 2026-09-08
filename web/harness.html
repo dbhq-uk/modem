@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>modem browser endpoint harness</title>
+</head>
+<body style="background:#0A0A0A;color:#FFB000;font-family:monospace;padding:2rem">
+<h1>Browser endpoint harness</h1>
+<p>Not the product page - Task 3 builds that. This proves Task 2's endpoint two ways, each the same gate the spike used, now against the real Session rather than a placeholder tone.</p>
+<button id="go">Run both tests</button>
+<pre id="log"></pre>
+<script type="module">
+import { instantiateModemModule, SessionHandle, Role, Duplex, SessionState } from './session.js';
+import { ModemEndpoint } from './modem.js';
+
+const log = (m) => {
+  document.getElementById('log').textContent += m + "\n";
+  console.log('[harness] ' + m);
+};
+
+// Polled by automation, same convention as spike/worklet.html's
+// window.spikeResult.
+window.harnessResult = { loopback: 'pending', worklet: 'pending' };
+
+/**
+ * Modulates and demodulates in the tab with no audio device at all: two
+ * SessionHandles, wired together entirely in WASM linear memory, one
+ * dialling and one answering, exactly like modem-core's own
+ * two_sessions_exchange_data_in_both_directions test but driven through
+ * the actual browser ABI rather than Rust. This is the test the plan
+ * calls for - "a browser loopback - modulate and demodulate in the tab
+ * and assert the bytes survive" - and it is a stronger check than
+ * "it instantiated": wrong bit order, a wrong tone, or a broken
+ * Gardner loop would all fail this, not just a missing export.
+ */
+async function runLoopbackTest() {
+  const bytes = await (await fetch('modem.wasm')).arrayBuffer();
+  const exportsA = await instantiateModemModule(bytes);
+  // A second, independent instantiation - not two SessionHandles built
+  // from the same module instance - so the two ends do not secretly
+  // share linear memory the way two Sessions inside one real instance
+  // would have to be kept apart from each other by hand.
+  const exportsB = await instantiateModemModule(bytes);
+
+  const sampleRate = 8000; // the DSP's own internal rate - no resampling
+  const originate = new SessionHandle(exportsA, { sampleRate, role: Role.ORIGINATE, duplex: Duplex.HALF_PING_PONG });
+  const answer = new SessionHandle(exportsB, { sampleRate, role: Role.ANSWER, duplex: Duplex.HALF_PING_PONG });
+
+  originate.dial(new TextEncoder().encode('1'));
+  answer.answer();
+
+  const BLOCK = 256;
+  const bufA = new Float32Array(BLOCK);
+  const bufB = new Float32Array(BLOCK);
+
+  const pump = () => {
+    originate.processOut(bufA);
+    answer.processOut(bufB);
+    originate.processIn(bufB);
+    answer.processIn(bufA);
+  };
+
+  let connected = false;
+  for (let i = 0; i < 4000 && !connected; i++) {
+    pump();
+    connected = originate.state() === SessionState.CONNECTED && answer.state() === SessionState.CONNECTED;
+  }
+  if (!connected) throw new Error('sessions never both reached Connected');
+
+  // A short settle so the just-granted turn's acquisition preamble has
+  // drained, matching modem-core's own session.rs test convention.
+  for (let i = 0; i < 10; i++) pump();
+
+  const message = 'HELLO FROM THE BROWSER';
+  const payload = new TextEncoder().encode(message);
+  originate.send(payload);
+
+  let received = new Uint8Array(0);
+  for (let i = 0; i < 500 && received.length < payload.length; i++) {
+    pump();
+    const chunk = answer.receive();
+    if (chunk.length > 0) {
+      const merged = new Uint8Array(received.length + chunk.length);
+      merged.set(received);
+      merged.set(chunk, received.length);
+      received = merged;
+    }
+  }
+
+  const gotText = new TextDecoder().decode(received);
+  if (gotText !== message) {
+    throw new Error(`round trip mismatch: sent "${message}", got "${gotText}"`);
+  }
+
+  originate.free();
+  answer.free();
+  return `loopback verified - "${message}" survived modulation and demodulation byte-exact`;
+}
+
+/**
+ * Keeps the spike's own gate - a spectral peak within three bins of
+ * 1270 Hz, measured through a real AnalyserNode - rather than replacing
+ * it with "the worklet instantiated". The difference from the spike:
+ * this tone now comes from a real dialling Session's idle mark once it
+ * reaches Connected, not a synthetic sine the worklet fabricated for
+ * its own sake.
+ */
+async function runWorkletTest() {
+  const endpoint = new ModemEndpoint();
+  let sawConnected = false;
+  endpoint.addEventListener('status', (e) => {
+    log('status: ' + JSON.stringify(e.detail));
+    if (e.detail.state === 3) sawConnected = true; // SessionState.CONNECTED
+  });
+
+  try {
+    await endpoint.init({ role: Role.ORIGINATE, duplex: Duplex.HALF_PING_PONG });
+    log('worklet ready, sampleRate=' + endpoint.ctx.sampleRate);
+
+    endpoint.dial('1');
+
+    const analyser = endpoint.ctx.createAnalyser();
+    analyser.fftSize = 8192;
+    endpoint.node.connect(analyser);
+    await endpoint.ctx.resume();
+    log('audio graph running');
+
+    const deadline = Date.now() + 15000;
+    while (!sawConnected && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (!sawConnected) throw new Error('dial never reached Connected within 15 s');
+
+    // A short wait once connected, so the block the analyser sees is
+    // settled idle mark rather than the tail of the training stage.
+    await new Promise((r) => setTimeout(r, 400));
+
+    const bins = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(bins);
+    const hzPerBin = endpoint.ctx.sampleRate / analyser.fftSize;
+    const target = Math.round(1270 / hzPerBin);
+
+    let peak = 0;
+    for (let i = 1; i < bins.length; i++) if (bins[i] > bins[peak]) peak = i;
+    const peakHz = Math.round(peak * hzPerBin);
+    log('spectral peak at ' + peakHz + ' Hz (' + bins[peak].toFixed(1) + ' dB)');
+
+    if (Math.abs(peak - target) > 3 || bins[peak] <= -60) {
+      throw new Error('expected 1270 Hz mark tone, got ' + peakHz + ' Hz');
+    }
+
+    return 'worklet verified - real Session idle mark measured at ' + peakHz + ' Hz';
+  } finally {
+    // Stop regardless of pass or fail - spike/README.md finding 5. A
+    // failed assertion above must not leave a carrier running any more
+    // than a passed one should.
+    await endpoint.stop();
+    log('audio stopped');
+  }
+}
+
+document.getElementById('go').onclick = async () => {
+  try {
+    window.harnessResult.loopback = await runLoopbackTest();
+    log(window.harnessResult.loopback);
+  } catch (err) {
+    window.harnessResult.loopback = 'failed: ' + err;
+    log('LOOPBACK FAILED: ' + err);
+  }
+
+  try {
+    window.harnessResult.worklet = await runWorkletTest();
+    log(window.harnessResult.worklet);
+  } catch (err) {
+    window.harnessResult.worklet = 'failed: ' + err;
+    log('WORKLET FAILED: ' + err);
+  }
+};
+</script>
+</body>
+</html>
