@@ -1115,49 +1115,81 @@ mod tests {
     /// could never move once detected, held that lock for as long as the
     /// noise itself continued. Swapping to a floor that freezes on
     /// detection instead of merely decaying slowly moved the measured
-    /// cold-start ceiling from about 0.012 to precisely between 0.0205
-    /// (passes) and 0.021 (fails) - documented as a measured pair of
-    /// numbers in `carrier.rs`'s `INITIAL_FLOOR` comment, not the "0.02 to
-    /// 0.03" range an earlier report gave from testing only the endpoints.
+    /// cold-start ceiling from about 0.012 to about 0.0175-0.0205 -
+    /// documented as a measured *range* in `carrier.rs`'s `INITIAL_FLOOR`
+    /// comment, not the "0.02 to 0.03" range an earlier report gave from
+    /// testing only the endpoints, and not the single precise pair
+    /// ("0.0205 passes, 0.021 fails") a later single-seed measurement
+    /// wrongly presented as exact.
+    ///
+    /// # This is a seed lottery, not a band effect
+    ///
+    /// Round 1 review of Task 12's Role fix moved this test's Rx to
+    /// `Role::Answer` on the theory that the ceiling was measured against
+    /// a specific band and needed pinning there to stay accurate. It does
+    /// not: an 8-seed x 2-band sweep (16 combinations, amplitudes swept in
+    /// 0.001-0.0005 steps from 0.014 to 0.0205) found the boundary
+    /// clustered at 0.0175-0.0205 on **both** bands, with individual
+    /// seeds landing anywhere in that range regardless of which band they
+    /// ran against - two of the sixteen combinations already fail at
+    /// 0.018, and several on both bands still pass at 0.0205. This is the
+    /// same seed-lottery shape `acc5372` ("the seed lottery replacing the
+    /// periodicity one") already found and fixed for a BER bracket and an
+    /// AWGN floor: a single fixed seed's measurement is a draw, not a
+    /// property of the mechanism, and the Role fix handing this test an
+    /// independent second draw (the band moved, incidentally) is what
+    /// exposed it here.
+    ///
+    /// So this sweeps 8 seeds at both roles rather than one seed at one
+    /// role, and the top amplitude (0.015) sits with real margin below
+    /// the worst boundary actually observed (0.0175, not the best-case
+    /// 0.0205) - a test whose top point sits against the best draw would
+    /// have exactly the fragility this section exists to close off.
     #[test]
     fn noise_on_a_dead_line_produces_no_bytes() {
-        for amplitude in [1e-4f32, 1e-3, 5e-3, 1e-2, 0.0126, 0.02] {
-            // Role-fix call-site audit: there is no Tx here, but this
-            // sweep's top amplitude (0.02) sits right against the
-            // documented cold-start ceiling (`carrier.rs`'s
-            // `INITIAL_FLOOR` doc: passes at 0.0205, fails at 0.021) -
-            // measured, implicitly, at the band `Role::Originate` resolved
-            // to *before* the Role fix, tones(Originate) == 1270/1070.
-            // Deterministic PRNG noise is not spectrally flat, so a
-            // different correlator band can read genuinely different
-            // energy from the identical byte stream: post-fix,
-            // `Rx::new(cfg(Role::Originate, ..))` moved to 2225/2025 and
-            // this exact amplitude started fabricating bytes there.
-            // Role::Answer keeps this test (and the figures it is cited
-            // from) pinned to the original, documented band -
-            // tones(Answer.listen()) == tones(Originate) == 1270/1070.
-            let c = cfg(Role::Answer, 8000);
-            let mut rx = Rx::new(c);
+        // Eight arbitrary fixed seeds - not swept for their own sake, but
+        // because a single seed cannot distinguish a real ceiling from a
+        // lucky draw (see this test's own doc).
+        const SEEDS: [u64; 8] = [
+            0x2545F491_4F6CDD1D,
+            0x1234_5678_9ABC_DEF1,
+            0xDEAD_BEEF_CAFE_0001,
+            0x0BAD_C0DE_1234_5555,
+            0x9E37_79B9_7F4A_7C15,
+            0xABCD_EF01_2345_6789,
+            0x1111_1111_1111_1111,
+            0xF00D_F00D_F00D_F00D,
+        ];
+        for &seed in &SEEDS {
+            for role in [Role::Originate, Role::Answer] {
+                // Top point (0.015) is comfortably below the worst
+                // boundary measured across the full seed x role sweep
+                // (0.0175) - see this test's own doc.
+                for amplitude in [1e-4f32, 1e-3, 5e-3, 1e-2, 0.0126, 0.015] {
+                    let c = cfg(role, 8000);
+                    let mut rx = Rx::new(c);
 
-            // Deterministic noise, no carrier anywhere, scaled per sweep
-            // point.
-            let noise = noise_buf(amplitude, 40_000, 0x2545F491_4F6CDD1D);
+                    let noise = noise_buf(amplitude, 40_000, seed);
 
-            let mut got = [0u8; 256];
-            let mut total = 0;
-            for chunk in noise.chunks(733) {
-                rx.write(chunk);
-                total += rx.read(&mut got);
+                    let mut got = [0u8; 256];
+                    let mut total = 0;
+                    for chunk in noise.chunks(733) {
+                        rx.write(chunk);
+                        total += rx.read(&mut got);
+                    }
+                    assert_eq!(
+                        total, 0,
+                        "seed {seed:#018x}, role {role:?}, amplitude {amplitude}: \
+                         fabricated {total} bytes from noise on a dead line"
+                    );
+                    assert_eq!(
+                        rx.framing_errors(),
+                        0,
+                        "seed {seed:#018x}, role {role:?}, amplitude {amplitude}: \
+                         fabricated framing errors from noise"
+                    );
+                }
             }
-            assert_eq!(
-                total, 0,
-                "amplitude {amplitude}: fabricated {total} bytes from noise on a dead line"
-            );
-            assert_eq!(
-                rx.framing_errors(),
-                0,
-                "amplitude {amplitude}: fabricated framing errors from noise"
-            );
         }
     }
 
@@ -1287,6 +1319,15 @@ mod tests {
     /// This is a half-duplex modem: a gap of a few seconds between
     /// transmissions is the ordinary operating condition, not an edge
     /// case.
+    ///
+    /// Runs at 2225/2025 (`Role::Originate` here means `Rx::new` listens
+    /// on `tones(Originate.listen())`, i.e. the Answer band) - unlike
+    /// `noise_on_a_dead_line_produces_no_bytes`'s own top sweep point,
+    /// 1e-3 sits nowhere near the measured 0.0175-0.0205 boundary on
+    /// either band, so which one this test happens to use does not
+    /// change what it proves. Stated here rather than left implicit,
+    /// since round 1 review found the same silent band change undisclosed
+    /// in a test that mattered more.
     #[test]
     fn quiet_then_noise_does_not_fabricate_bytes() {
         let c = cfg(Role::Originate, 8000);
@@ -1321,6 +1362,11 @@ mod tests {
     /// floor's lower clamp has to hold regardless of how long the line
     /// sat quiet first, which is exactly the property a single settle
     /// duration cannot demonstrate.
+    ///
+    /// Runs at 2225/2025 (Answer band, via `Role::Originate` - see
+    /// `Rx::new`'s doc). As with `quiet_then_noise_does_not_fabricate_
+    /// bytes`, 1e-3 is nowhere near the measured 0.0175-0.0205 boundary on
+    /// either band.
     #[test]
     fn noise_rejection_at_reference_amplitude_holds_across_idle_durations() {
         for settle_secs in [0.0f64, 1.0, 5.0, 10.0, 60.0] {
@@ -1357,6 +1403,11 @@ mod tests {
     /// actually stops, in about the hold-off period. "Never recovers" (an
     /// earlier report's wording) meant "while the same noise continues",
     /// which is materially more benign than it reads.
+    ///
+    /// Runs at 2225/2025 (Answer band, via `Role::Originate` - see
+    /// `Rx::new`'s doc). Amplitude 0.03 is well above the measured
+    /// 0.0175-0.0205 boundary on either band, deliberately - this test
+    /// wants a false lock, not a marginal one.
     #[test]
     fn a_false_lock_clears_once_the_noise_actually_stops() {
         let c = cfg(Role::Originate, 8000);

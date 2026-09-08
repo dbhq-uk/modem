@@ -21,13 +21,17 @@
 //! about 10 s (eight `FLOOR_ADAPT` time constants) and staying there
 //! indefinitely - the clamp means they do not keep drifting after that.
 //! Measured at `FLOOR_MIN_FRACTION = 1/10`: a cold start (no prior idle)
-//! rejects noise up to amplitude 0.0205 and detects a clean signal down to
-//! about 0.0075; after 10 s or more of idle line, rejection tightens to
-//! about 0.002-0.0025 and sensitivity improves to about 0.0005-0.0007.
-//! Both numbers move in the *same* direction with idle time (more
-//! sensitive, less tolerant of loud ambient) because they are two readings
-//! of the one mechanism - the floor decaying towards whatever it is
-//! actually fed - not two independent properties.
+//! rejects noise up to about 0.0175-0.0205 (a range across seeds and both
+//! Bell 103 bands, not one precise number - see `INITIAL_FLOOR`'s own
+//! comment) and detects a clean signal down to about 0.0075; after 10 s or
+//! more of idle line, rejection tightens to about 0.002-0.0025 and
+//! sensitivity improves to about 0.0005-0.0007. Both numbers move in the
+//! *same* direction with idle time (more sensitive, less tolerant of loud
+//! ambient) because they are two readings of the one mechanism - the floor
+//! decaying towards whatever it is actually fed - not two independent
+//! properties. Only the cold-start noise ceiling has been checked across
+//! seeds and bands for this range-not-a-point caveat; the other three
+//! figures here are each still a single measured draw.
 //!
 //! This does not make the detector immune to loud ambient noise. A
 //! receiver that powers up straight into a noise floor loud enough to
@@ -99,14 +103,22 @@ const FLOOR_ADAPT: f64 = 1e-4;
 /// it, and the effective ceiling on how loud an ambient a cold start can
 /// reject: energy above `RISE_RATIO * INITIAL_FLOOR` clears the threshold
 /// in the first attack time constant, before FLOOR_ADAPT has moved this at
-/// all, and then freezes there the moment it does. Measured precisely
-/// against this crate's noise sweep (`rx.rs`'s
-/// `noise_on_a_dead_line_produces_no_bytes`): passes at amplitude 0.0205,
-/// fails at 0.021 - comfortably past -38 dBFS (amplitude 0.0126, "ordinary
-/// microphone noise floor"), which is the reference point this constant is
-/// tuned to clear. A cold start cannot reject anything above about 0.0205;
-/// see the module doc for why, and `FLOOR_MIN_FRACTION` for the equivalent
-/// number once the line has been idle for a while.
+/// all, and then freezes there the moment it does. Measured against this
+/// crate's noise sweep (`rx.rs`'s `noise_on_a_dead_line_produces_no_bytes`)
+/// across 8 seeds and both Bell 103 bands: the boundary is not one precise
+/// number, it is a **range**, about 0.0175 to 0.0205, and it does not
+/// depend on which band the correlator is tuned to - individual seeds land
+/// anywhere across that range on either band. An earlier version of this
+/// comment quoted a single fixed-seed pair ("passes at 0.0205, fails at
+/// 0.021") as though it were exact; that draw sat at the favourable end of
+/// the same range, not a tighter true boundary - see `noise_on_a_dead_
+/// line_produces_no_bytes`'s own doc for the sweep this was found with,
+/// and `acc5372` for the same seed-lottery shape found once already in
+/// this crate. A cold start cannot reliably reject anything above about
+/// 0.0175; see the module doc for why, and `FLOOR_MIN_FRACTION` for the
+/// equivalent figure once the line has been idle for a while (that figure
+/// has not been re-checked for the same band-independence and may carry
+/// the same caveat).
 const INITIAL_FLOOR: f64 = 1e-3;
 /// How long the energy must stay low before carrier drops. Longer than any
 /// inter-character gap at 300 baud, which is at most a few symbol times.
