@@ -339,8 +339,8 @@ fn main() {
     let right = App::single(b, &wired, Theme::default());
     let side_by_side = format!(
         "<div class=\"row\">{}{}</div>",
-        window("originate", &render(&left, 100, 24)),
-        window("answer", &render(&right, 100, 24)),
+        window("originate", &render(&left, 72, 22)),
+        window("answer", &render(&right, 72, 22)),
     );
 
     // One window, both ends in it - the split layout the crate builds.
@@ -451,7 +451,12 @@ fn page(
 <p>For comparison, the same call in the current frame. The waterfall rows are empty because Task 16 builds the FFT that fills them. The call runs full duplex: under half duplex an idle end currently transmits silence, the far end reads that as carrier loss, and the first turn hand-over hangs the call up.</p>
 {side_by_side}
 
-<h2>Now - one window, both ends in it</h2>
+<h2>The two earlier proposals, for the record</h2>
+<p>Drawn, not rendered, and not being taken - kept so the comparison is on file.</p>
+{proposal_a}
+{proposal_b}
+
+<h2>One window, both ends in it</h2>
 <p>The split layout the crate also builds, sharing one spectrum between the panes.</p>
 {split}
 

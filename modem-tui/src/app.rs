@@ -297,7 +297,10 @@ impl App {
             let pane = &self.panes[0];
             return vec![Title {
                 left: "modem".to_string(),
-                right: format!("{} \u{b7} {} Hz", pane.role_name(), pane.band_label()),
+                // No "Hz" - the row labels down the waterfall's left edge
+                // are the same numbers in the same units, so the unit on
+                // the title bar is three columns saying nothing.
+                right: format!("{} \u{b7} {}", pane.role_name(), pane.band_label()),
             }];
         }
         self.panes
@@ -371,47 +374,110 @@ impl App {
         style: Style,
         show_prompt: bool,
     ) {
-        let terminal_rows = area.height;
-        let history_rows = if show_prompt {
-            terminal_rows.saturating_sub(1)
+        let width = area.width as usize;
+        if width == 0 || area.height == 0 {
+            return;
+        }
+        let terminal_rows = area.height as usize;
+
+        // Every line is wrapped to the pane's width before any of it is
+        // placed, because `draw::text` clips: an unwrapped 90-character
+        // line in a 68-column pane loses its tail with nothing on screen
+        // saying so, and a chat client that silently eats the end of
+        // what the far end said is worse than a denser status bar.
+        let prompt = if show_prompt {
+            let prefix = if pane.in_command_mode() { "" } else { "> " };
+            wrap(&format!("{prefix}{}_", pane.composing()), width)
         } else {
-            terminal_rows
+            Vec::new()
         };
-        let history = pane.history();
-        let start = history.len().saturating_sub(history_rows as usize);
-        for (i, line) in history[start..].iter().enumerate() {
+
+        // The prompt is what you are typing right now, so it keeps its
+        // rows and history gives way - never the other way round.
+        let prompt_rows = prompt.len().min(terminal_rows);
+        let history_rows = terminal_rows - prompt_rows;
+
+        let wrapped: Vec<String> = pane
+            .history()
+            .iter()
+            .flat_map(|line| wrap(line, width))
+            .collect();
+        let start = wrapped.len().saturating_sub(history_rows);
+        for (i, line) in wrapped[start..].iter().enumerate() {
             draw::text(buf, area, area.left(), area.top() + i as u16, line, style);
         }
-        if show_prompt && history_rows < terminal_rows {
-            let prefix = if pane.in_command_mode() { "" } else { "> " };
-            let text = format!("{prefix}{}_", pane.composing());
-            draw::text(
-                buf,
-                area,
-                area.left(),
-                area.top() + history_rows,
-                &text,
-                style,
-            );
+
+        // A prompt longer than the pane is tall shows its tail: the
+        // cursor has to stay visible, so it is the oldest rows that go.
+        let first = prompt.len() - prompt_rows;
+        for (i, line) in prompt[first..].iter().enumerate() {
+            let y = area.top() + (history_rows + i) as u16;
+            draw::text(buf, area, area.left(), y, line, style);
         }
     }
 
     fn render_fkey_bar(&self, buf: &mut Buffer, area: Rect, split: bool) {
         let base = if split {
-            " F1 help  F3 dial  F4 answer  F7 swap focus  F10 hang up"
+            FKEY_BAR_SPLIT
         } else {
-            " F1 help  F2 directory  F3 dial  F4 answer  F5 waterfall  F6 theme  F10 hang up"
+            FKEY_BAR_SINGLE
         };
         let style = Style::default().fg(self.theme.bright());
-        draw::text(buf, area, area.left(), area.top(), base, style);
-        if self.demo_mode {
-            let tag = "[DEMO MODE]";
+
+        // The badge outranks the bar. Drawing the bar first and letting
+        // the badge land wherever is left is what produced a bare "["
+        // at 76 columns - the keys are a reminder, the badge is the one
+        // thing on screen saying this link is not acoustic (rule 2), so
+        // when only one of them fits it is the badge that fits.
+        let tag = "[DEMO MODE]";
+        let tag_width = tag.chars().count() as u16 + 2;
+        let bar_room = if self.demo_mode {
+            area.width.saturating_sub(tag_width)
+        } else {
+            area.width
+        };
+        let bar: String = base.chars().take(bar_room as usize).collect();
+        draw::text(buf, area, area.left(), area.top(), &bar, style);
+
+        if self.demo_mode && area.width >= tag_width {
             let x = area.right().saturating_sub(tag.chars().count() as u16 + 1);
-            let left_end = area.left() + base.chars().count() as u16;
-            let x = x.max(left_end + 1).min(area.right().saturating_sub(1));
             draw::text(buf, area, x, area.top(), tag, style);
         }
     }
+}
+
+/// The function-key strip, single-pane. **Only keys [`App::handle_key`]
+/// actually acts on.** F1 help, F2 directory, F3 dial and F5 waterfall
+/// were all on this bar and none of them did anything - help and the
+/// standalone waterfall view have no UI yet, and dialling needs the
+/// directory Task 18 builds. Advertising a dead key costs width the
+/// frame needs to fit two windows side by side, and this project's whole
+/// argument is that it does not claim things it is not doing. They come
+/// back as their features land.
+const FKEY_BAR_SINGLE: &str = " F4 answer  F6 colour  F10 hang up";
+
+/// The same strip when split, with focus swapping in place of the colour
+/// cycle - both panes share one theme, so F6 has nothing pane-specific
+/// to say here.
+const FKEY_BAR_SPLIT: &str = " F4 answer  F7 swap focus  F10 hang up";
+
+/// Hard-wraps `line` to `width` columns, the way a terminal does - no
+/// word breaking, because a modem transcript is a character grid and a
+/// word-wrapped one would not line up with what the far end sent. An
+/// empty line still produces one row, so a blank line in the scrollback
+/// stays a blank line rather than vanishing.
+fn wrap(line: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return Vec::new();
+    }
+    let chars: Vec<char> = line.chars().collect();
+    if chars.is_empty() {
+        return vec![String::new()];
+    }
+    chars
+        .chunks(width)
+        .map(|chunk| chunk.iter().collect())
+        .collect()
 }
 
 fn status_text(pane: &Pane, wide: bool) -> String {
@@ -421,12 +487,19 @@ fn status_text(pane: &Pane, wide: bool) -> String {
         "\u{25CB} NO CARRIER"
     };
     if wide {
-        format!(
-            "{carrier}    300 baud    {}    {}    {}",
-            pane.duplex_label(),
-            pane.turn_or_state_label(),
-            pane.elapsed_label()
-        )
+        // Under `Duplex::Full` the turn label has no turn to name and
+        // repeats the duplex mode instead (see `Pane::turn_or_state_label`),
+        // so printing both fields renders "full duplex    full duplex".
+        // Collapsing them keeps the field count honest rather than
+        // padding the line with a value already on it.
+        let duplex = pane.duplex_label();
+        let turn = pane.turn_or_state_label();
+        let state = if turn == duplex {
+            turn
+        } else {
+            format!("{duplex}   {turn}")
+        };
+        format!("{carrier}   300 baud   {state}   {}", pane.elapsed_label())
     } else {
         format!("{carrier}  300  {}", pane.turn_or_state_label())
     }
@@ -758,13 +831,145 @@ mod tests {
 
     #[test]
     fn no_chrome_string_in_this_module_uses_an_em_or_en_dash() {
-        let strings = [
-            " F1 help  F3 dial  F4 answer  F7 swap focus  F10 hang up",
-            " F1 help  F2 directory  F3 dial  F4 answer  F5 waterfall  F6 theme  F10 hang up",
-            "[DEMO MODE]",
-        ];
+        // The two bars are referenced, not re-typed: a copy here would
+        // keep passing after the real strings changed, which is the
+        // whole failure mode this crate keeps guarding against.
+        let strings = [FKEY_BAR_SINGLE, FKEY_BAR_SPLIT, "[DEMO MODE]"];
         for s in strings {
             assert!(!s.contains('\u{2013}') && !s.contains('\u{2014}'), "{s:?}");
         }
+    }
+
+    /// The reduction has a number on it: one pane must fit in 72 columns
+    /// so two windows sit side by side in 144. Asserted against the
+    /// widest thing on each row rather than against a rendered frame,
+    /// because a frame clips silently - it would render "fine" at 72 and
+    /// simply lose the right-hand end of every line.
+    #[test]
+    fn the_single_pane_chrome_fits_in_seventy_two_columns() {
+        const TARGET: u16 = 72;
+        let wired = modem_audio::WiredTransport::new(8000);
+        let app = App::single(pane(Role::Originate), &wired, Theme::default());
+        let mut buf = Buffer::empty(Rect::new(0, 0, TARGET, 24));
+        app.render_into(buf.area, &mut buf);
+
+        // Rendered, not measured from the constants: the frame clips
+        // silently, so the only way to know a row fits is to look at the
+        // last thing on it after it has been drawn.
+        let title = row_text(&buf, 0);
+        assert!(
+            title.contains("ORIGINATE \u{b7} 1270/1070") && title.ends_with('\u{2557}'),
+            "title bar does not fit in {TARGET} columns: {title:?}"
+        );
+
+        let status = row_text(&buf, 1);
+        assert!(
+            status.contains("00:00:00"),
+            "status line loses its elapsed field in {TARGET} columns: {status:?}"
+        );
+
+        let fkeys = row_text(&buf, 23);
+        assert!(
+            fkeys.contains("F10 hang up") && fkeys.contains("[DEMO MODE]"),
+            "the fkey bar and the demo badge do not both fit in {TARGET} columns: {fkeys:?}"
+        );
+    }
+
+    /// A received line longer than the pane is wide must appear in full
+    /// on two rows, not lose its tail. Asserted on the two rows'
+    /// contents joined back together, so a test cannot pass on a frame
+    /// that merely *contains* the first half somewhere.
+    #[test]
+    fn a_line_wider_than_the_pane_wraps_instead_of_being_clipped() {
+        let wired = modem_audio::WiredTransport::new(8000);
+        let mut p = pane(Role::Originate);
+        // Typed as a command line, which is how a long line gets into
+        // the scrollback without a wire: the AT processor does not
+        // recognise it, so the line itself lands in history followed by
+        // ERROR. No test-only setter on `Pane` to go stale.
+        let long =
+            "the quick brown fox jumps over the lazy dog and keeps running well past the edge";
+        p.type_line(long);
+        let app = App::single(p, &wired, Theme::default());
+
+        let mut buf = Buffer::empty(Rect::new(0, 0, 72, 24));
+        app.render_into(buf.area, &mut buf);
+
+        let rows: Vec<String> = (0..buf.area.height).map(|y| row_text(&buf, y)).collect();
+        let head = rows
+            .iter()
+            .position(|r| r.contains("the quick brown fox"))
+            .expect("the start of the long line is not on screen at all");
+        // The two rows' contents, joined back together, must reconstruct
+        // the line exactly - not merely contain a recognisable piece of
+        // it. The wrap lands mid-word (a terminal wraps on columns, not
+        // words), so any assertion looking for a whole phrase on one row
+        // would be testing where the boundary happened to fall.
+        let inner = |y: usize| rows[y].trim_matches('\u{2551}').trim_end().to_string();
+        let rejoined = format!("{}{}", inner(head), inner(head + 1));
+        assert_eq!(
+            rejoined,
+            long,
+            "a long line must wrap onto the next row and lose nothing. \
+             row {head}: {:?}, row {}: {:?}",
+            rows[head],
+            head + 1,
+            rows[head + 1]
+        );
+    }
+
+    #[test]
+    fn wrap_splits_at_the_width_and_keeps_every_character() {
+        let rows = wrap("abcdefghij", 4);
+        assert_eq!(rows, vec!["abcd", "efgh", "ij"]);
+        assert_eq!(rows.concat(), "abcdefghij");
+    }
+
+    /// A blank scrollback line must stay a row of its own - collapsing it
+    /// would silently reflow the transcript.
+    #[test]
+    fn wrap_keeps_an_empty_line_as_one_row() {
+        assert_eq!(wrap("", 10), vec![String::new()]);
+    }
+
+    /// Rule 2, stated accurately: the badge survives every width that can
+    /// physically hold it, and below that nothing is drawn rather than a
+    /// fragment. Codex's review was right that "always shown" was not
+    /// literally true - 13 columns is the floor, and this pins it.
+    #[test]
+    fn below_the_badge_width_no_fragment_of_it_is_drawn() {
+        let wired = modem_audio::WiredTransport::new(8000);
+        for width in [1u16, 5, 12] {
+            let app = App::single(pane(Role::Originate), &wired, Theme::default());
+            let mut buf = Buffer::empty(Rect::new(0, 0, width, 24));
+            app.render_into(buf.area, &mut buf);
+            let row = row_text(&buf, 23);
+            assert!(
+                !row.contains('['),
+                "a fragment of the badge was drawn at {width} columns: {row:?}"
+            );
+        }
+    }
+
+    /// Rule 2 again, at a width where both cannot fit: the badge is what
+    /// survives. Before this, the bar was drawn first and the badge was
+    /// clipped to a bare "[", which is both illegible and a silent loss
+    /// of the only on-screen statement that the link is not acoustic.
+    #[test]
+    fn a_narrow_fkey_row_keeps_the_whole_badge_and_truncates_the_keys() {
+        let wired = modem_audio::WiredTransport::new(8000);
+        let app = App::single(pane(Role::Originate), &wired, Theme::default());
+        let mut buf = Buffer::empty(Rect::new(0, 0, 40, 24));
+        app.render_into(buf.area, &mut buf);
+
+        let row = row_text(&buf, 23);
+        assert!(
+            row.contains("[DEMO MODE]"),
+            "the whole badge must survive a narrow row, got {row:?}"
+        );
+        assert!(
+            !row.contains("F10 hang up"),
+            "the keys, not the badge, are what gets cut: {row:?}"
+        );
     }
 }
