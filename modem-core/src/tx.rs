@@ -78,8 +78,24 @@ impl Tx {
         !self.bits.is_empty()
     }
 
-    /// How many samples `n` bits occupy. Used by the handshake sequencer and
-    /// by tests to lay out timed stages exactly.
+    /// How many samples `n` bits occupy at this `Tx`'s configured rate -
+    /// `round(n * samples_per_symbol())`. A duration conversion, not a
+    /// layout tool: a fresh `Tx` idles on mark and only retunes at a symbol
+    /// boundary *after* that boundary's sample has already gone out (see
+    /// `next_symbol` and `read`'s loop), so the first symbol period of any
+    /// transmission is always idle mark rather than the first queued bit.
+    /// `samples_for_bits(n)` on a `Tx` that has just had `n` bits queued
+    /// therefore spans that one-symbol lead-in plus only `n - 1` of the
+    /// queued bits - the last one lands in whatever comes next.
+    ///
+    /// Stacking several stages back-to-back by adding up
+    /// `samples_for_bits` calls for each one's bit count is exactly the
+    /// mistake this leads to: every stage after the first loses its final
+    /// bit into the following stage's opening samples. This function
+    /// cannot be used to lay out a multi-stage sequence exactly for that
+    /// reason - a sequencer needs to either drain each `Tx` until
+    /// `pending()` is false (plus one more symbol to flush the last bit)
+    /// or account for the lead-in itself.
     pub fn samples_for_bits(&self, n: usize) -> usize {
         libm::round(n as f64 * samples_per_symbol()) as usize
     }
