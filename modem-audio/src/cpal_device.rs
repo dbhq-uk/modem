@@ -39,6 +39,35 @@
 //! `WiredTransport::step`, and is tested the same way, via a device-free
 //! constructor (see `new_for_test`).
 //!
+//! # `run` is now paced by the device's ring occupancy, not a fixed block
+//!
+//! Hand-verification against a real `snd-aloop` loopback (see the task
+//! report for Task 13's follow-up) found two `Session`s sharing one
+//! `CpalTransport` never connecting, with continuous buffer
+//! underrun/overrun on both real streams. The cause: `run` used to pop
+//! *exactly* `BLOCK_LEN` samples from `input_consumer` every call,
+//! substituting `0.0` for any shortfall, and generate *exactly* one block
+//! of output every call, regardless of how much room the output ring
+//! actually had. A caller paced by `sleep(BLOCK / sample_rate)` has no way
+//! to stay exactly in step with the real device clock, so that fixed
+//! figure was always either too much (fabricating silence into real
+//! captured audio, corrupting the exact sample sequence the Gardner timing
+//! loop and carrier detector depend on) or too little (leaving real
+//! captured samples queued until the input ring filled and `drain_input`
+//! started dropping newly-arrived ones for real).
+//!
+//! `run` now loops on `input_consumer.slots()`/`output_producer.slots()`:
+//! it drains every whole block genuinely queued (zero, one, or as many as
+//! the ring holds) and generates output for every whole block of room
+//! genuinely available, then stops - never waiting, never padding a
+//! partial block with fabricated samples. A caller running slightly slow
+//! catches up on its very next call; one running fast simply finds
+//! nothing to do. [`crate::transport::RunStats`] reports how many blocks a
+//! call actually processed, and `input_dropped` (below) counts samples
+//! genuinely lost in `drain_input` itself - the one loss this design
+//! cannot eliminate, because it happens on the real-time thread before
+//! `run` is ever called, but can now report rather than hide.
+//!
 //! # Real audio cannot be tested in CI
 //!
 //! No test in this module ever calls [`CpalTransport::new`] - it opens a
@@ -51,12 +80,15 @@
 //! suite, and that path is deliberately small. See the task report for
 //! what was verified by hand instead.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
 use modem_core::session::Session;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::transport::{
-    device_err, fill_output, Transport, TransportError, BLOCK_LEN, RING_CAPACITY,
+    device_err, fill_output, RunStats, Transport, TransportError, BLOCK_LEN, RING_CAPACITY,
 };
 
 /// Drives one [`Session`] against a real sound card (a genuine
@@ -76,6 +108,18 @@ pub struct CpalTransport {
     scratch_in: Vec<f32>,
     scratch_out_a: Vec<f32>,
     scratch_out_b: Vec<f32>,
+    /// Cumulative count of captured samples `drain_input` (the real-time
+    /// capture callback) has ever had to drop because the input ring was
+    /// already full. Shared with that callback via `Arc` so incrementing
+    /// it there is a single lock-free atomic add - no allocation, no
+    /// blocking, the same real-time discipline as the ring buffer itself.
+    /// `run` reads it each call and reports the *delta* since the
+    /// previous call as `RunStats::input_samples_dropped`, via
+    /// `input_dropped_baseline` below.
+    input_dropped: Arc<AtomicU64>,
+    /// The value of `input_dropped` as of the end of the previous `run`
+    /// call - see its own doc.
+    input_dropped_baseline: u64,
 }
 
 impl CpalTransport {
@@ -118,6 +162,8 @@ impl CpalTransport {
 
         let (output_producer, mut output_consumer) = rtrb::RingBuffer::<f32>::new(RING_CAPACITY);
         let (mut input_producer, input_consumer) = rtrb::RingBuffer::<f32>::new(RING_CAPACITY);
+        let input_dropped = Arc::new(AtomicU64::new(0));
+        let input_dropped_for_callback = Arc::clone(&input_dropped);
 
         let output_stream = output_device
             .build_output_stream::<f32, _, _>(
@@ -131,7 +177,14 @@ impl CpalTransport {
         let input_stream = input_device
             .build_input_stream::<f32, _, _>(
                 input_config,
-                move |data: &[f32], _| drain_input(data, &mut input_producer, input_channels),
+                move |data: &[f32], _| {
+                    drain_input(
+                        data,
+                        &mut input_producer,
+                        input_channels,
+                        &input_dropped_for_callback,
+                    )
+                },
                 |err| eprintln!("modem-audio: input stream error: {err}"),
                 None,
             )
@@ -150,6 +203,8 @@ impl CpalTransport {
             scratch_in: vec![0.0; BLOCK_LEN],
             scratch_out_a: vec![0.0; BLOCK_LEN],
             scratch_out_b: vec![0.0; BLOCK_LEN],
+            input_dropped,
+            input_dropped_baseline: 0,
         })
     }
 
@@ -180,13 +235,32 @@ impl CpalTransport {
             scratch_in: vec![0.0; BLOCK_LEN],
             scratch_out_a: vec![0.0; BLOCK_LEN],
             scratch_out_b: vec![0.0; BLOCK_LEN],
+            input_dropped: Arc::new(AtomicU64::new(0)),
+            input_dropped_baseline: 0,
         };
         (transport, input_producer, output_consumer)
     }
 }
 
 impl Transport for CpalTransport {
-    fn run(&mut self, ends: &mut [Session]) -> Result<(), TransportError> {
+    /// See this module's own doc ("`run` is now paced by the device's ring
+    /// occupancy, not a fixed block") for the defect this replaced and
+    /// why. Two loops, each bounded by the ring's own fixed capacity so
+    /// neither can spin unboundedly or block:
+    ///
+    /// - Drains every whole block of real captured input actually queued
+    ///   (`input_consumer.slots() >= BLOCK_LEN`), feeding each one to
+    ///   every end in `ends` in arrival order, before generating anything.
+    ///   A remainder smaller than one block is left queued rather than
+    ///   padded with fabricated silence - `pop()` is only ever called
+    ///   after `slots()` has already confirmed a whole block is there, so
+    ///   it cannot itself fall back to `0.0`.
+    /// - Generates and queues output only while the output ring has room
+    ///   for a whole block (`output_producer.slots() >= BLOCK_LEN`) -
+    ///   catching the ring up when there is slack, and doing no work at
+    ///   all when it is already full, rather than blindly pushing one more
+    ///   block regardless of whether anything will ever drain it.
+    fn run(&mut self, ends: &mut [Session]) -> Result<RunStats, TransportError> {
         if ends.is_empty() || ends.len() > 2 {
             return Err(TransportError::WrongEndCount {
                 expected: "1 (a real two-machine call) or 2 (--acoustic split screen)",
@@ -194,33 +268,50 @@ impl Transport for CpalTransport {
             });
         }
 
-        // Exactly one block's worth every call, real captured samples
-        // where the ring buffer has them, silence where it has fallen
-        // behind - never a wait, matching `fill_output`'s own fallback.
-        for slot in self.scratch_in.iter_mut() {
-            *slot = self.input_consumer.pop().unwrap_or(0.0);
-        }
-        // Both ends hear the same microphone in the two-end (`--acoustic`)
-        // case - there is only one, physically.
-        for end in ends.iter_mut() {
-            end.process_in(&self.scratch_in);
+        let mut input_blocks = 0usize;
+        while self.input_consumer.slots() >= BLOCK_LEN {
+            for slot in self.scratch_in.iter_mut() {
+                *slot = self
+                    .input_consumer
+                    .pop()
+                    .expect("slots() just confirmed a whole block is queued");
+            }
+            // Both ends hear the same microphone in the two-end
+            // (`--acoustic`) case - there is only one, physically.
+            for end in ends.iter_mut() {
+                end.process_in(&self.scratch_in);
+            }
+            input_blocks += 1;
         }
 
-        if ends.len() == 1 {
-            ends[0].process_out(&mut self.scratch_out_a);
-            for &s in &self.scratch_out_a {
-                let _ = self.output_producer.push(s);
+        let mut output_blocks = 0usize;
+        while self.output_producer.slots() >= BLOCK_LEN {
+            if ends.len() == 1 {
+                ends[0].process_out(&mut self.scratch_out_a);
+                for &s in &self.scratch_out_a {
+                    let _ = self.output_producer.push(s);
+                }
+            } else {
+                let (first, second) = ends.split_at_mut(1);
+                first[0].process_out(&mut self.scratch_out_a);
+                second[0].process_out(&mut self.scratch_out_b);
+                for i in 0..self.scratch_out_a.len() {
+                    let mixed = (self.scratch_out_a[i] + self.scratch_out_b[i]).clamp(-1.0, 1.0);
+                    let _ = self.output_producer.push(mixed);
+                }
             }
-        } else {
-            let (first, second) = ends.split_at_mut(1);
-            first[0].process_out(&mut self.scratch_out_a);
-            second[0].process_out(&mut self.scratch_out_b);
-            for i in 0..self.scratch_out_a.len() {
-                let mixed = (self.scratch_out_a[i] + self.scratch_out_b[i]).clamp(-1.0, 1.0);
-                let _ = self.output_producer.push(mixed);
-            }
+            output_blocks += 1;
         }
-        Ok(())
+
+        let dropped_total = self.input_dropped.load(Ordering::Relaxed);
+        let input_samples_dropped = dropped_total.wrapping_sub(self.input_dropped_baseline);
+        self.input_dropped_baseline = dropped_total;
+
+        Ok(RunStats {
+            input_blocks,
+            output_blocks,
+            input_samples_dropped,
+        })
     }
 
     fn sample_rate(&self) -> u32 {
@@ -235,13 +326,25 @@ impl Transport for CpalTransport {
 /// The input stream's entire callback body, the same discipline as
 /// [`fill_output`](crate::transport::fill_output). Downmixes to mono by
 /// averaging - the same convention `wav::read_wav` already uses - and
-/// silently drops a captured sample the ring buffer has no room for,
-/// rather than blocking the capture thread until `run` makes room.
-fn drain_input(data: &[f32], producer: &mut rtrb::Producer<f32>, channels: usize) {
+/// drops a captured sample the ring buffer has no room for rather than
+/// blocking the capture thread until `run` makes room, but - unlike the
+/// version this replaced - counts every one it drops in `dropped` first.
+/// A single lock-free atomic add: no allocation, no blocking, so the
+/// real-time discipline this callback must keep is unaffected. `run`
+/// reads `dropped` itself and turns it into `RunStats::input_samples_dropped`
+/// - see this module's own doc.
+fn drain_input(
+    data: &[f32],
+    producer: &mut rtrb::Producer<f32>,
+    channels: usize,
+    dropped: &AtomicU64,
+) {
     let channels = channels.max(1);
     for frame in data.chunks(channels) {
         let mono = frame.iter().sum::<f32>() / frame.len() as f32;
-        let _ = producer.push(mono);
+        if producer.push(mono).is_err() {
+            dropped.fetch_add(1, Ordering::Relaxed);
+        }
     }
 }
 

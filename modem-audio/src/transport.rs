@@ -22,17 +22,53 @@
 //! rather than retrofitting it once the TUI already has an `if cpal {
 //! ... } else { ... }` branch baked into it.
 //!
-//! # `run` advances by exactly one block, not the whole call
+//! # `run` never blocks, but it does not advance by a fixed one block either
 //!
-//! Every other streaming type in this workspace - `Tx::read`,
-//! `Rx::write`, `Session::process_out`/`process_in` - processes one block
-//! per call and expects its caller to loop. [`Transport::run`] keeps that
-//! shape rather than blocking for the life of the call: a caller (the TUI's
-//! own event loop, eventually) calls `run` once per tick, interleaved with
-//! redrawing and reading a keypress, and drives `ends` directly (`send`,
-//! `hangup`, `state()`) between calls. This is also what makes `run`
-//! testable at all for [`WiredTransport`] without a background thread or
-//! any real device: a test's own loop plays the same role the TUI's will.
+//! Every other streaming type in this workspace - `Tx::read`, `Rx::write`,
+//! `Session::process_out`/`process_in` - processes one block per call and
+//! expects its caller to loop. [`Transport::run`] never blocks for the
+//! life of a call, for the same reason those types don't: a caller (the
+//! TUI's own event loop, eventually) calls `run` once per tick, interleaved
+//! with redrawing and reading a keypress, and drives `ends` directly
+//! (`send`, `hangup`, `state()`) between calls. This is also what makes
+//! `run` testable at all for [`WiredTransport`] without a background
+//! thread or any real device: a test's own loop plays the same role the
+//! TUI's will.
+//!
+//! An earlier version of this doc said `run` "advances by exactly one
+//! block, not the whole call" for [`crate::cpal_device::CpalTransport`]
+//! too, and that was the defect: hand-verification against a real
+//! `snd-aloop` device found two `Session`s sharing one `CpalTransport`
+//! (the `--acoustic` split-screen case) never connecting, with continuous
+//! buffer underrun/overrun on both streams. A caller paced by
+//! `sleep(BLOCK / sample_rate)` is a free-running clock with no
+//! relationship to the real device clock; call slightly slow and the
+//! output ring starves, slightly fast and the input ring overflows, and
+//! popping a fixed one block every call papered over the difference with
+//! fabricated silence (`unwrap_or(0.0)`) rather than reporting it. That is
+//! invisible right up until a receiver has to genuinely decode what
+//! arrived, which is exactly the case the overture-only single-session
+//! path never exercises.
+//!
+//! `CpalTransport::run` now drains every *whole* block of real captured
+//! input actually queued (zero, one, or many, up to the ring's own
+//! capacity) and generates output only while the output ring has room for
+//! a whole block - the device's own timing, via how full or empty its
+//! rings are, paces how much work one call does, without `run` itself
+//! ever waiting. A caller running slightly slow catches up on its next
+//! call instead of losing samples; one running fast simply finds nothing
+//! new to drain and does no work that call. [`RunStats`] reports how many
+//! blocks a call actually processed and how many previously-captured
+//! samples were lost before the call ever got a chance to drain them, so
+//! a caller (or a test) can tell a healthy link from one that is silently
+//! losing the samples it needs to decode - see `cpal_device.rs`'s own doc
+//! for exactly where those samples are lost and counted.
+//!
+//! [`WiredTransport::step`] never had this defect: its two `Session`s are
+//! cross-wired directly in software within one call, with no ring buffer
+//! and no independent device clock between them, so there is no caller
+//! clock to fall out of step with in the first place. Its `run` always
+//! reports exactly one block processed - see its own doc.
 //!
 //! # The real-time discipline
 //!
@@ -72,15 +108,57 @@ pub(crate) const BLOCK_LEN: usize = 256;
 /// long, silent buffer-draining delay.
 pub(crate) const RING_CAPACITY: usize = BLOCK_LEN * 16;
 
+/// What one [`Transport::run`] call actually did: how many whole blocks of
+/// input it drained and fed to `ends`, how many blocks of output it
+/// generated and queued, and how many previously-captured input samples
+/// were lost before the call ever got a chance to drain them.
+///
+/// This is the type this fix adds so a caller (or a test) can tell a
+/// healthy link from one that is silently losing what it needs to decode.
+/// See this module's own doc for the defect a fixed "always exactly one
+/// block, no way to tell" `run` signature hid. [`WiredTransport::run`]
+/// always reports `input_blocks: 1, output_blocks: 1,
+/// input_samples_dropped: 0`, because its link has no ring buffer and no
+/// device clock to fall behind, so there is nothing here for it to report
+/// beyond the one block it always does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RunStats {
+    /// Whole blocks of real captured input drained and fed to every end in
+    /// `ends` this call. Zero on a call that found less than one whole
+    /// block queued - a partial block is left queued for the next call,
+    /// never padded out with fabricated silence to make up the
+    /// difference. See this module's doc for why that padding was the
+    /// defect.
+    pub input_blocks: usize,
+    /// Whole blocks of output generated and queued for playback this
+    /// call. Zero on a call that found no room at all in the output ring.
+    pub output_blocks: usize,
+    /// Captured input samples lost since the last call to `run`, because
+    /// the real-time capture callback found the input ring already full
+    /// and had nowhere to put them - see `cpal_device.rs`'s `drain_input`.
+    /// Always `0` for [`WiredTransport`], which has no capture ring to
+    /// overflow.
+    pub input_samples_dropped: u64,
+}
+
 /// What actually moves samples between a [`Session`] and the outside
 /// world. See this module's own doc for why two implementations share one
-/// trait and why `run` advances by one block rather than the whole call.
+/// trait and why `run` is not guaranteed to advance by exactly one block.
 pub trait Transport {
-    /// Advances this transport, and every [`Session`] in `ends`, by
-    /// exactly one block: reads whatever real or software-linked input is
-    /// available, feeds it to `process_in`, generates the next block of
-    /// `process_out` for each end, and (mixed, if `ends.len() == 2`)
-    /// queues it for real playback.
+    /// Advances this transport, and every [`Session`] in `ends`, without
+    /// blocking: feeds every whole block of real or software-linked input
+    /// actually available to `process_in`, generates as much of the next
+    /// `process_out` block(s) for each end as there is room for, and
+    /// (mixed, if `ends.len() == 2`) queues the result for real playback.
+    ///
+    /// Never blocks or sleeps - see this module's doc - but is also *not*
+    /// guaranteed to process exactly one block: [`crate::cpal_device::CpalTransport`]
+    /// processes zero, one or many blocks in a single call depending on
+    /// how far ahead or behind the real device clock this call happens to
+    /// land (see [`RunStats`] and this module's own doc for why a fixed
+    /// one-block figure was the actual defect this signature replaces).
+    /// [`WiredTransport`] always processes exactly one, since its link has
+    /// no device clock to fall behind or race ahead of.
     ///
     /// `ends` must be the length this transport expects -
     /// [`WiredTransport`] always links exactly two; a real
@@ -89,7 +167,7 @@ pub trait Transport {
     /// Anything else is [`TransportError::WrongEndCount`], not a panic -
     /// a caller mistake here should fail cleanly, the same standard
     /// `Session::send`'s own doc holds itself to.
-    fn run(&mut self, ends: &mut [Session]) -> Result<(), TransportError>;
+    fn run(&mut self, ends: &mut [Session]) -> Result<RunStats, TransportError>;
 
     /// The sample rate every [`Session`] driven by this transport must be
     /// built at. For [`crate::cpal_device::CpalTransport`] this is read
@@ -234,7 +312,17 @@ impl WiredTransport {
 }
 
 impl Transport for WiredTransport {
-    fn run(&mut self, ends: &mut [Session]) -> Result<(), TransportError> {
+    /// Always processes exactly one block and reports `RunStats { input_blocks: 1,
+    /// output_blocks: 1, input_samples_dropped: 0 }` - `step` cross-wires
+    /// the two `Session`s directly in software within this one call, with
+    /// no ring buffer and no independent device clock for a caller to
+    /// fall out of step with, so there is nothing here that can vary
+    /// call to call. The real output device this method also feeds is
+    /// monitor-only (see this module's doc): a full playback ring here
+    /// means a person is about to hear a gap, never a protocol-breaking
+    /// loss, which is why dropping into it is not reflected in
+    /// `input_samples_dropped`.
+    fn run(&mut self, ends: &mut [Session]) -> Result<RunStats, TransportError> {
         if ends.len() != 2 {
             return Err(TransportError::WrongEndCount {
                 expected: "2 (WiredTransport always links exactly two ends)",
@@ -254,7 +342,11 @@ impl Transport for WiredTransport {
             // (non-real-time) loop on a device that may never catch up.
             let _ = producer.push(s);
         }
-        Ok(())
+        Ok(RunStats {
+            input_blocks: 1,
+            output_blocks: 1,
+            input_samples_dropped: 0,
+        })
     }
 
     fn sample_rate(&self) -> u32 {
@@ -487,8 +579,8 @@ mod tests {
     }
 
     impl Transport for FakeTransport {
-        fn run(&mut self, _ends: &mut [Session]) -> Result<(), TransportError> {
-            Ok(())
+        fn run(&mut self, _ends: &mut [Session]) -> Result<RunStats, TransportError> {
+            Ok(RunStats::default())
         }
         fn sample_rate(&self) -> u32 {
             self.rate
