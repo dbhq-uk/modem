@@ -24,6 +24,7 @@ pub mod nco;
 pub mod overture;
 pub mod resample;
 pub mod rx;
+pub mod session;
 pub mod tx;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
