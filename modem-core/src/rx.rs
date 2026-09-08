@@ -509,17 +509,22 @@ mod tests {
     /// to zero-delay that the free-running symbol counter's phase at the
     /// first real transition happened, by luck, to land in a winning band
     /// for both tx_rate cases. The real resampler's low-pass has a genuine
-    /// group delay - a few taps' worth at these near-1:1 ratios, comparable
-    /// to a symbol period - and idle mark carries no timing information
-    /// for the loop to acquire against (see this module's own doc), so the
-    /// shifted phase landed tx_rate 8160 in a losing band: the payload's
-    /// first byte decoded as 0x50 instead of 0x54, one bit wrong, with
-    /// everything after it - once the loop had a real transition to pull
-    /// in on - correct. Adding the same acquisition preamble this file
-    /// already establishes elsewhere as required (see `receiver_joining_
-    /// mid_symbol_recovers_byte_alignment`) fixed it at every amplitude and
-    /// both tx_rates; this is that fix, not a loosened assertion - the
-    /// content comparison below still demands the payload byte-exact.
+    /// group delay - half the filter, not "a few taps" as an earlier draft
+    /// of this comment claimed: (N - 1) / 2 samples for an N-tap linear
+    /// phase FIR, which is 31 taps at the 8 kHz reference rate and 186
+    /// taps at 48 kHz. At tx_rate 8160 Hz (64 taps there) that is 31.5
+    /// samples, 3.86 ms, 1.16 symbol periods at 300 baud - "comparable to
+    /// a symbol period" was the right description, the tap count was not.
+    /// Idle mark carries no timing information for the loop to acquire
+    /// against (see this module's own doc), so the shifted phase landed
+    /// tx_rate 8160 in a losing band: the payload's first byte decoded as
+    /// 0x50 instead of 0x54, one bit wrong, with everything after it -
+    /// once the loop had a real transition to pull in on - correct.
+    /// Adding the same acquisition preamble this file already establishes
+    /// elsewhere as required (see `receiver_joining_mid_symbol_recovers_
+    /// byte_alignment`) fixed it at every amplitude and both tx_rates;
+    /// this is that fix, not a loosened assertion - the content
+    /// comparison below still demands the payload byte-exact.
     #[test]
     fn loopback_tracks_a_two_percent_sample_clock_offset() {
         let mut payload = Vec::new();
@@ -770,6 +775,28 @@ mod tests {
         for i in 0..50 {
             rx.write(&buf);
             assert_eq!(rx.scratch.as_ptr(), ptr, "scratch reallocated, call {i}");
+        }
+    }
+
+    /// Round 1 review finding: the test above runs at 8000 Hz, the
+    /// resampler's identity bypass, so it cannot see whether `in64` or
+    /// `scratch` allocate in the hot path of a real (non-identity)
+    /// resampling call. This drives the same check through an actual
+    /// 48 kHz decimation.
+    #[test]
+    fn write_does_not_allocate_after_the_first_call_at_48khz() {
+        let c = cfg(Role::Originate, 48000);
+        let mut rx = Rx::new(c);
+        let buf = vec![0.0f32; 512];
+        rx.write(&buf);
+        let ptr = rx.scratch.as_ptr();
+        for i in 0..50 {
+            rx.write(&buf);
+            assert_eq!(
+                rx.scratch.as_ptr(),
+                ptr,
+                "scratch reallocated at 48 kHz, call {i}"
+            );
         }
     }
 

@@ -12,11 +12,17 @@ use crate::{samples_per_symbol, tones, Config, DSP_RATE};
 
 /// Bound on the pending output queue - device-rate samples the resampler
 /// produced in a previous `read` but that call's `out` was already full.
-/// In practice this holds at most a handful of samples (bounded by how far
-/// one extra DSP-rate sample's worth of output can overshoot at the
-/// steepest ratio this crate resamples at), never the full device buffer;
-/// a generous fixed cap keeps it from ever reallocating.
-const PENDING_CAP: usize = 32;
+///
+/// Round 1 review finding: this was 32 with a comment claiming it "keeps
+/// it from ever reallocating", which was not measured and was wrong. The
+/// per-call surplus is bounded by roughly 2 * (device_rate / DSP_RATE);
+/// measured over 5000 duplex quanta, that held within capacity (zero
+/// reallocations) at 8000/44100/48000/96000 Hz but overflowed 32 - one
+/// reallocation - at 176400 and 192000 Hz, both real cpal-reportable rates
+/// (Task 13). 64 comfortably covers the worst case in this crate's actual
+/// range (about 48 at 192 kHz) without claiming a guarantee this constant
+/// cannot actually give for an arbitrary future device rate.
+const PENDING_CAP: usize = 64;
 
 /// Write queues bytes; read fills sample blocks. Stateful: the symbol
 /// clock, the oscillator phase and the resampler's own history all carry
@@ -249,6 +255,32 @@ mod tests {
                 tx.scratch.as_ptr(),
                 ptr,
                 "scratch was reallocated in the hot path (call {i})"
+            );
+        }
+    }
+
+    /// Round 1 review finding: the test above runs at 8000 Hz, which is
+    /// the resampler's identity bypass - it cannot see whether the
+    /// batching loop `read` grew to drive a real resampler (the `scratch`
+    /// resize, the `resample_out` resize, or the `pending` queue) ever
+    /// allocates in its own hot path. This drives the same check through
+    /// an actual 48 kHz interpolation.
+    #[test]
+    fn read_does_not_allocate_after_the_first_call_at_48khz() {
+        let mut tx = Tx::new(Config {
+            sample_rate: 48000,
+            role: Role::Originate,
+            duplex: Duplex::HalfPingPong,
+        });
+        let mut buf = vec![0.0f32; 512];
+        tx.read(&mut buf);
+        let ptr = tx.scratch.as_ptr();
+        for i in 0..50 {
+            tx.read(&mut buf);
+            assert_eq!(
+                tx.scratch.as_ptr(),
+                ptr,
+                "scratch was reallocated in the hot path at 48 kHz (call {i})"
             );
         }
     }

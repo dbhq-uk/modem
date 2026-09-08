@@ -271,8 +271,24 @@ impl Resampler {
             // decimating drains at most one, and most pushes drain none.
             while self.n_pushed - 2.0 > self.frac_pos {
                 if out_i >= output.len() {
-                    // The caller under-sized output. Stop rather than
-                    // overrun it; the remaining input is not consumed.
+                    // The caller under-sized output relative to
+                    // max_output_len. Stop rather than overrun it - but
+                    // this is not a resumable midpoint. The sample that
+                    // triggered this iteration has already been pushed and
+                    // n_pushed already incremented (that happens earlier in
+                    // this same `for` iteration, before the drain loop
+                    // runs), so it is not sitting unconsumed in `input`
+                    // waiting for a retry. The remaining elements of
+                    // `input` genuinely are never pushed, but there is no
+                    // way for the caller to know where the
+                    // already-consumed prefix ends, and re-passing any
+                    // part of `input` on a later call would push samples
+                    // this call already accounted for - desynchronising
+                    // frac_pos from n_pushed, so `t` could land outside
+                    // [0, 1) on the very next call. Not reachable from Tx
+                    // or Rx today, since both size `output` via
+                    // max_output_len first; a caller that does not is on
+                    // its own past this point.
                     return out_i;
                 }
                 let k_base = self.n_pushed - 3.0;
@@ -347,6 +363,13 @@ mod tests {
     /// The anti-aliasing test the placeholder failed outright: at 8000 Hz
     /// the placeholder degenerates to a passthrough and never exercises
     /// this path at all.
+    ///
+    /// Bounded both sides. Round 1 review finding: a lower-bound-only
+    /// assertion passes a filter with no DC-gain normalisation at all -
+    /// removing the `/= sum` step in `design_lowpass` gives roughly 48000x
+    /// gain here (this filter's tap count at 48 kHz), and a bare `mag >=
+    /// 0.99` reads 47998 and calls it full magnitude. "Full magnitude"
+    /// means close to the input's actual 1.0 amplitude, not merely large.
     #[test]
     fn three_khz_survives_decimation_to_8khz_at_full_magnitude() {
         let mut r = Resampler::new(48000.0, 8000.0);
@@ -360,6 +383,10 @@ mod tests {
         assert!(
             mag >= 0.99,
             "3 kHz survived decimation at only {mag}, not full magnitude"
+        );
+        assert!(
+            mag <= 1.01,
+            "3 kHz measured at {mag}, not unity gain - the low-pass is not DC-normalised"
         );
     }
 
@@ -383,6 +410,59 @@ mod tests {
         assert!(
             mag < 0.01,
             "6 kHz at 48 kHz appeared at 2 kHz with magnitude {mag}"
+        );
+    }
+
+    /// Round 1 review finding: `six_khz_does_not_alias_to_two_khz` alone
+    /// does not pin `CUTOFF_HZ`. 6 kHz sits deep in the stopband of a
+    /// filter cut off at 3600 Hz *or* one wrongly cut off at 4800 Hz -
+    /// mutating `CUTOFF_HZ` to 4800.0 leaves that test (and all 54 others)
+    /// green, while reinstating exactly the fold-into-band defect this
+    /// task exists to fix: a 4200 Hz tone would fold onto 3800 Hz at
+    /// residue 0.99996, and 4500 Hz onto 3500 Hz at 0.997 - both squarely
+    /// inside the telephone band. Only a cutoff at or below about 4 kHz
+    /// stops that. This drives a tone just above the *correct* cutoff and
+    /// asserts its fold lands nowhere.
+    #[test]
+    fn tone_above_cutoff_does_not_alias_into_band() {
+        let mut r = Resampler::new(48000.0, 8000.0);
+        let n_in = 48000;
+        let input = sine(4500.0, 48000.0, n_in);
+        let max_out = r.max_output_len(n_in);
+        let mut output = vec![0.0; max_out];
+        let n = r.process(&input, &mut output[..max_out]);
+        let win = cycle_window(3500.0, 8000.0, 4000);
+        let mag = goertzel(&output[n - win..n], 3500.0, 8000.0);
+        assert!(
+            mag < 0.01,
+            "4500 Hz at 48 kHz appeared at 3500 Hz with magnitude {mag} - \
+             CUTOFF_HZ is not actually excluding content above the telephone band"
+        );
+    }
+
+    /// Round 1 review finding: the interpolation side's post-upsample
+    /// filter (`resample.rs`'s `else { self.fir_push(y) }` branch) had no
+    /// test at all - Mutation 1 only covers the decimation side. Naive
+    /// upsampling images the signal around the source rate; driven with
+    /// Tx's own 2225 Hz answer-mark tone at DSP_RATE, the strongest image
+    /// lands at 8000 - 2225 = 5775 Hz, and measured with that filter
+    /// bypassed it rises from 0.00059 to 0.0883 - a 43 dB regression of
+    /// real energy going out on the wire. See mutation proof (interpolation
+    /// side) in the task report.
+    #[test]
+    fn interpolation_filter_suppresses_the_upsample_image() {
+        let mut r = Resampler::new(DSP_RATE, 48000.0);
+        let n_in = 6000;
+        let input = sine(2225.0, DSP_RATE, n_in);
+        let max_out = r.max_output_len(n_in);
+        let mut output = vec![0.0; max_out];
+        let n = r.process(&input, &mut output[..max_out]);
+        let win = cycle_window(5775.0, 48000.0, 8000);
+        let mag = goertzel(&output[n - win..n], 5775.0, 48000.0);
+        assert!(
+            mag < 0.005,
+            "the 8000 - 2225 Hz upsample image at 5775 Hz measured {mag} - \
+             the post-interpolation low-pass is not suppressing it"
         );
     }
 
@@ -478,6 +558,17 @@ mod tests {
     /// signal. This drives all four Bell 103 tones through the real
     /// filter+interpolate pipeline (Goertzel, integer-cycle windows) and
     /// pins the measured gap between the two schemes.
+    ///
+    /// Note on what actually proves this: `linear_measured` below is a
+    /// hardcoded constant recorded from a real linear-interpolation run
+    /// (see the table in this module's doc), not linear interpolation
+    /// re-run inside this test. So the assertion this test body can fail
+    /// on its own is only the Hermite floor; the comparison against
+    /// `linear_measured` can drift stale if the implementation changes
+    /// without this constant being re-measured. What actually
+    /// demonstrates the gap is Mutation 4 in the task report - swapping
+    /// the real `hermite(...)` call for linear interpolation and rerunning
+    /// this test - not this test's body in isolation.
     #[test]
     fn hermite_beats_linear_on_bell_103_tones() {
         // (frequency, Hermite magnitude floor, linear's actual measured
