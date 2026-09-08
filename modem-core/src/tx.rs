@@ -7,14 +7,23 @@ use alloc::vec::Vec;
 
 use crate::frame::frame_byte;
 use crate::nco::Nco;
+use crate::resample::Resampler;
 use crate::{samples_per_symbol, tones, Config, DSP_RATE};
 
-/// Write queues bytes; read fills sample blocks. Stateful: the symbol clock
-/// and the oscillator phase both carry across calls, so blocks must be read
-/// in order.
+/// Bound on the pending output queue - device-rate samples the resampler
+/// produced in a previous `read` but that call's `out` was already full.
+/// In practice this holds at most a handful of samples (bounded by how far
+/// one extra DSP-rate sample's worth of output can overshoot at the
+/// steepest ratio this crate resamples at), never the full device buffer;
+/// a generous fixed cap keeps it from ever reallocating.
+const PENDING_CAP: usize = 32;
+
+/// Write queues bytes; read fills sample blocks. Stateful: the symbol
+/// clock, the oscillator phase and the resampler's own history all carry
+/// across calls, so blocks must be read in order.
 ///
-/// The scratch buffer is owned and grown once, never per call. Allocating
-/// inside an audio callback is how you get dropouts.
+/// The scratch buffers are owned and grown once, never per call.
+/// Allocating inside an audio callback is how you get dropouts.
 pub struct Tx {
     cfg: Config,
     nco: Nco,
@@ -24,6 +33,14 @@ pub struct Tx {
     sym_pos: f64,
     current: bool,
     scratch: Vec<f64>,
+    resampler: Resampler,
+    /// Resampler output for the current batch of `scratch`, at DSP_RATE
+    /// resampled to the device rate. Reused, resized only on growth.
+    resample_out: Vec<f64>,
+    /// Device-rate samples the resampler produced but `read`'s caller
+    /// buffer was already full for. Drained before generating anything
+    /// new, so no produced sample is ever dropped.
+    pending: VecDeque<f32>,
 }
 
 impl Tx {
@@ -39,6 +56,9 @@ impl Tx {
             sym_pos: 0.0,
             current: true, // idle holds mark
             scratch: Vec::new(),
+            resampler: Resampler::new(DSP_RATE, cfg.sample_rate as f64),
+            resample_out: Vec::new(),
+            pending: VecDeque::with_capacity(PENDING_CAP),
         }
     }
 
@@ -60,32 +80,66 @@ impl Tx {
 
     /// Fills `out` with the next block at the device rate, holding mark when
     /// idle. Allocates only on the first call, or if the block size grows.
+    ///
+    /// Drains `pending` first, then generates and resamples DSP-rate
+    /// batches until `out` is full. A batch almost always produces at
+    /// least as many device-rate samples as `out` still needs (the sizing
+    /// below asks for a small margin over the naive estimate); the loop
+    /// exists so that is a performance property, not a correctness one -
+    /// if a batch ever falls short, the next iteration just asks for more,
+    /// and if it produces extra, the remainder carries to `pending` for the
+    /// next call rather than being dropped. Either way every DSP-rate
+    /// sample generated corresponds to exactly one device-rate sample
+    /// delivered somewhere, which is what keeps the resampler's fractional
+    /// phase meaningful across calls.
     pub fn read(&mut self, out: &mut [f32]) {
-        let need = libm::ceil(out.len() as f64 * DSP_RATE / self.cfg.sample_rate as f64) as usize;
-        if self.scratch.len() < need {
-            self.scratch.resize(need, 0.0);
-        }
+        let mut written = 0;
+        while written < out.len() {
+            if let Some(v) = self.pending.pop_front() {
+                out[written] = v;
+                written += 1;
+                continue;
+            }
 
-        // Derived from samples_per_symbol so there is exactly one
-        // implementation of the 26.6667 arithmetic. A second inline copy
-        // would not be covered by that function's test, and a rounding
-        // regression here would ship green.
-        let step = 1.0 / samples_per_symbol();
+            let remaining = out.len() - written;
+            let need =
+                libm::ceil(remaining as f64 * DSP_RATE / self.cfg.sample_rate as f64) as usize + 1;
+            if self.scratch.len() < need {
+                self.scratch.resize(need, 0.0);
+            }
 
-        for i in 0..need {
-            self.scratch[i] = self.nco.next();
-            self.sym_pos += step;
-            if self.sym_pos >= 1.0 {
-                self.sym_pos -= 1.0;
-                self.next_symbol();
+            // Derived from samples_per_symbol so there is exactly one
+            // implementation of the 26.6667 arithmetic. A second inline
+            // copy would not be covered by that function's test, and a
+            // rounding regression here would ship green.
+            let step = 1.0 / samples_per_symbol();
+
+            for i in 0..need {
+                self.scratch[i] = self.nco.next();
+                self.sym_pos += step;
+                if self.sym_pos >= 1.0 {
+                    self.sym_pos -= 1.0;
+                    self.next_symbol();
+                }
+            }
+
+            let max_out = self.resampler.max_output_len(need);
+            if self.resample_out.len() < max_out {
+                self.resample_out.resize(max_out, 0.0);
+            }
+            let produced = self
+                .resampler
+                .process(&self.scratch[..need], &mut self.resample_out[..max_out]);
+
+            for &v in &self.resample_out[..produced] {
+                if written < out.len() {
+                    out[written] = v as f32;
+                    written += 1;
+                } else {
+                    self.pending.push_back(v as f32);
+                }
             }
         }
-        crate::resample::to_device(
-            &self.scratch[..need],
-            out,
-            DSP_RATE,
-            self.cfg.sample_rate as f64,
-        );
     }
 
     fn next_symbol(&mut self) {

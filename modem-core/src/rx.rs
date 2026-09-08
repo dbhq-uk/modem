@@ -97,6 +97,7 @@ use libm::{cos, hypot, round, sin};
 
 use crate::carrier::{CarrierDetector, Event};
 use crate::frame::Deframer;
+use crate::resample::Resampler;
 use crate::{samples_per_symbol, tones, Config, DSP_RATE};
 
 /// Timing loop gain. Measured, not guessed: this is a proportional-only
@@ -118,8 +119,6 @@ const GARDNER_GAIN: f64 = 0.15;
 const EVENT_QUEUE_CAP: usize = 64;
 
 pub struct Rx {
-    cfg: Config,
-
     // Quadrature correlator state. One symbol of product history per tone,
     // held as a ring so the sliding sum costs nothing to maintain.
     win: usize,
@@ -143,6 +142,11 @@ pub struct Rx {
 
     deframer: Deframer,
     out: Vec<u8>,
+    resampler: Resampler,
+    /// Device-rate input converted to f64, ready for the resampler. Reused,
+    /// resized only on growth.
+    in64: Vec<f64>,
+    /// Resampler output at DSP_RATE. Reused, resized only on growth.
     scratch: Vec<f64>,
 
     carrier: CarrierDetector,
@@ -155,7 +159,6 @@ impl Rx {
         let (mark, space) = tones(cfg.role);
         let win = round(samples_per_symbol()) as usize;
         Self {
-            cfg,
             win,
             pos: 0,
             filled: false,
@@ -174,6 +177,8 @@ impl Rx {
             have_mid: false,
             deframer: Deframer::new(),
             out: Vec::new(),
+            resampler: Resampler::new(cfg.sample_rate as f64, DSP_RATE),
+            in64: Vec::new(),
             scratch: Vec::new(),
 
             carrier: CarrierDetector::new(),
@@ -189,19 +194,24 @@ impl Rx {
     }
 
     /// Hands the receiver the next contiguous block of samples. Blocks must
-    /// be in order and gapless; a discontinuity costs symbol lock.
+    /// be in order and gapless; a discontinuity costs symbol lock, and now
+    /// also the resampler's own fractional phase and filter history.
     pub fn write(&mut self, input: &[f32]) {
-        let need = libm::ceil(input.len() as f64 * DSP_RATE / self.cfg.sample_rate as f64) as usize;
+        if self.in64.len() < input.len() {
+            self.in64.resize(input.len(), 0.0);
+        }
+        for (o, &i) in self.in64.iter_mut().zip(input) {
+            *o = i as f64;
+        }
+
+        let need = self.resampler.max_output_len(input.len());
         if self.scratch.len() < need {
             self.scratch.resize(need, 0.0);
         }
-        crate::resample::from_device(
-            input,
-            &mut self.scratch[..need],
-            self.cfg.sample_rate as f64,
-            DSP_RATE,
-        );
-        for i in 0..need {
+        let n = self
+            .resampler
+            .process(&self.in64[..input.len()], &mut self.scratch[..need]);
+        for i in 0..n {
             self.push_sample(self.scratch[i]);
         }
     }
@@ -492,6 +502,24 @@ mod tests {
     /// see the difference - `e /= mag` with a correspondingly smaller
     /// GARDNER_GAIN decodes this payload perfectly at amplitude 1.0 and
     /// loses a third of it at 0.1.
+    ///
+    /// Task 7 added an alternating training preamble after the idle-mark
+    /// settle period, which earlier revisions of this test did not need.
+    /// The placeholder resampler this crate used to have was near enough
+    /// to zero-delay that the free-running symbol counter's phase at the
+    /// first real transition happened, by luck, to land in a winning band
+    /// for both tx_rate cases. The real resampler's low-pass has a genuine
+    /// group delay - a few taps' worth at these near-1:1 ratios, comparable
+    /// to a symbol period - and idle mark carries no timing information
+    /// for the loop to acquire against (see this module's own doc), so the
+    /// shifted phase landed tx_rate 8160 in a losing band: the payload's
+    /// first byte decoded as 0x50 instead of 0x54, one bit wrong, with
+    /// everything after it - once the loop had a real transition to pull
+    /// in on - correct. Adding the same acquisition preamble this file
+    /// already establishes elsewhere as required (see `receiver_joining_
+    /// mid_symbol_recovers_byte_alignment`) fixed it at every amplitude and
+    /// both tx_rates; this is that fix, not a loosened assertion - the
+    /// content comparison below still demands the payload byte-exact.
     #[test]
     fn loopback_tracks_a_two_percent_sample_clock_offset() {
         let mut payload = Vec::new();
@@ -515,6 +543,23 @@ mod tests {
                     }
                     rx.write(&buf);
                     rx.read(&mut got);
+                    sent += 733;
+                }
+
+                // Alternating preamble the Gardner loop can actually
+                // acquire on, then one character time of idle mark to put
+                // the deframer back in a known state - see this module's
+                // doc for why both halves are load-bearing.
+                tx.write(&[0x55, 0x55]);
+                let acquire = 2 * 10 * tx_rate as usize / 300 + tx_rate as usize / 30;
+                let mut sent = 0;
+                while sent < acquire {
+                    tx.read(&mut buf);
+                    for v in buf.iter_mut() {
+                        *v *= amplitude;
+                    }
+                    rx.write(&buf);
+                    rx.read(&mut got); // discard the training bytes
                     sent += 733;
                 }
 
