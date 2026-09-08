@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "modem"
+path = "src/main.rs"
+
 [dependencies]
 crossterm = "0.29.0"
 modem-audio = { path = "../modem-audio" }

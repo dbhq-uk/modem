@@ -185,6 +185,90 @@ impl App {
         }
     }
 
+    /// Drives every pane's own `Session` through one real
+    /// [`Transport::run`] call - the binary's event loop uses this for
+    /// `--acoustic` (a real [`modem_audio::CpalTransport`]), where the
+    /// device's own ring-buffer pacing must not be bypassed.
+    ///
+    /// `Transport::run` requires a genuinely contiguous `&mut [Session]`
+    /// (see its own doc), and a [`Pane`] owns its `Session` privately -
+    /// there is deliberately no `panes_mut()` escape hatch that would let
+    /// a caller reach in and drive a pane's session directly, bypassing
+    /// whatever else this type wants to guarantee about it. So this
+    /// briefly swaps each pane's real session out for a throwaway
+    /// placeholder (a fresh `Session::new` from that same pane's own
+    /// `Config` - never read from or written to, so its own state does
+    /// not matter), gathers the real ones into the slice the trait
+    /// requires, runs the transport exactly once, and hands each one
+    /// back. Nothing observes a pane's session through any other method
+    /// while it is briefly swapped out - the whole exchange happens
+    /// within this one call.
+    ///
+    /// Does not feed the waterfall: `Transport::run`'s own return value
+    /// (`RunStats`) reports block counts, never the actual samples
+    /// exchanged, so there is nothing here to hand `push_samples`. See
+    /// [`App::step_wired`] for the demo path, which drives the two
+    /// panes' sessions directly and can see the real audio.
+    pub fn run_transport(
+        &mut self,
+        transport: &mut dyn Transport,
+    ) -> Result<modem_audio::transport::RunStats, modem_audio::transport::TransportError> {
+        let mut ends: Vec<modem_core::session::Session> = self
+            .panes
+            .iter_mut()
+            .map(|p| p.take_session(modem_core::session::Session::new(p.config())))
+            .collect();
+        let result = transport.run(&mut ends);
+        for (pane, session) in self.panes.iter_mut().zip(ends) {
+            pane.restore_session(session);
+        }
+        result
+    }
+
+    /// Demo-only: cross-wires the two panes' own `Session`s directly in
+    /// software for exactly one block - the same cross-wire
+    /// `modem_audio::WiredTransport::step` performs, reimplemented here
+    /// rather than reached through `Transport::run`/`WiredTransport`
+    /// because that trait method's own `RunStats` return never exposes
+    /// the samples it just produced (see `run_transport`'s own doc), and
+    /// the whole point of the wired demo path is feeding those very
+    /// samples to the waterfall - exactly what `examples/mockup.rs`'s own
+    /// `pump` function already does, tested and working, which this
+    /// mirrors directly. `WiredTransport` itself is still constructed by
+    /// the binary and used for its metadata (`is_acoustic`,
+    /// `sample_rate`, `config_for`) - only its own `run`/`step` is
+    /// bypassed here.
+    ///
+    /// Panics if this `App` does not have exactly two panes - the wired
+    /// demo always cross-wires two ends; the binary's own startup check
+    /// refuses `--single` without `--acoustic` before this is ever
+    /// reached, for exactly this reason.
+    pub fn step_wired(&mut self) {
+        assert_eq!(
+            self.panes.len(),
+            2,
+            "step_wired needs exactly two panes - the wired demo always cross-wires two ends"
+        );
+        const BLOCK: usize = 256;
+        let mut from_a = [0.0f32; BLOCK];
+        let mut from_b = [0.0f32; BLOCK];
+        {
+            let (first, second) = self.panes.split_at_mut(1);
+            let a = first[0].session_mut();
+            let b = second[0].session_mut();
+            a.process_out(&mut from_a);
+            b.process_out(&mut from_b);
+            a.process_in(&from_b);
+            b.process_in(&from_a);
+        }
+        let mix: Vec<f32> = from_a
+            .iter()
+            .zip(from_b.iter())
+            .map(|(&x, &y)| (x + y).clamp(-1.0, 1.0))
+            .collect();
+        self.push_samples(&mix);
+    }
+
     pub fn layout_mode(&self, area: Rect) -> LayoutMode {
         decide_layout(self.requested, area)
     }
@@ -601,6 +685,108 @@ mod tests {
         (0..buf.area.width)
             .map(|x| buf[(x, y)].symbol().to_string())
             .collect()
+    }
+
+    // --- Task 17: run_transport and step_wired -------------------------
+
+    /// A `Transport` that mutates the sessions it is actually handed
+    /// (answers the second one), so a test can tell "the real session
+    /// round-tripped through `run_transport`" from "a fresh placeholder
+    /// silently stood in for it".
+    struct AnswerTransport;
+
+    impl Transport for AnswerTransport {
+        fn run(
+            &mut self,
+            ends: &mut [modem_core::session::Session],
+        ) -> Result<modem_audio::transport::RunStats, modem_audio::transport::TransportError>
+        {
+            assert_eq!(
+                ends.len(),
+                2,
+                "run_transport did not hand every pane's session through"
+            );
+            ends[1].answer();
+            Ok(modem_audio::transport::RunStats::default())
+        }
+        fn sample_rate(&self) -> u32 {
+            8000
+        }
+        fn is_acoustic(&self) -> bool {
+            true
+        }
+    }
+
+    /// Required behaviour: `run_transport` hands each pane's *real*
+    /// session to the transport - not a copy, not a fresh placeholder -
+    /// and hands the transport's own mutations back. Checked both ways:
+    /// pane 0's own pre-existing `Dialling` state must have survived the
+    /// round trip (a fresh placeholder would have reset it to `Idle`),
+    /// and pane 1 must show the transport's own real mutation
+    /// (`Answering`, from a session that started `Idle`), not something
+    /// `run_transport` itself would ever produce.
+    #[test]
+    fn run_transport_hands_each_panes_real_session_to_the_transport_and_back() {
+        let mut a = pane(Role::Originate);
+        a.session_mut().dial("1");
+        let b = pane(Role::Answer);
+        let mut transport = AnswerTransport;
+        let mut app = App::split(a, b, &transport, Theme::Amber);
+
+        app.run_transport(&mut transport)
+            .expect("run_transport must succeed");
+
+        assert_eq!(
+            app.panes()[0].turn_or_state_label(),
+            "dialling",
+            "pane 0's own session was replaced rather than round-tripped - its dialling state \
+             was lost"
+        );
+        assert_eq!(
+            app.panes()[1].turn_or_state_label(),
+            "listening",
+            "pane 1 does not show the transport's own real mutation - its session was not the \
+             one the transport actually ran against"
+        );
+    }
+
+    /// `step_wired` must feed the waterfall from the real audio the two
+    /// panes' own sessions just exchanged, not merely avoid panicking -
+    /// `fft_size_for(8000)` needs 512 samples for one FFT window, so two
+    /// calls (256 samples each) must be enough to push at least one
+    /// column.
+    #[test]
+    fn step_wired_feeds_the_waterfall_from_real_exchanged_audio() {
+        let mut a = pane(Role::Originate);
+        a.session_mut().dial("1");
+        let mut b = pane(Role::Answer);
+        b.session_mut().answer();
+        let wired = modem_audio::WiredTransport::new(8000);
+        let mut app = App::split(a, b, &wired, Theme::Amber);
+
+        assert!(
+            app.spectrum().is_empty(),
+            "precondition failed: a fresh App must start with no waterfall history"
+        );
+        app.step_wired();
+        app.step_wired();
+        assert!(
+            !app.spectrum().is_empty(),
+            "step_wired did not feed any real audio to the waterfall"
+        );
+    }
+
+    /// `step_wired` panics rather than silently doing nothing useful on a
+    /// single-pane `App` - the wired demo always needs two ends to cross-
+    /// wire, and the binary's own startup check is what actually prevents
+    /// this combination from being reachable in practice (see the task
+    /// report).
+    #[test]
+    #[should_panic(expected = "step_wired needs exactly two panes")]
+    fn step_wired_panics_on_a_single_pane_app() {
+        let wired = modem_audio::WiredTransport::new(8000);
+        let mut app = App::single(pane(Role::Originate), &wired, Theme::Amber);
+        app.step_wired();
     }
 
     // --- Required test: both layouts render at a range of sizes without
