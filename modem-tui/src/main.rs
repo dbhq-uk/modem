@@ -38,38 +38,27 @@
 //! silently promoted to a layout nobody asked for or left to panic
 //! later inside `App::step_wired`.
 //!
-//! # `--answer` only sets where an idle `--single` end starts (Task 19)
+//! # `--answer` picks receive mode, and that end answers by itself
 //!
-//! Before Task 19, a `--single` pane was always built `Role::Originate` -
-//! there was no way to run the answering end at all, so two machines
-//! both running `--single --acoustic` both transmitted on 1270/1070 and
-//! both listened on 2225/2025, and neither could ever hear the other.
-//! That is fixed at the `modem_core::session::Session` layer, not here:
-//! `Session::dial` now sets its own role to `Role::Originate` and
-//! `Session::answer` sets `Role::Answer`, each rebuilding that end's
-//! transmitter and receiver in the right band regardless of what
-//! `Config` it was built from (see `session.rs`'s own module doc, "The
-//! role follows the command"). So a `--single` pane built here with
-//! `Role::Originate` and then typed `ATA` into genuinely answers in the
-//! answer band; this binary's own choice of role only matters for the
-//! handful of samples before anyone has typed anything at all.
+//! Bell 103 needs the two ends in opposite bands - originate transmits on
+//! 1270/1070 and listens on 2225/2025, and the answering end does the
+//! reverse. That split is what lets both talk at once over one pair, and
+//! it is also why two machines started identically could not hear each
+//! other at all, which is the bug Task 19 fixed.
 //!
-//! `--answer` exists purely to choose that starting band - which
-//! `role_name`/`band` (see `pane.rs`) report on an idle end that has
-//! never yet dialled or answered - rather than leaving it hardcoded to
-//! `Role::Originate`. It has nothing to add to `--split`, where both
-//! ends already start in opposite bands by construction, so it is
-//! rejected there the same way `--single` without `--acoustic` is.
+//! The role follows the command: `Session::dial` sets `Role::Originate`
+//! and `Session::answer` sets `Role::Answer`, each rebuilding that end's
+//! transmitter and receiver in the right band, exactly as `ATD` and `ATA`
+//! did on a real modem.
 //!
-//! # Terminal restoration on every exit path
-//!
-//! `ratatui::run` (see its own doc) initialises the terminal, installs a
-//! panic hook that restores it before the default panic handler prints
-//! anything, runs the closure, and restores the terminal afterwards
-//! regardless of what the closure returns - `Ok`, `Err`, or a panic
-//! unwinding through it. That is the whole of this binary's own
-//! responsibility for "restored on every exit path including panic":
-//! rely on the already-proven mechanism rather than re-implementing it.
+//! `--answer` is how you choose receive mode on the second machine, and
+//! an end told to receive **answers at startup** rather than waiting to
+//! be told twice. A real modem did the same thing through its S0
+//! register: set it, and the modem picked up on its own with nobody
+//! typing `ATA`. So the two-machine flow is `modem --single --acoustic`
+//! on the calling machine and the same plus `--answer` on the receiving
+//! one, then `ATDT<digits>` on the caller. Nothing to type on the far
+//! end at all.
 
 use std::time::{Duration, Instant};
 
@@ -89,10 +78,10 @@ const TICK: Duration = Duration::from_millis(20);
 struct Args {
     layout: RequestedLayout,
     acoustic: bool,
-    /// The role a `--single` end starts idle in, before anyone has typed
-    /// `ATDT` or `ATA` - see this module's own doc, "`--answer` only sets
-    /// where an idle `--single` end starts". Ignored for `--split`, which
-    /// always builds one end of each role regardless.
+    /// Which mode a `--single` end runs in. `Role::Answer` does not just
+    /// choose a band: that end **auto-answers at startup**, so it is
+    /// already listening before anybody types anything. Ignored for
+    /// `--split`, which always builds one end of each role regardless.
     role: Role,
 }
 
@@ -139,9 +128,9 @@ fn parse_args_from(args: impl IntoIterator<Item = String>) -> Result<Args, Strin
     }
     if answer_requested && layout != RequestedLayout::Single {
         return Err(
-            "--answer only means something for --single - it picks which band a single idle \
-             end starts in before anyone types ATDT or ATA. Pass --single --acoustic --answer, \
-             or drop --answer for the two-pane demo, which already starts one end in each band."
+            "--answer only means something for --single - it puts one end in receive mode. \
+             Pass --single --acoustic --answer, or drop --answer for the two-pane demo, \
+             which already starts one end in each band."
                 .to_string(),
         );
     }
@@ -159,11 +148,11 @@ fn print_help() {
     println!("  --single     one end, connected to another machine over a real device");
     println!("               (needs --acoustic)");
     println!("  --acoustic   use the real sound card instead of the wired demo transport");
-    println!("  --answer     a --single end starts idle in the answer band instead of");
-    println!("               originate - only changes what it shows before you type");
-    println!("               ATDT or ATA, since dialling or answering sets the band for");
-    println!("               real either way. Two machines: run --single --acoustic on");
-    println!("               both, ATDT<digits> on one and ATA on the other.");
+    println!("  --answer     run this --single end in receive mode: it answers at");
+    println!("               startup and waits in the answer band, so there is nothing");
+    println!("               to type on it. Two machines: --single --acoustic on the");
+    println!("               calling one, the same plus --answer on the receiving one,");
+    println!("               then ATDT<digits> on the caller.");
     println!();
     println!("Dial with ATDT<digits>, answer with ATA - typed into either pane, followed");
     println!("by Enter. F2 opens the dialling directory (Up/Down to pick, Enter to dial,");
@@ -203,7 +192,16 @@ fn run(
 
     let mut app = match args.layout {
         RequestedLayout::Single => {
-            let pane = Pane::new(transport.config_for(args.role, Duplex::HalfPingPong));
+            let mut pane = Pane::new(transport.config_for(args.role, Duplex::HalfPingPong));
+            if args.role == Role::Answer {
+                // Auto-answer. `--answer` is how you pick receive mode on
+                // the second machine, so that end has to be listening
+                // from the moment it starts - a real modem did exactly
+                // this through its S0 register, picking up without
+                // anybody typing ATA. Choosing the mode and then still
+                // having to type the command would be picking it twice.
+                pane.session_mut().answer();
+            }
             App::single(pane, &*transport, Theme::default())
         }
         RequestedLayout::Split => {
@@ -323,5 +321,75 @@ mod tests {
     fn unrecognised_argument_is_rejected() {
         let err = parse_args_from(args(&["--bogus"])).unwrap_err();
         assert!(err.contains("--bogus"));
+    }
+}
+
+#[cfg(test)]
+mod auto_answer_tests {
+    use modem_core::{Config, Duplex, Role};
+    use modem_tui::Pane;
+    use std::time::Duration;
+
+    /// Builds a pane exactly the way `run` does for `--single`, including
+    /// the auto-answer. Kept in step with the real construction by being
+    /// the same two lines; if `run` grows more setup this has to follow,
+    /// and the end-to-end test below is what would notice.
+    fn single_pane(role: Role) -> Pane {
+        let mut pane = Pane::new(Config {
+            sample_rate: 8000,
+            role,
+            duplex: Duplex::HalfPingPong,
+        });
+        if role == Role::Answer {
+            pane.session_mut().answer();
+        }
+        pane
+    }
+
+    /// The two-machine flow, end to end, with **nothing typed on the
+    /// receiving end**: one machine runs `--single --acoustic --answer`
+    /// and just sits there, the other dials, and a line of chat has to
+    /// arrive. That is what "you pick receive mode" has to mean, and it
+    /// is the claim the page makes.
+    ///
+    /// Asserted on the recovered bytes, never on `SessionState` - two
+    /// ends can both reach `Connected` while being completely deaf to
+    /// each other, which is exactly the bug Task 19 fixed.
+    #[test]
+    fn an_answer_mode_end_takes_a_call_with_nothing_typed_into_it() {
+        const BLOCK: usize = 256;
+        let dt = Duration::from_secs_f64(BLOCK as f64 / 8000.0);
+
+        let mut caller = single_pane(Role::Originate);
+        let mut receiver = single_pane(Role::Answer);
+
+        // Only the calling machine is touched by a person.
+        caller.type_line("ATDT5551234");
+
+        let mut from_caller = [0.0f32; BLOCK];
+        let mut from_receiver = [0.0f32; BLOCK];
+        let mut sent = false;
+        for _ in 0..4000 {
+            caller.session_mut().process_out(&mut from_caller);
+            receiver.session_mut().process_out(&mut from_receiver);
+            caller.session_mut().process_in(&from_receiver);
+            receiver.session_mut().process_in(&from_caller);
+            caller.tick(dt);
+            receiver.tick(dt);
+
+            if !sent && caller.session_mut().has_turn() && caller.carrier() {
+                caller.session_mut().send(b"knock knock\n");
+                sent = true;
+            }
+            if receiver.history().iter().any(|l| l.contains("knock knock")) {
+                return;
+            }
+        }
+        panic!(
+            "an --answer end never took the call with nothing typed into it. \
+             caller history {:?}, receiver history {:?}",
+            caller.history(),
+            receiver.history()
+        );
     }
 }
