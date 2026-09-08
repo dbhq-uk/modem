@@ -3,7 +3,7 @@
 The release gate for this modem. `modem-core::impair::MAX_BYTE_ERROR_RATE` is fixed by the measurements below and does not move upward afterwards - a later change that pushes the measured rate above it has made the modem worse, not the gate wrong.
 
 **Measured:** 8th September 2026 (fix round 1)
-**Commit:** see the task report for the exact commit this fix round lands on
+**Commit:** `1a777a3` (`fix(core): fix round 1 for BER calibration - measurement, not modem`)
 **Toolchain:** rustc 1.98.1, cargo 1.98.1
 
 ## Fix round 1: three measurement defects, not implementation defects
