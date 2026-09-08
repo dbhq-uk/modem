@@ -392,9 +392,19 @@ mod tests {
     /// between two addresses on repeated same-size alloc-then-free, so an
     /// endpoint-only comparison can pass against precisely the bug it
     /// exists to catch.
+    ///
+    /// `run`'s input and output loops can now each iterate zero, one or
+    /// many times within a *single* call (see this module's doc) - the
+    /// scratch-reuse discipline matters most exactly inside that loop, so
+    /// this drains a varying number of whole blocks (1, then 2, then 1,
+    /// then 2, ...) every call, rather than feeding a fixed sub-block
+    /// amount once up front, so every one of the 50 checked calls actually
+    /// exercises more than one inner iteration at least half the time.
+    /// `played` is drained every call too, so the output loop keeps
+    /// finding room and is exercised the same way, not just the input one.
     #[test]
     fn run_does_not_allocate_after_construction() {
-        let (mut transport, mut mic, _played) = CpalTransport::new_for_test(8000, false);
+        let (mut transport, mut mic, mut played) = CpalTransport::new_for_test(8000, false);
         let mut originate = Session::new(cfg(Role::Originate, Duplex::Full));
         originate.dial("1");
         let mut ends = [originate];
@@ -410,6 +420,14 @@ mod tests {
         let out_ptr = transport.scratch_out_a.as_ptr();
 
         for i in 0..50 {
+            // Alternate one and two whole blocks' worth of freshly
+            // "captured" audio so the input loop's iteration count varies
+            // call to call - see this test's own doc on why a fixed count
+            // would not be enough to trust the check below.
+            let blocks = if i % 2 == 0 { 1 } else { 2 };
+            for _ in 0..(BLOCK_LEN * blocks) {
+                let _ = mic.push(0.1);
+            }
             transport.run(&mut ends).unwrap();
             assert_eq!(
                 transport.scratch_in.as_ptr(),
@@ -421,6 +439,9 @@ mod tests {
                 out_ptr,
                 "scratch_out_a moved at call {i}"
             );
+            // Keep the output ring drained so the next call's output loop
+            // has room to run more than once too.
+            while played.pop().is_ok() {}
         }
     }
 
@@ -485,6 +506,286 @@ mod tests {
         assert!(
             ends[1].carrier_detected(),
             "the second end never saw the shared microphone's input"
+        );
+    }
+
+    /// Mutation-proof for the actual defect this fix closes. Queues fewer
+    /// than one whole block of real "captured" audio, then calls `run`
+    /// once, and checks the *ring's own remaining content* - not just the
+    /// returned `RunStats` - which is what a mutation could otherwise
+    /// fake. Two independent facts must both hold: `run` did no input
+    /// work (`input_blocks == 0`) and every one of the real samples is
+    /// still sitting in the ring, untouched, for the next call.
+    ///
+    /// The old, reverted design failed this immediately: it popped
+    /// exactly `BLOCK_LEN` samples every call regardless of how many were
+    /// actually queued, substituting `0.0` for the shortfall via
+    /// `unwrap_or(0.0)`. That would have drained all
+    /// `BLOCK_LEN - 1` real samples here (leaving the ring empty, not
+    /// holding `BLOCK_LEN - 1`) and spliced one fabricated silent sample
+    /// onto the end of them before ever reporting anything back - exactly
+    /// the corruption that broke the answer end's Gardner timing loop and
+    /// carrier detector on the real `snd-aloop` loopback. Reintroducing
+    /// that old body (restoring the fixed-`BLOCK_LEN`,
+    /// `unwrap_or(0.0)` loop in place of the `while ... slots()` loop
+    /// above) was verified by hand to fail both assertions below - see
+    /// the task report.
+    #[test]
+    fn run_does_not_fabricate_a_partial_block_when_less_than_one_is_queued() {
+        let (mut transport, mut mic, _played) = CpalTransport::new_for_test(8000, false);
+        let mut originate = Session::new(cfg(Role::Originate, Duplex::Full));
+        originate.dial("1");
+        let mut ends = [originate];
+
+        let queued = BLOCK_LEN - 1;
+        for _ in 0..queued {
+            let _ = mic.push(0.3);
+        }
+
+        let stats = transport.run(&mut ends).unwrap();
+
+        assert_eq!(
+            stats.input_blocks, 0,
+            "run() processed a block before a whole block's worth of real input had arrived"
+        );
+        assert_eq!(
+            transport.input_consumer.slots(),
+            queued,
+            "run() consumed real captured samples without a whole block being available - \
+             they must stay queued for the next call, not be dropped or padded with silence"
+        );
+    }
+
+    /// The other half of the same mutation-proof: when *several* whole
+    /// blocks are genuinely queued at once (a caller that briefly fell
+    /// behind the real device), a single `run` call must drain all of
+    /// them, not just one. Checked the same way - both the returned count
+    /// and the ring's own remaining content, so a mutation cannot satisfy
+    /// one while faking the other.
+    ///
+    /// The old, reverted one-block-per-call design left `BLOCK_LEN * 2`
+    /// samples still queued after this call (it only ever drained one
+    /// block, no matter how many were waiting) - verified by hand; see
+    /// the task report.
+    #[test]
+    fn run_drains_every_whole_block_available_in_one_call() {
+        let (mut transport, mut mic, _played) = CpalTransport::new_for_test(8000, false);
+        let mut originate = Session::new(cfg(Role::Originate, Duplex::Full));
+        originate.dial("1");
+        let mut ends = [originate];
+
+        let whole_blocks = 3;
+        for _ in 0..(BLOCK_LEN * whole_blocks) {
+            let _ = mic.push(0.0);
+        }
+
+        let stats = transport.run(&mut ends).unwrap();
+
+        assert_eq!(
+            stats.input_blocks, whole_blocks,
+            "run() did not drain every whole block queued in a single call"
+        );
+        assert_eq!(
+            transport.input_consumer.slots(),
+            0,
+            "whole blocks were left queued in the ring instead of being drained this call"
+        );
+    }
+
+    /// The output side of the same fix: `run` must not blindly push a
+    /// block into an already-full output ring - it has to check for room
+    /// first and simply do nothing once the ring cannot take a whole
+    /// block, the same discipline the input loop above is held to.
+    /// Checked against the ring's own occupancy (`slots()`), not just the
+    /// returned count, for the same reason as the two tests above.
+    #[test]
+    fn run_stops_producing_output_once_the_ring_is_full() {
+        let (mut transport, _mic, _played) = CpalTransport::new_for_test(8000, false);
+        let mut originate = Session::new(cfg(Role::Originate, Duplex::Full));
+        originate.dial("1");
+        let mut ends = [originate];
+
+        // Nobody ever drains `_played`, so the very first call already
+        // fills the output ring completely (its capacity is a whole
+        // number of blocks - see `RING_CAPACITY`'s own doc).
+        let first = transport.run(&mut ends).unwrap();
+        assert!(
+            first.output_blocks > 0,
+            "precondition failed: the first call produced no output at all"
+        );
+        assert_eq!(
+            transport.output_producer.slots(),
+            0,
+            "precondition failed: the output ring was not actually filled"
+        );
+
+        let second = transport.run(&mut ends).unwrap();
+        assert_eq!(
+            second.output_blocks, 0,
+            "run() produced output into a ring that already had no room for a whole block"
+        );
+    }
+
+    /// Required by the brief: samples `drain_input` genuinely drops (the
+    /// real-time capture callback finding the ring already full) must be
+    /// reported, not silently absorbed - the whole point of this fix.
+    /// Calls `drain_input` directly with a ring left with no room at all,
+    /// the same function a real `cpal` input stream callback runs, then
+    /// checks `run`'s own `RunStats::input_samples_dropped` picks up
+    /// exactly that count on its very next call. This is the one loss
+    /// `run`'s own drain-what's-available redesign above cannot prevent -
+    /// it happens on the real-time thread before `run` is ever called -
+    /// so reporting it, rather than eliminating it, is the correct fix.
+    #[test]
+    fn dropped_input_samples_are_reported_via_run_stats() {
+        let (mut transport, mut mic, _played) = CpalTransport::new_for_test(8000, false);
+        let mut originate = Session::new(cfg(Role::Originate, Duplex::Full));
+        originate.dial("1");
+        let mut ends = [originate];
+
+        // Fill the input ring completely first...
+        while mic.push(0.0).is_ok() {}
+        // ...then simulate the real-time capture callback trying to add
+        // five more samples than the ring has room for. `drain_input`
+        // takes a `&mut rtrb::Producer`, the same handle a real `cpal`
+        // input stream owns - `mic` here plays exactly that role.
+        let dropped_before = transport.input_dropped.load(Ordering::Relaxed);
+        drain_input(
+            &[0.1, 0.2, 0.3, 0.4, 0.5],
+            &mut mic,
+            1,
+            &transport.input_dropped,
+        );
+        assert_eq!(
+            transport.input_dropped.load(Ordering::Relaxed) - dropped_before,
+            5,
+            "precondition failed: drain_input did not count the samples it had to drop"
+        );
+
+        let stats = transport.run(&mut ends).unwrap();
+        assert_eq!(
+            stats.input_samples_dropped, 5,
+            "run() did not surface drain_input's real dropped-sample count via RunStats"
+        );
+
+        // And the counter must not double-report the same drops on a
+        // second call with nothing new dropped in between.
+        let stats2 = transport.run(&mut ends).unwrap();
+        assert_eq!(
+            stats2.input_samples_dropped, 0,
+            "run() re-reported the same drop on a later call instead of reporting only the delta"
+        );
+    }
+
+    /// The acceptance test's in-memory analogue: two `Session`s sharing
+    /// one `CpalTransport`, driven through a caller loop whose call rate
+    /// has no relationship to the device's own - the actual free-running-
+    /// caller-clock scenario this module's own doc describes, reproduced
+    /// deterministically with no real device, no real time, and no
+    /// flakiness.
+    ///
+    /// The "device" here advances by exactly one `BLOCK_LEN` period every
+    /// tick, always, independent of how many times (zero, one, or several)
+    /// the caller happens to call `run` that same tick: it pops up to one
+    /// block from `played` (an underrun - less than a block queued - is
+    /// padded with real silence, exactly what a real DAC does when
+    /// starved) and feeds exactly that much straight back into `mic`, a
+    /// same-machine loopback with no acoustic loss. This is the crucial
+    /// difference from an earlier, discarded version of this test: a
+    /// "device" that only ever fed back what the caller had *just*
+    /// produced could never race ahead of or fall behind the caller, so it
+    /// could not reproduce the mismatch at all (verified by hand: that
+    /// version passed even with `run` reverted to its old defective body).
+    /// Decoupling the device's own per-tick advance from `CALL_PATTERN`
+    /// below is what makes the two clocks genuinely independent, the same
+    /// way a real sound card's clock never waits for the caller's.
+    ///
+    /// `CALL_PATTERN` includes a `0` (the caller falls behind a device
+    /// tick entirely) and repeated multiples (the caller then races back
+    /// past it) specifically so both directions of the mismatch the task
+    /// brief names are exercised, not just one.
+    ///
+    /// Asserts on a decoded, byte-exact payload - never on reaching
+    /// `Connected` alone, which the task brief's own hand-verification
+    /// showed proves nothing about the link (a session built at the wrong
+    /// rate for its transport still reached `Connected` in 9.0 s on real
+    /// hardware; the overture that gets a session to `Connected` never
+    /// decodes anything).
+    ///
+    /// Reverting `run` to its old fixed-one-block, `unwrap_or(0.0)` body
+    /// was verified by hand to fail this test (payload not received
+    /// within the tick budget below) - see the task report.
+    #[test]
+    fn two_sessions_exchange_a_payload_over_a_simulated_loopback_with_irregular_call_pacing() {
+        use modem_core::session::SessionState;
+
+        let (mut transport, mut mic, mut played) = CpalTransport::new_for_test(8000, true);
+        let mut originate = Session::new(cfg(Role::Originate, Duplex::HalfPingPong));
+        let mut answer = Session::new(cfg(Role::Answer, Duplex::HalfPingPong));
+        originate.dial("1");
+        answer.answer();
+        let mut ends = [originate, answer];
+
+        // How many times the caller calls `run` on a given tick, cycled -
+        // deliberately including a tick where it does not call at all
+        // (falling a whole device period behind) followed by ticks that
+        // call several times in a row (racing back past it), so both
+        // directions of the mismatch get exercised many times over the
+        // run below, not just once.
+        const CALL_PATTERN: [usize; 5] = [0, 3, 1, 0, 2];
+        let mut connected_at = None;
+
+        for tick in 0..60_000 {
+            let calls = CALL_PATTERN[tick % CALL_PATTERN.len()];
+            for _ in 0..calls {
+                transport.run(&mut ends).unwrap();
+            }
+
+            // The device: exactly one BLOCK_LEN period this tick, always,
+            // whether or not the caller called `run` at all. Pops up to
+            // one block from `played`; an underrun (less queued than a
+            // whole block) is padded with real silence, then fed back -
+            // a real DAC does not wait for more samples to arrive either.
+            let mut period = [0.0f32; BLOCK_LEN];
+            for slot in period.iter_mut() {
+                *slot = played.pop().unwrap_or(0.0);
+            }
+            for &s in &period {
+                let _ = mic.push(s);
+            }
+
+            if connected_at.is_none()
+                && ends[0].state() == SessionState::Connected
+                && ends[1].state() == SessionState::Connected
+            {
+                connected_at = Some(tick);
+            }
+            if let Some(connected_tick) = connected_at {
+                // A short settle after connecting (matching every other
+                // exchange test in this workspace's own convention) before
+                // sending, then give the payload a generous window to
+                // round-trip.
+                if tick == connected_tick + 400 {
+                    ends[0].send(b"IRREGULAR PACING");
+                }
+                if tick > connected_tick + 400 {
+                    let got = ends[1].receive();
+                    if !got.is_empty() {
+                        assert_eq!(
+                            got, b"IRREGULAR PACING",
+                            "payload arrived corrupted under irregular call pacing"
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+
+        panic!(
+            "payload never round-tripped under irregular call pacing within the tick budget - \
+             final states: originate={:?} answer={:?}",
+            ends[0].state(),
+            ends[1].state()
         );
     }
 }
