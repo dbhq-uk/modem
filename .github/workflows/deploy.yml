@@ -167,10 +167,22 @@ jobs:
       - name: The three routes must be serving
         run: |
           set -euo pipefail
+          # -L, because the routes are real directories: Cloudflare Pages
+          # 308s /demo to /demo/ before serving it, and that redirect is
+          # correct. Asserting on the unfollowed status fails a deploy that
+          # actually worked. The final URL is checked too, so a redirect
+          # that quietly landed somewhere else - which is exactly what the
+          # earlier _redirects rewrites did, sending every route to / and
+          # breaking shared links - still fails.
           for route in demo originate receive; do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/${route}?cb=${GITHUB_SHA}")
-            echo "/${route} -> $CODE"
+            CODE=$(curl -sL -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/${route}?cb=${GITHUB_SHA}")
+            FINAL=$(curl -sL -o /dev/null -w "%{url_effective}" "https://modem.dbhq.uk/${route}?cb=${GITHUB_SHA}")
+            echo "/${route} -> $CODE at $FINAL"
             [ "$CODE" = "200" ]
+            case "$FINAL" in
+              *"/${route}/"*) ;;
+              *) echo "landed at $FINAL, not the route itself"; exit 1 ;;
+            esac
           done
 
       # AudioWorklet instantiation needs 'wasm-unsafe-eval' in script-src.
