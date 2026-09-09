@@ -37,7 +37,7 @@ const PHASES = [
   { label: STAGE_NAMES[5], description: 'The answer tone: 2100 Hz, its phase flipped 180 degrees every 450 milliseconds. Analogue phone networks ran echo suppressors that muted a call whenever it looked like only one side was talking, fine for speech and fatal for two modems talking at once. The phase reversals are a signal those suppressors were built to recognise, and switch themselves off for.' },
   { label: STAGE_NAMES[6], description: 'Call menu and joint menu. The two modems compare what modulations they each support and settle on the one they will actually use.' },
   { label: STAGE_NAMES[7], description: 'The acknowledgement that both ends agreed, followed by a short, deliberate silence: the last quiet moment before the two modems start probing the line itself.' },
-  { label: STAGE_NAMES[8], description: "An impression of the real V.34-style probing that follows in an actual call, where two modems measure the line's own noise and frequency response before committing to a speed. There is no physical phone line here to measure, so this stage is texture, not a conformant negotiation - the one stage on this page that is not a faithful reconstruction." },
+  { label: STAGE_NAMES[8], description: "An impression of the real V.34-style probing that follows in an actual call - the fast, noisy screech most people actually remember from a 33.6k or 56k dial-up modem - where two modems measure the line's own noise and frequency response before committing to a speed. There is no physical phone line here to measure, so this stage is texture, not a conformant negotiation - the one stage on this page that is not a faithful reconstruction." },
 ];
 
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -685,9 +685,22 @@ function resetAllPhaseButtons() {
   activePhaseIndex = null;
 }
 
+/** A stable, human-readable anchor id for a phase - derived from
+ * STAGE_NAMES rather than hand-picked, so it can never drift from the
+ * one real label each phase already carries. Slugged the ordinary way
+ * (lowercase, non-alphanumerics to hyphens) so `#phase-ansam` and
+ * `#phase-dial-tone` stay predictable and linkable even though the
+ * whole list is only ever built by this loop, never present in the
+ * static HTML for a crawler that does not run JavaScript to find. */
+function phaseAnchorId(index) {
+  const slug = STAGE_NAMES[index].toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return `phase-${slug}`;
+}
+
 PHASES.forEach((phase, index) => {
   const li = document.createElement('li');
   li.className = 'phase-row';
+  li.id = phaseAnchorId(index);
   li.dataset.stage = String(index);
 
   const button = document.createElement('button');
@@ -746,6 +759,18 @@ PHASES.forEach((phase, index) => {
   li.appendChild(p);
   phaseListEl.appendChild(li);
 });
+
+// A direct link to one phase (e.g. shared as
+// https://modem.dbhq.uk/#phase-ansam) has to actually land on it. The
+// browser's own initial-load hash scroll cannot do this on its own: the
+// nine <li> elements above do not exist in the static HTML at all, only
+// once this loop has just created them - by the time that happens, the
+// browser's one-shot "scroll to the fragment" pass already ran and found
+// nothing. Redone here, once, now that the real target exists.
+if (location.hash) {
+  const target = document.getElementById(location.hash.slice(1));
+  if (target) target.scrollIntoView();
+}
 
 // -----------------------------------------------------------------------
 // Routing: three routes behind one application - /demo, /originate,
@@ -824,18 +849,24 @@ async function startRoute(route) {
   else if (route === 'receive') await startEndpointRoute(Role.ANSWER);
 }
 
+// Trailing-slash form throughout: Cloudflare Pages 308s the slash-less
+// path to this one (each route is a real directory - see
+// .github/workflows/deploy.yml's own doc), which is also the form each
+// route's own <link rel="canonical"> declares. Pushing that form
+// directly means a visitor who reloads, shares, or bookmarks straight
+// from the address bar never takes the redirect hop at all.
 launchDemoBtn.addEventListener('click', () => {
-  history.pushState(null, '', '/demo');
+  history.pushState(null, '', '/demo/');
   launcher.hidden = true;
   startRoute('demo');
 });
 launchOriginateBtn.addEventListener('click', () => {
-  history.pushState(null, '', '/originate');
+  history.pushState(null, '', '/originate/');
   launcher.hidden = true;
   startRoute('originate');
 });
 launchReceiveBtn.addEventListener('click', () => {
-  history.pushState(null, '', '/receive');
+  history.pushState(null, '', '/receive/');
   launcher.hidden = true;
   startRoute('receive');
 });
@@ -1451,7 +1482,7 @@ async function startEndpointRoute(role) {
 
   if (role === Role.ORIGINATE) {
     shareBlock.hidden = false;
-    renderShareBlock(`${location.origin}/receive`);
+    renderShareBlock(`${location.origin}/receive/`);
   } else {
     shareBlock.hidden = true;
   }
