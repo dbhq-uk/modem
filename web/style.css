@@ -83,6 +83,96 @@ body {
   top: var(--modem-space-sm);
 }
 
+/* ---------------------------------------------------------------------
+ * site-nav - the sticky primary nav: Try, Explained, and three same-page
+ * anchors (Downloads, Projects, About) that resolve to a real section on
+ * the home page - on /explained they jump back here instead. Placed
+ * ahead of .hero in the markup rather than overlaid on it: a nav painted
+ * on top of a full-bleed hero would eat into the image it exists to
+ * show, so this is a normal, non-overlapping block instead, sticky only
+ * once its own top edge would otherwise scroll out of view - which, sat
+ * at the very top of the page, is immediately.
+ *
+ * --site-nav-height is fixed, not the box's own intrinsic height,
+ * because every fragment target on the page needs to subtract the exact
+ * same number from its own scroll-margin-top below - a value that only
+ * ever matches if both sides read it from one custom property rather
+ * than two hand-matched numbers.
+ * ------------------------------------------------------------------- */
+:root {
+  --site-nav-height: 3rem;
+}
+
+.site-nav {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Tighter than the space-sm gap most rows on this page use - five
+     items plus four gaps at that spacing measured 7px over a 390px
+     viewport (verified directly with a real browser at 390 and 1440px);
+     space-xs closes that with room to spare. overflow-x: auto stays as
+     a defensive fallback regardless - see the media query below for the
+     actual collapse behaviour on anything narrower still. */
+  gap: var(--modem-space-xs);
+  height: var(--site-nav-height);
+  padding: 0 var(--modem-space-xs);
+  background: var(--modem-ground);
+  border-bottom: 1px solid var(--modem-white-dim);
+  overflow-x: auto;
+}
+
+.site-nav__link {
+  color: var(--modem-green-bright);
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: var(--modem-type-scale-small);
+  letter-spacing: 0.02em;
+  padding: 0 2px;
+}
+
+.site-nav__link:hover,
+.site-nav__link:focus-visible {
+  color: var(--modem-white-bright);
+}
+
+/* The current page, not a hover state - a solid underline rather than
+   reusing the hover/focus colour, so the two states never look the
+   same. */
+.site-nav__link[aria-current="page"] {
+  color: var(--modem-white-bright);
+  border-bottom: 2px solid var(--modem-green-bright);
+}
+
+/* Five items fit a 390px phone at this type scale and this gap -
+   verified directly (see the design spec's own "sticky nav behaviour").
+   Kept as a defensive floor for anything narrower still: Try and
+   Explained (the two real pages) stay, the three same-page anchors
+   collapse - a hamburger was explicitly rejected for three links (see
+   the spec's "Out of scope"), so collapsing is the fallback, not a
+   drawer. */
+@media (max-width: 320px) {
+  .site-nav__link--anchor {
+    display: none;
+  }
+}
+
+/* Every fragment-navigation target on the site needs this, or the
+   sticky nav above lands on top of it the moment the jump completes -
+   see the design spec's own "sticky nav behaviour". #main covers the
+   skip link's own destination; the rest are the nav's own anchors and
+   (on explained.html) its contents list and each phase row. */
+#main,
+#downloads,
+#about,
+#projects,
+.section-anchor,
+.phase-row {
+  scroll-margin-top: var(--site-nav-height);
+}
+
 /* Browser surfaces the design system otherwise leaves to the platform
    default - themed from the same phosphor rather than left grey. */
 ::selection {
@@ -340,11 +430,30 @@ p {
   line-height: 1;
 }
 
-.hero__tagline {
+/* The page's actual <h1> - deliberately not the visually biggest text on
+   the page. `.wordmark` above stays the visual mark (same size, same
+   bloom, unchanged); this is the second line, sized like the tagline
+   used to be, carrying the phrase a search query would actually match.
+   `h1.wordmark` on the element beats the generic `h1, h2, h3` colour
+   rule further up this file on specificity alone, so this needs no
+   `!important` to win the white-bright/large treatment it wants instead
+   of green-bright. */
+h1.hero__heading {
   margin: 0;
   max-width: 60ch;
   font-size: var(--modem-type-scale-large);
+  font-weight: normal;
   color: var(--modem-white-bright);
+}
+
+/* Now the third line, under the heading rather than under the wordmark -
+   still Dan's own unchanged line, just demoted a step in the visual
+   stack to make room for the heading above it. */
+.hero__tagline {
+  margin: 0;
+  max-width: 60ch;
+  font-size: var(--modem-type-scale-base);
+  color: var(--modem-white-dim);
 }
 
 /* ---------------------------------------------------------------------
@@ -397,8 +506,11 @@ main > section:last-child {
 .scenarios > p,
 .scenario__label,
 .scenario > p,
+.explainer-teaser > h2,
+.explainer-teaser > p,
 .explainer > h2,
 .explainer > p,
+.contents__list,
 .downloads > h2,
 .downloads > p,
 .resources > h2,
@@ -537,6 +649,16 @@ main > section:last-child {
   padding: var(--modem-space-xs) var(--modem-space-md);
   cursor: pointer;
   text-shadow: 0 0 var(--modem-bloom-radius) currentColor;
+}
+
+/* .dial-button on an <a> rather than a <button> - the explainer teaser's
+   own "Hear every phase explained" and explained.html's own "Try the
+   demo" link, in addition to 404.html's existing "Back to modem". An
+   anchor carries no button reset, so text-decoration and display need
+   setting explicitly here rather than assumed. */
+a.dial-button {
+  display: inline-block;
+  text-decoration: none;
 }
 
 .dial-button:hover:not(:disabled),
@@ -1356,6 +1478,42 @@ body.app-mode {
   margin: 0;
 }
 
+/* The "Also from DBHQ" group's own list - one sibling per line, each
+   with the one-sentence reason to click that a bare name never gave
+   (see the design spec's defect 3). A list rather than
+   .endorsement__links's single row of names: a name-plus-description no
+   longer reads as one short row, and forcing it into one anyway just
+   wraps mid-sentence on a narrow phone. */
+.endorsement__siblings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  max-width: 32ch;
+}
+
+.endorsement__siblings li {
+  padding: 2px 0;
+}
+
+/* ---------------------------------------------------------------------
+ * contents - explained.html's own short jump list to its sections (see
+ * the design spec: "give it a short contents list"). Plain text links,
+ * no numbering or bullets - it reads as a compact index, not a second
+ * page of prose.
+ * ------------------------------------------------------------------- */
+.contents {
+  margin-bottom: var(--modem-space-lg);
+}
+
+.contents__list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--modem-space-xs) var(--modem-space-md);
+}
+
 /* ---------------------------------------------------------------------
  * resource-row - one external link and the one sentence saying why it
  * is worth a visitor's time, on links.html. Same header-plus-
@@ -1426,11 +1584,6 @@ body.app-mode {
   margin-top: var(--modem-space-md);
 }
 
-.not-found__action .dial-button {
-  display: inline-block;
-  text-decoration: none;
-}
-
 /* ---------------------------------------------------------------------
  * Mobile - phones and small tablets. The threshold is 48rem (768px):
  * the generated frame's own font-size clamp (.screen pre, above) is
@@ -1476,6 +1629,16 @@ body.app-mode {
   .phase-row__play,
   .download-row__link,
   .endorsement__links a {
+    min-height: 44px;
+  }
+
+  /* Same touch-target floor as the row above, kept separate because a
+     nav link also needs to stay vertically centred within it rather
+     than just growing taller - the row above's own elements are all
+     already block/table-ish enough not to need that. */
+  .site-nav__link {
+    display: inline-flex;
+    align-items: center;
     min-height: 44px;
   }
 

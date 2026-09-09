@@ -34,8 +34,9 @@
      type is exempt (verified against this page's own live CSP - see
      git history for the verification note). Every fact below is stated
      elsewhere on this page already; nothing here is invented to chase a
-     keyword. The FAQ answers mirror PHASES in page.js - if one changes,
-     update the other. -->
+     keyword. The FAQPage node moved to explained.html on 9 Sep 2026,
+     along with the content it actually describes (the phases, Bell 103,
+     FSK) - see that page's own identical comment. -->
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -79,68 +80,6 @@
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "GBP" },
       "codeRepository": "https://github.com/dbhq-uk/modem",
       "url": "https://modem.dbhq.uk/"
-    },
-    {
-      "@type": "FAQPage",
-      "@id": "https://modem.dbhq.uk/#faq",
-      "mainEntity": [
-        {
-          "@type": "Question",
-          "name": "What is the dial-up sound?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "It's the performed overture a modem plays before a call connects: the click of the line being seized, a dial tone, DTMF digits, a ringback tone, then the answer tone and its phase reversals. modem renders this live in the browser with the same code that runs its real connection, then completes a genuine 300 baud Bell 103 connection underneath it."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Why did dial-up make that noise?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Each sound had a job. The dial tone said the line was ready; DTMF sent the digits; ringback meant the far end's phone was ringing; the 2100 Hz answer tone, with its phase reversed every 450 milliseconds, told the phone network's echo suppressors to switch off so two modems could talk over each other without being muted."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What is that screeching noise at the start of a dial-up call?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "On a real 33.6k or 56k modem it was V.34-style probing: two modems measuring the line's own noise and frequency response before agreeing a speed. modem performs an impression of that stage for texture - there is no physical phone line here to measure, so it is the one stage on this page that is not a faithful reconstruction of a real signal."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Is the dial-up sound on this page a recording?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "No. The overture is a reconstruction rendered live by the same code that drives the real connection, not a recording - and the connection itself is a genuine 300 baud Bell 103 link, not simulated."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What is a Bell 103 modem?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "AT&T's 1963 300 baud modem standard - the connection this project actually implements once CONNECT appears, with the same originate and answer tone pairs, 1270/1070 Hz and 2225/2025 Hz."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What is FSK modulation?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Frequency-shift keying: a bit is a shift between two frequencies. It's the modulation underneath the connection itself, once the overture ends and CONNECT appears."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What is a modem handshake?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "The sequence two modems perform before data flows: seizing the line, exchanging tones to prove they are both modems, agreeing capabilities, then settling into a stable connection. modem's own explainer plays each phase of that handshake individually."
-          }
-        }
-      ]
     }
   ]
 }
@@ -157,6 +96,22 @@
 <div class="crt-warmup" aria-hidden="true"></div>
 
 <div class="crt-frame">
+
+  <!-- Sticky, five items, in Dan's own words rather than invented verbs -
+       see the design spec's own "Navigation" table. Try and Explained are
+       real pages; Downloads/Projects/About are anchors on this page, and
+       stay anchors on /explained too (jumping back here) rather than
+       becoming their own pages - see the spec's "Two pages, not five".
+       Placed ahead of .hero, not overlaid on it, so the hero still
+       renders full-bleed on load - an overlay nav would eat into the
+       image it exists to show. -->
+  <nav class="site-nav" aria-label="Primary">
+    <a class="site-nav__link" href="/" aria-current="page">Try</a>
+    <a class="site-nav__link" href="/explained">Explained</a>
+    <a class="site-nav__link site-nav__link--anchor" href="/#downloads">Downloads</a>
+    <a class="site-nav__link site-nav__link--anchor" href="/#projects">Projects</a>
+    <a class="site-nav__link site-nav__link--anchor" href="/#about">About</a>
+  </nav>
 
   <header class="hero">
     <!-- hero.png (2.2 MB) stays committed as the source of truth; a
@@ -180,19 +135,20 @@
            the image and its gradient stay full-bleed behind it. -->
       <div class="hero__content">
         <!--
-          One line under the wordmark, not two around it. `modem` is a common
-          noun and carries nothing on its own, so it needs a companion - but
-          it needs one, not a kicker above and a tagline below. The factual
-          claim it used to carry ("a real Bell 103 modem, behind a performed
-          dial-up handshake") now opens the section immediately below, next
-          to the demo, where somebody is ready to read it.
+          modem is the visual mark, not the heading - a common noun on its
+          own carries no search intent, so the actual <h1> now says what a
+          visitor is here to do. The wordmark stays exactly as it read
+          before (same class, same size, same bloom); it is a styled <p>
+          now rather than an <h1> because a page has one heading and this
+          page needed it to say something a search query would actually
+          match.
 
-          The line itself says ritual rather than sound on purpose. Data over
-          sound is what minimodem does faster; the ceremony is what this
-          reconstructs, and CONNECT is the word the modem itself prints a few
-          lines further down the page.
+          "The ritual before CONNECT" is Dan's own line and is unchanged -
+          see the design spec. It now reads as the third line, under the
+          new heading, rather than the second line under the wordmark.
         -->
-        <h1 class="wordmark">modem</h1>
+        <p class="wordmark">modem</p>
+        <h1 class="hero__heading">Hear the dial-up sound, live</h1>
         <p class="hero__tagline">The ritual before CONNECT</p>
       </div>
     </div>
@@ -215,7 +171,12 @@
          still no-ops safely before JS has run (see page.js's own
          guards). -->
     <section class="demo" id="demo" aria-labelledby="demo-heading">
-      <h2 id="demo-heading">Hear the dial-up sound, live</h2>
+      <!-- Not "Hear the dial-up sound, live" - that is now the page's own
+           <h1>, above. Repeating it verbatim as this section's h2 would
+           be the exact "wrong figure, wrong claim" kind of duplication
+           Ground Rule 3 exists to catch, just for a heading instead of a
+           fact. -->
+      <h2 id="demo-heading">Try it now</h2>
       <p>Three ways in. Watch a full handshake and a real connection right here, nothing to set up. Or open this device as one real end of an acoustic call - dial from one, answer on the other, the sound genuinely crossing the room between them.</p>
 
       <!-- The landing state: on screen only at the plain root path. An
@@ -518,32 +479,18 @@
       </div>
     </section>
 
-    <section class="explainer" aria-labelledby="explainer-heading">
-      <h2 id="explainer-heading">Why dial-up sounded like that: every phase of the handshake</h2>
-      <p>Play the whole overture at once, rendered live by the same code that runs the connection above - not a recording - or preview any stage on its own below. Dialling itself is decorative throughout this section: there is no real telephone network behind it, so the far end always answers regardless of what is dialled.</p>
-
-      <div class="demo__controls">
-        <button class="dial-button" id="overture-btn" type="button">Play the whole overture</button>
-      </div>
-
-      <div class="terminal">
-        <div class="terminal__output" id="terminal-output" role="log" aria-label="Call transcript"></div>
-        <div class="waterfall-wrap">
-          <div class="waterfall-axis" aria-hidden="true">
-            <span>3400</span>
-            <span>2225</span>
-            <span>1270</span>
-            <span>300</span>
-          </div>
-          <canvas class="waterfall" id="waterfall" width="960" height="200" aria-hidden="true"></canvas>
-        </div>
-        <p class="now-playing" id="now-playing" aria-live="polite">Idle</p>
-      </div>
-
-      <ol class="phase-list" id="phase-list"></ol>
+    <!-- The full phase-by-phase explainer (the nine phases, the overture
+         playback, Bell 103/FSK, standards, prior art, history) now lives
+         at /explained, where it has a URL of its own to rank on - see
+         explained.html's own doc. This is deliberately just a teaser: a
+         reason to go there, not a second copy of what is there. -->
+    <section class="explainer-teaser" aria-labelledby="explainer-teaser-heading">
+      <h2 id="explainer-teaser-heading">Why dial-up sounded like that</h2>
+      <p>Nine phases make up the overture above - dial tone, DTMF, ringback, the ANSam answer tone and more - each rendered live by the same code that runs the connection, not a recording.</p>
+      <p><a class="dial-button" href="/explained">Hear every phase explained</a></p>
     </section>
 
-    <section class="downloads" aria-labelledby="downloads-heading">
+    <section class="downloads" id="downloads" aria-labelledby="downloads-heading">
       <h2 id="downloads-heading">Get modem</h2>
       <p>Native binaries for Linux, macOS and Windows are built by the project's release workflow.</p>
       <ul class="download-list">
@@ -562,36 +509,45 @@
       </ul>
       <p class="downloads__note">No release has been tagged yet - the releases page will list binaries once one has.</p>
       <p><a href="https://github.com/dbhq-uk/modem" rel="noopener">View the source on GitHub</a></p>
-      <p><a href="/links">The technical record, the prior art, and why this exists</a></p>
+      <p><a href="/explained">The technical record, the prior art, and why this exists</a></p>
     </section>
 
   </main>
 
-  <footer class="endorsement">
-    <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a></p>
+  <!-- id="about" - this byline is the whole of "About" (see the design
+       spec: "About is a byline", not a separate section worth its own
+       prose). The nav's About anchor lands here. -->
+  <footer class="endorsement" id="about">
+    <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. The full workspace - modem-core, modem-audio, modem-tui, modem-wasm and this page - lives on <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>, MIT licensed.</p>
 
     <!-- Two labelled groups, not three undifferentiated rows: this
          project's own links, then the sibling DBHQ experiments -
          "what other sites do for cross-promotion" (Dan, 8 Sep 2026).
          dbhq.uk and the releases page are already linked above (the
          byline, and the three platform rows just above this footer),
-         so neither is repeated here. All plain links, no interstitial,
-         no banner. -->
+         so neither is repeated here.
+
+         id="projects" on the second group - the nav's Projects anchor
+         lands here: three live siblings each with a real reason to
+         click, not the two bare names this used to be (see the design
+         spec's defect 3: "the sibling links give nobody a reason to
+         click"). -->
     <div class="endorsement__groups">
       <div class="endorsement__group">
         <p class="endorsement__group-label">This project</p>
         <p class="endorsement__links">
           <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
-          <a href="/links">Links</a>
+          <a href="/explained">Explained</a>
         </p>
       </div>
 
-      <div class="endorsement__group">
+      <div class="endorsement__group" id="projects">
         <p class="endorsement__group-label">Also from DBHQ</p>
-        <p class="endorsement__links">
-          <a href="https://bbs.dbhq.uk">BBS</a>
-          <a href="https://heliograph.dbhq.uk">heliograph</a>
-        </p>
+        <ul class="endorsement__siblings">
+          <li><a href="https://dbhq.uk">DBHQ</a> - the practice behind these experiments.</li>
+          <li><a href="https://bbs.dbhq.uk">BBS</a> - explore a bulletin board system.</li>
+          <li><a href="https://heliograph.dbhq.uk">heliograph</a> - debug a remote machine through an operator, using Git.</li>
+        </ul>
       </div>
     </div>
   </footer>
