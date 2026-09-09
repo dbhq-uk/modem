@@ -109,6 +109,7 @@ class ModemProcessor extends AudioWorkletProcessor {
       stage: session.stage(),
       hasTurn: session.hasTurn(),
       carrier: session.carrierDetected(),
+      ringNumber: session.ringNumber(),
     };
     const last = this.lastStatus;
     if (
@@ -116,7 +117,8 @@ class ModemProcessor extends AudioWorkletProcessor {
       status.state !== last.state ||
       status.stage !== last.stage ||
       status.hasTurn !== last.hasTurn ||
-      status.carrier !== last.carrier
+      status.carrier !== last.carrier ||
+      status.ringNumber !== last.ringNumber
     ) {
       this.lastStatus = status;
       this.port.postMessage({ type: 'status', ...status });

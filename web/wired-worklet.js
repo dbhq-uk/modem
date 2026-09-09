@@ -154,6 +154,7 @@ class WiredProcessor extends AudioWorkletProcessor {
       stage: session.stage(),
       hasTurn: session.hasTurn(),
       carrier: session.carrierDetected(),
+      ringNumber: session.ringNumber(),
     };
   }
 
@@ -163,7 +164,8 @@ class WiredProcessor extends AudioWorkletProcessor {
       a.state === b.state &&
       a.stage === b.stage &&
       a.hasTurn === b.hasTurn &&
-      a.carrier === b.carrier
+      a.carrier === b.carrier &&
+      a.ringNumber === b.ringNumber
     );
   }
 

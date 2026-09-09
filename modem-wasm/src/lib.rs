@@ -345,3 +345,20 @@ pub unsafe extern "C" fn session_stage(ptr: *mut Session) -> i32 {
         Some(Stage::Connected) => 9,
     }
 }
+
+/// Which double-ring cycle (1 or 2) is currently sounding, while
+/// `session_stage` reports 3 (`Ringback`). -1 at every other time. See
+/// [`Session::ring_number`]'s own doc - this is what lets a page show
+/// "ring 1 of 2" / "ring 2 of 2" from the same real overture state that
+/// is actually being rendered, rather than a separate guess at elapsed
+/// time that could disagree with it.
+///
+/// # Safety
+/// `ptr` must be a live `Session`.
+#[no_mangle]
+pub unsafe extern "C" fn session_ring_number(ptr: *mut Session) -> i32 {
+    match (*ptr).ring_number() {
+        Some(n) => n as i32,
+        None => -1,
+    }
+}

@@ -191,6 +191,12 @@ export class SessionHandle {
     return s < 0 ? null : s;
   }
 
+  /** @returns {number|null} 1 or 2 while stage() is Ringback, otherwise null */
+  ringNumber() {
+    const n = this.exports.session_ring_number(this.ptr);
+    return n < 0 ? null : n;
+  }
+
   /** Releases the WASM-side Session and its scratch buffers. */
   free() {
     if (this._outPtr) this.exports.dealloc_f32(this._outPtr, this._outLen);

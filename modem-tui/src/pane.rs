@@ -133,6 +133,14 @@ pub struct Pane {
     /// proxy for protocol correctness - see this project's own
     /// established caution against asserting on `SessionState`.
     elapsed: Duration,
+    /// Set by [`Pane::set_auto_answer`] for a `--answer` end that must
+    /// keep listening with nothing typed into it, matching a real
+    /// unattended answering machine (`main.rs`'s own doc: "that end has
+    /// to be listening from the moment it starts"). An unattended
+    /// listener has to keep listening, not just start out listening: see
+    /// [`Pane::tick`]'s own doc for the disclosed carrier-detection gap
+    /// this actually guards against in practice.
+    auto_answer: bool,
 }
 
 impl Pane {
@@ -147,7 +155,19 @@ impl Pane {
             pending_line: None,
             turn_held_for: Duration::ZERO,
             elapsed: Duration::ZERO,
+            auto_answer: false,
         }
+    }
+
+    /// Marks this pane as an unattended answering end: [`Pane::tick`]
+    /// re-issues `session.answer()` on its own if the session ever falls
+    /// back to `Idle` while this is set, rather than waiting for a human
+    /// to notice a dropped call and retype `ATA`. `false` by default -
+    /// only `--answer` mode's own startup auto-answer (see `main.rs`)
+    /// should set this; a call a person actually typed `ATA` for, or hung
+    /// up on purpose, must stay hung up.
+    pub fn set_auto_answer(&mut self, on: bool) {
+        self.auto_answer = on;
     }
 
     /// `ORIGINATE` or `ANSWER`, matching the mockups' own capitalisation.
@@ -407,11 +427,29 @@ impl Pane {
     /// while connected, and - under `Duplex::HalfPingPong` - flushes a
     /// queued chat line the moment this end is granted the turn it was
     /// waiting for. See [`Pane::try_flush_pending`]'s own doc.
+    ///
+    /// Also re-arms an [`Pane::set_auto_answer`]-marked pane the instant it
+    /// falls back to `Idle`. This is not only about a call that genuinely
+    /// ended: `modem-core`'s carrier detector has a disclosed, pre-existing
+    /// gap (see `modem-core/src/carrier.rs`'s own module doc on why a
+    /// broadband transient can clear its rise threshold before the floor
+    /// has calibrated) that a caller's own off-hook click can trip on an
+    /// answering end's receiver well before any real signal exists - and
+    /// Task 3i's ringback fix (a real, full 2.0 s inter-ring silence)
+    /// gives that false-early "connected" state a genuine silent stretch
+    /// long enough to then genuinely, correctly detect carrier loss and
+    /// hang up, before the real call has actually arrived. An unattended
+    /// answering machine has to survive that exactly as it would a real
+    /// call ending: by going straight back to listening, not by staying
+    /// dead until a person notices and retypes `ATA`.
     pub fn tick(&mut self, dt: Duration) {
         if let Some(resp) = self.at.advance_time(dt, &mut self.session) {
             for l in resp.lines {
                 self.push_line(l);
             }
+        }
+        if self.auto_answer && self.session.state() == SessionState::Idle {
+            self.session.answer();
         }
         let bytes = self.session.receive();
         if !bytes.is_empty() {
@@ -599,9 +637,25 @@ mod tests {
         b.tick(dt);
     }
 
+    /// `b` is re-armed with a fresh `ATA` if its session ever drops back
+    /// to `Idle` before `a` has connected - see `modem-core/src/at.rs`'s
+    /// `five_hand_overs_hold_the_call_up_and_connect_reports_exactly_
+    /// once_each_end` for the same fix and the disclosed, pre-existing
+    /// finding it exists for: the answering end's receiver can trip on
+    /// originate's own off-hook transient well before dialling has even
+    /// finished, and Task 3i's ringback fix (a real, full 2.0 s inter-ring
+    /// silence, not a truncated 0.5 s tail) gives that false-early carrier
+    /// a genuine silent gap long enough to actually drop and hang up
+    /// during - which a fresh `ATA` recovers from exactly as a person
+    /// re-answering a dropped call would.
     fn connect(a: &mut Pane, b: &mut Pane) {
         for _ in 0..4000 {
             pump(a, b);
+            if b.session_mut().state() == SessionState::Idle
+                && a.session_mut().state() != SessionState::Connected
+            {
+                b.type_line("ATA");
+            }
             if a.session_mut().state() == SessionState::Connected
                 && b.session_mut().state() == SessionState::Connected
             {

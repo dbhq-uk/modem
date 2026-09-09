@@ -201,6 +201,13 @@ fn run(
                 // anybody typing ATA. Choosing the mode and then still
                 // having to type the command would be picking it twice.
                 pane.session_mut().answer();
+                // And keeps listening, not just starts out listening -
+                // see `Pane::set_auto_answer`'s own doc for why an
+                // unattended end has to survive a dropped call (real or
+                // the disclosed early-carrier false start) the same way
+                // a real answering machine goes straight back to
+                // listening rather than staying dead.
+                pane.set_auto_answer(true);
             }
             App::single(pane, &*transport, Theme::default())
         }
@@ -342,6 +349,7 @@ mod auto_answer_tests {
         });
         if role == Role::Answer {
             pane.session_mut().answer();
+            pane.set_auto_answer(true);
         }
         pane
     }

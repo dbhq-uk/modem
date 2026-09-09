@@ -524,6 +524,15 @@ impl Session {
         self.overture_stage
     }
 
+    /// Which double-ring cycle (1 or 2) is currently sounding, while
+    /// `stage()` reports [`Stage::Ringback`]. `None` at every other time.
+    /// Delegates to the live [`Overture`] rather than tracking a copy, so
+    /// this can never disagree with what `process_out` actually rendered -
+    /// see [`Overture::ring_number`]'s own doc.
+    pub fn ring_number(&self) -> Option<u8> {
+        self.overture.as_ref().and_then(Overture::ring_number)
+    }
+
     /// Whether the receiver currently reports in-band energy above the
     /// noise floor. `false` whenever this session has no active `Rx`
     /// (`Idle`, or between construction and the first `dial`/`answer`).
@@ -682,6 +691,53 @@ mod tests {
             "dial did not pass through every overture stage in order"
         );
         assert_eq!(s.state(), SessionState::Connected);
+    }
+
+    /// `Session::ring_number` must delegate to the live `Overture`, not a
+    /// stale copy: `None` before and after `Stage::Ringback`, and 1 then 2
+    /// while it is current - the same claim `overture.rs`'s own
+    /// `ring_number_reports_which_cycle_is_sounding` proves at the
+    /// `Overture` layer, checked again here at the layer a page (or
+    /// `modem-wasm`) actually calls.
+    #[test]
+    fn ring_number_follows_the_overture_through_a_real_dial() {
+        let mut s = Session::new(cfg(Role::Originate));
+        assert_eq!(s.ring_number(), None, "ring_number set before any call");
+        s.dial("1");
+
+        let mut buf = [0.0f32; 1];
+        let mut saw_1 = false;
+        let mut saw_2 = false;
+        for _ in 0..(8000 * 30) {
+            let ring_before = s.ring_number();
+            s.process_out(&mut buf);
+            if s.stage() == Some(Stage::Ringback) {
+                match ring_before {
+                    Some(1) => saw_1 = true,
+                    Some(2) => {
+                        saw_2 = true;
+                        assert!(saw_1, "ring_number reported 2 before ever reporting 1");
+                    }
+                    other => panic!("ring_number reported {other:?} during Ringback"),
+                }
+            } else {
+                assert_eq!(
+                    ring_before,
+                    None,
+                    "ring_number reported a value outside Ringback (stage {:?})",
+                    s.stage()
+                );
+            }
+            if s.state() == SessionState::Connected {
+                break;
+            }
+        }
+        assert!(saw_1 && saw_2, "dial never passed through both rings");
+        assert_eq!(
+            s.ring_number(),
+            None,
+            "ring_number kept reporting a value once connected"
+        );
     }
 
     /// The test the Role fix exists for. Two sessions built from two

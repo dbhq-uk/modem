@@ -66,7 +66,7 @@
 //! | Off hook | A short decaying broadband click - the audible artefact of the relay closing, not a tone |
 //! | Dial tone | UK: 350 + 450 Hz, continuous, for [`DIAL_TONE_S`] |
 //! | Dialling | DTMF, 100 ms tone / 100 ms gap per digit |
-//! | Ringback | UK double ring: 400 + 450 Hz, 0.4 s on / 0.2 s off / 0.4 s on / 2.0 s silent, one cycle |
+//! | Ringback | UK double ring: 400 + 450 Hz, 0.4 s on / 0.2 s off / 0.4 s on, twice - the full 2.0 s gap between the two cycles, none after the second |
 //! | CI | "CI", V.21 low channel, 300 bit/s |
 //! | ANSam | 2100 Hz, phase reversals every 450 ms, 15 Hz amplitude modulation, [`ANSAM_S`] |
 //! | CM/JM | "CMJM", V.21 low channel, 300 bit/s |
@@ -112,26 +112,31 @@ const RING_B: f64 = 450.0;
 const RING_ON1_S: f64 = 0.4;
 const RING_OFF_S: f64 = 0.2;
 const RING_ON2_S: f64 = 0.4;
-/// The real UK cadence's inter-ring silence. Pinned to the literal spec
-/// value at compile time, below, independent of how much of it this
-/// module actually renders (see [`RING_TAIL_RENDER_S`]) - a mutation to
-/// this constant is a compile error, not a silent behaviour change that
-/// only a sample-level test could catch.
+/// The real UK cadence's inter-ring silence, per spec.
 const RING_SILENT_S: f64 = 2.0;
 const _: () = assert!(
     RING_SILENT_S == 2.0,
     "the UK ringback's inter-ring gap is 2.0 s per spec - this constant records \
-     that fact and must not silently drift, even though the performance only \
-     renders RING_TAIL_RENDER_S seconds of it before cutting to CI"
+     that fact and must not silently drift"
 );
-/// How much of the UK cadence's 2.0 s inter-ring silence this module
-/// actually renders before cutting to CI. One double-ring cycle only -
-/// the far end always answers (dialling is decorative, see this module's
-/// doc) - so sitting through the entire 2.0 s gap is 21% of the whole
-/// overture spent on dead air leading nowhere; a real callee answers
-/// during or just after the ring, not after the silence that follows it.
-const RING_TAIL_RENDER_S: f64 = 0.5;
-const RING_STAGE_S: f64 = RING_ON1_S + RING_OFF_S + RING_ON2_S + RING_TAIL_RENDER_S;
+/// One double-ring cycle: two short bursts, then the full inter-ring
+/// silence. "One ring" is one whole cycle - the UK *brr-brr* - not each
+/// individual burst.
+const RING_BURST_S: f64 = RING_ON1_S + RING_OFF_S + RING_ON2_S;
+const RING_CYCLE_S: f64 = RING_BURST_S + RING_SILENT_S;
+/// Two complete double-rings, then automatic answer (Dan, 8 Sep 2026:
+/// "Two complete double-rings, then automatic answer... Display 'Answers
+/// after 2 rings'"). The first cycle renders its full, genuine 2.0 s
+/// gap - a truncated 0.5 s tail previously stood in for it, which made
+/// "ring 1 of 2" impossible to tell apart from "ring 2 of 2" honestly,
+/// since there was only ever one ring rendered at all. The second cycle
+/// renders only its burst, not a second trailing gap: a real callee picks
+/// up during or just after the ring it answers on, not after the silence
+/// that would follow a third one that never comes - the far end always
+/// answers here (dialling is decorative, see this module's doc), so
+/// sitting through a gap nothing will ever break is dead air leading
+/// nowhere.
+const RING_STAGE_S: f64 = RING_CYCLE_S + RING_BURST_S;
 
 const ANSAM_FREQ: f64 = 2100.0;
 /// Per the brief: phase reversals every 450 ms.
@@ -276,12 +281,28 @@ fn dialling_phase(t: f64) -> (usize, bool) {
 }
 
 /// Whether the UK ringback cadence is sounding (as opposed to silent) at
-/// `t` seconds into `Stage::Ringback`.
-fn ringback_gate(t: f64) -> bool {
+/// `local_t` seconds into whichever cycle currently owns it - see
+/// [`ring_progress`], which resolves a stage-relative `t` into this and a
+/// ring number together.
+fn ringback_gate(local_t: f64) -> bool {
     let off_at = RING_ON1_S;
     let on2_at = off_at + RING_OFF_S;
     let silent_at = on2_at + RING_ON2_S;
-    t < off_at || (t >= on2_at && t < silent_at)
+    local_t < off_at || (local_t >= on2_at && local_t < silent_at)
+}
+
+/// Resolves `t` seconds into `Stage::Ringback` as a whole into which ring
+/// (1 or 2) owns that instant and the cycle-relative time within it, for
+/// [`ringback_gate`]. The first cycle spans `[0, RING_CYCLE_S)` (burst
+/// plus its full trailing gap); everything from `RING_CYCLE_S` onward is
+/// the second cycle's burst - see [`RING_STAGE_S`]'s own doc for why no
+/// second gap is rendered.
+fn ring_progress(t: f64) -> (u8, f64) {
+    if t < RING_CYCLE_S {
+        (1, t)
+    } else {
+        (2, t - RING_CYCLE_S)
+    }
 }
 
 /// A minimal FSK bit modulator for V.21's low channel, used by
@@ -366,6 +387,10 @@ enum StageState {
         a: Nco,
         b: Nco,
         n: u64,
+        /// Which double-ring cycle (1 or 2) owns the sample most recently
+        /// generated - see [`ring_progress`]. Read back by
+        /// [`Overture::ring_number`].
+        ring: u8,
     },
     Ci(FskChannel),
     Ansam {
@@ -419,6 +444,20 @@ impl Overture {
                 rng: OFF_HOOK_SEED,
                 n: 0,
             },
+        }
+    }
+
+    /// Which double-ring cycle (1 or 2) owned the most recently rendered
+    /// sample, while [`Stage::Ringback`] is current. `None` in every other
+    /// stage. A caller (the browser page, `modem-tui`) can show "ring 1 of
+    /// 2" / "ring 2 of 2" from this directly - it is read from the same
+    /// state [`Overture::read`] just advanced, not a separate guess at
+    /// elapsed time, so it can never disagree with what was actually
+    /// rendered.
+    pub fn ring_number(&self) -> Option<u8> {
+        match &self.state {
+            StageState::Ringback { ring, .. } => Some(*ring),
+            _ => None,
         }
     }
 
@@ -513,9 +552,11 @@ impl Overture {
                 }
                 (sample, finished)
             }
-            StageState::Ringback { a, b, n } => {
+            StageState::Ringback { a, b, n, ring } => {
                 let t = *n as f64 / rate as f64;
-                let sample = if ringback_gate(t) {
+                let (ring_now, local_t) = ring_progress(t);
+                *ring = ring_now;
+                let sample = if ringback_gate(local_t) {
                     a.next() * TWO_TONE_AMPLITUDE + b.next() * TWO_TONE_AMPLITUDE
                 } else {
                     0.0
@@ -585,6 +626,7 @@ impl Overture {
                 a: Nco::new(RING_A, rate as f64),
                 b: Nco::new(RING_B, rate as f64),
                 n: 0,
+                ring: 1,
             },
             Stage::Ci => StageState::Ci(FskChannel::new(
                 V21_LOW_MARK,
@@ -846,50 +888,76 @@ mod tests {
     /// checks against the standard check vector rather than its own
     /// encoder.
     ///
-    /// The final segment is 0.5 s, not the UK spec's full 2.0 s
-    /// inter-ring gap - this module only renders [`RING_TAIL_RENDER_S`]
-    /// of it before cutting to CI (see that constant's doc for why). The
-    /// full 2.0 s fact is not lost: it is pinned at compile time by the
-    /// `const _: () = assert!(...)` next to `RING_SILENT_S`, independent
-    /// of this render-time truncation.
+    /// Task 3i (Dan, 8 Sep 2026): two complete double-rings, the full
+    /// 2.0 s UK gap between them, then straight on with no second gap -
+    /// see [`RING_STAGE_S`]'s own doc. Seven segments now, not four:
+    /// on/off/on/GAP/on/off/on, the middle one alone at the full 2.0 s
+    /// this module used to truncate to 0.5 s.
     ///
-    /// Fix round 1 also added a second-burst check (`ring[4800..8000]`):
-    /// the first draft only ever probed the first 0.4 s burst
-    /// (`ring[..3200]`), so retuning the second burst to a different
-    /// frequency pair passed unnoticed.
+    /// The expected cadence below is written as literal seconds, not as
+    /// `RING_ON1_S` and friends - see this test's own history: comparing
+    /// against this module's own constants made an earlier draft
+    /// invariant under exactly the mutation it exists to catch (halving
+    /// the cadence). The published UK cadence is the independent fact
+    /// this test has to check against.
+    ///
+    /// Both cycles' both bursts are checked for the real 400 + 450 Hz
+    /// pair, not just the first: a bug that retuned the second cycle, or
+    /// only ever rendered one cycle padded to the right total length,
+    /// would still pass a check that stopped at cycle 1.
     #[test]
-    fn ringback_is_400_450_with_the_uk_cadence() {
+    fn ringback_is_400_450_with_two_uk_double_rings_and_the_full_gap_between_them() {
         let groups = render_all("1");
         let ring = stage_samples(&groups, Stage::Ringback);
 
-        let on1 = f64s(&ring[..(0.4 * RATE as f64) as usize]);
-        assert!(
-            goertzel(&on1, 400.0, RATE as f64) >= 0.35,
-            "no 400 Hz in first ring"
-        );
-        assert!(
-            goertzel(&on1, 450.0, RATE as f64) >= 0.35,
-            "no 450 Hz in first ring"
-        );
+        // Cycle 1's two bursts: [0, 0.4) and [0.6, 1.0).
+        for (label, win) in [
+            ("cycle 1, first burst", &ring[..3200]),
+            ("cycle 1, second burst", &ring[4800..8000]),
+        ] {
+            let w = f64s(win);
+            assert!(
+                goertzel(&w, 400.0, RATE as f64) >= 0.35,
+                "{label}: no 400 Hz"
+            );
+            assert!(
+                goertzel(&w, 450.0, RATE as f64) >= 0.35,
+                "{label}: no 450 Hz"
+            );
+        }
 
-        // The second burst, 0.6-1.0 s in (samples 4800..8000 at 8 kHz):
-        // must be the same 400 + 450 Hz pair, not silently retuned.
-        let on2 = f64s(&ring[4800..8000]);
-        assert!(
-            goertzel(&on2, 400.0, RATE as f64) >= 0.35,
-            "no 400 Hz in second ring"
-        );
-        assert!(
-            goertzel(&on2, 450.0, RATE as f64) >= 0.35,
-            "no 450 Hz in second ring"
-        );
+        // Cycle 2 starts at RING_CYCLE_S = 3.0 s (24000 samples): its two
+        // bursts are [24000, 27200) and [28800, 32000).
+        for (label, win) in [
+            ("cycle 2, first burst", &ring[24000..27200]),
+            ("cycle 2, second burst", &ring[28800..32000]),
+        ] {
+            let w = f64s(win);
+            assert!(
+                goertzel(&w, 400.0, RATE as f64) >= 0.35,
+                "{label}: no 400 Hz - the second cycle was retuned or never rendered"
+            );
+            assert!(
+                goertzel(&w, 450.0, RATE as f64) >= 0.35,
+                "{label}: no 450 Hz - the second cycle was retuned or never rendered"
+            );
+        }
 
         let runs = envelope_runs(ring, (0.01 * RATE as f64) as usize);
-        let want = [(true, 0.4), (false, 0.2), (true, 0.4), (false, 0.5)];
+        let want = [
+            (true, 0.4),
+            (false, 0.2),
+            (true, 0.4),
+            (false, 2.0),
+            (true, 0.4),
+            (false, 0.2),
+            (true, 0.4),
+        ];
         assert_eq!(
             runs.len(),
             want.len(),
-            "ringback did not measure as four segments: {runs:?}"
+            "ringback did not measure as seven segments (two full double-rings, the gap \
+             between them, no trailing gap): {runs:?}"
         );
         for (i, ((got_active, got_s), (want_active, want_s))) in
             runs.iter().zip(want.iter()).enumerate()
@@ -900,6 +968,67 @@ mod tests {
                 "segment {i}: measured {got_s:.3} s, expected {want_s:.3} s"
             );
         }
+    }
+
+    /// `Overture::ring_number` must report 1 throughout the first cycle
+    /// (burst and gap alike) and 2 throughout the second, tracking the
+    /// same boundaries `ringback_is_400_450_with_two_uk_double_rings_and_
+    /// the_full_gap_between_them` measures acoustically - not a separate,
+    /// looser notion of "roughly halfway". `None` in every other stage.
+    ///
+    /// `ring_number` is read *before* each `read()` call, not after: a
+    /// stage-completing sample advances `self.state` (and so
+    /// `ring_number`'s answer) internally the instant it is produced,
+    /// before `read` returns that sample's own `owner` label (see
+    /// `read`'s own doc on why the owner is captured before generating) -
+    /// so a value read after call *n* actually describes call *n+1*, not
+    /// call *n*. Reading beforehand keeps `ring_number` and the `owner`
+    /// `read` returns for that same call talking about the same sample
+    /// throughout, without hard-coding the boundary's exact sample index.
+    #[test]
+    fn ring_number_reports_which_cycle_is_sounding() {
+        let mut ov = Overture::new("1");
+        let mut buf = [0.0f32; 1];
+        let mut saw_ring_1 = false;
+        let mut saw_ring_2 = false;
+        let mut in_ringback = false;
+        for n in 0..(RATE as u64 * 30) {
+            let ring_before = ov.ring_number();
+            let (_, stage, done) = ov.read(&mut buf, RATE);
+            if stage == Stage::Ringback {
+                in_ringback = true;
+                assert!(
+                    ring_before == Some(1) || ring_before == Some(2),
+                    "ring_number reported {ring_before:?} for a sample Ringback owns"
+                );
+                if ring_before == Some(1) {
+                    saw_ring_1 = true;
+                    assert!(!saw_ring_2, "ring_number went back to 1 after reporting 2");
+                } else {
+                    saw_ring_2 = true;
+                }
+            } else {
+                assert_eq!(
+                    ring_before, None,
+                    "ring_number reported a value for a sample stage {stage:?} owns, not Ringback"
+                );
+                assert!(
+                    !in_ringback || saw_ring_2,
+                    "left Ringback without ring_number ever having reported 2"
+                );
+            }
+            if done {
+                break;
+            }
+            assert!(n < RATE as u64 * 29, "overture did not reach Connected");
+        }
+        assert!(saw_ring_1, "ring_number never reported 1");
+        assert!(saw_ring_2, "ring_number never reported 2");
+        assert_eq!(
+            ov.ring_number(),
+            None,
+            "ring_number kept reporting a value after the overture finished"
+        );
     }
 
     /// Off segments must be exact silence, not merely quiet - a stronger
@@ -1214,10 +1343,9 @@ mod tests {
     /// trap the brief names, applied to duration rather than a frequency
     /// magnitude.
     ///
-    /// Ringback's bound is 1.0-3.0 s, not 2.0-6.0: fix round 1 truncated
-    /// the rendered inter-ring silence to `RING_TAIL_RENDER_S` (see its
-    /// doc), so the rendered stage is 0.4+0.2+0.4+0.5 = 1.5 s, not the
-    /// full 3.0 s cadence.
+    /// Ringback's bound is 3.5-4.5 s: two complete double-rings (1.0 s of
+    /// burst each) plus one full 2.0 s inter-ring gap and no second one -
+    /// see [`RING_STAGE_S`]'s own doc - renders exactly 4.0 s.
     #[test]
     fn each_stage_duration_is_individually_sensible() {
         let groups = render_all("1");
@@ -1225,7 +1353,7 @@ mod tests {
             (Stage::OffHook, 0.01, 0.2),
             (Stage::DialTone, 0.5, 3.0),
             (Stage::Dialling, 0.1, 1.0),
-            (Stage::Ringback, 1.0, 3.0),
+            (Stage::Ringback, 3.5, 4.5),
             (Stage::Ci, 0.05, 1.0),
             (Stage::Ansam, 2.0, 5.0),
             (Stage::CmJm, 0.05, 1.0),
