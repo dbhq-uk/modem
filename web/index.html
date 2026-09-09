@@ -2,7 +2,7 @@
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>modem - a real Bell 103 modem, behind a performed dial-up handshake</title>
 <meta name="description" content="A real Bell 103 acoustic modem in your browser. Press Dial for a live one-device demo, both ends cross-wired right here, or open a second device's microphone for the real thing.">
 <meta property="og:type" content="website">
@@ -13,6 +13,11 @@
 <link rel="icon" href="../brand/icon.svg" type="image/svg+xml">
 <link rel="icon" href="../brand/icon-32.png" sizes="32x32">
 <link rel="apple-touch-icon" href="../brand/icon-180.png">
+<!-- brand/tokens.css linked directly rather than pulled in via style.css's
+     own @import: an @import is a serial fetch (the browser must fetch and
+     parse style.css before it even discovers the import), where two
+     ordinary <link> tags fetch in parallel. -->
+<link rel="stylesheet" href="../brand/tokens.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -28,7 +33,21 @@
 <div class="crt-frame">
 
   <header class="hero">
-    <img class="hero__image" src="hero.png" alt="" aria-hidden="true">
+    <!-- hero.png (2.2 MB) stays committed as the source of truth; a
+         visitor never fetches it unless every narrower, modern format
+         below fails. Widths match real breakpoints, not round numbers:
+         480/768/1080 are all comfortably under 150 KB even in WebP, the
+         heavier fallback - see web/_gen (there is no build step for
+         this, so these are pre-generated files, not derived at request
+         time). decoding is async and priority is deliberately low: this
+         is decorative (aria-hidden, sat behind the gradient and the
+         real text nodes above it) and must never compete with page.js
+         or modem.wasm for bandwidth on the initial load. -->
+    <picture>
+      <source type="image/avif" srcset="hero-480.avif 480w, hero-768.avif 768w, hero-1080.avif 1080w, hero-1536.avif 1536w" sizes="100vw">
+      <source type="image/webp" srcset="hero-480.webp 480w, hero-768.webp 768w, hero-1080.webp 1080w, hero-1536.webp 1536w" sizes="100vw">
+      <img class="hero__image" src="hero.png" width="1536" height="1024" decoding="async" fetchpriority="low" alt="" aria-hidden="true">
+    </picture>
     <div class="hero__overlay">
       <!-- hero__content mirrors main's own max-width, so the wordmark
            lines up with the body copy below it at every viewport while

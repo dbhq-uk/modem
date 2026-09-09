@@ -9,7 +9,13 @@
  * endorsement.
  */
 
-@import url("../brand/tokens.css");
+/* brand/tokens.css is linked directly from each HTML page's own <head>
+ * now, not pulled in here via @import - an @import forces the browser
+ * to fetch and parse this file first, discover the import only then,
+ * and fetch tokens.css after that: a serial round trip in front of
+ * every custom property this file depends on. Two <link> tags fetch in
+ * parallel instead. See index.html/links.html's own comment beside
+ * their tokens.css <link>. */
 
 /* The page container width. Not a brand/tokens.json value: that file is
    for colour, type and CRT-effect values the TUI and the page must

@@ -2,7 +2,7 @@
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>modem - links: the standards, the prior art, and why this exists</title>
 <meta name="description" content="The technical record behind modem's dial-up overture and Bell 103 connection, the prior art worth trying instead if speed is what you want, and the history that made the ceremony worth performing.">
 <meta property="og:type" content="website">
@@ -13,6 +13,10 @@
 <link rel="icon" href="../brand/icon.svg" type="image/svg+xml">
 <link rel="icon" href="../brand/icon-32.png" sizes="32x32">
 <link rel="apple-touch-icon" href="../brand/icon-180.png">
+<!-- See index.html's identical comment: an explicit <link> fetches in
+     parallel with style.css; style.css's own @import made this a serial
+     fetch instead. -->
+<link rel="stylesheet" href="../brand/tokens.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -26,7 +30,13 @@
 <div class="crt-frame">
 
   <header class="hero">
-    <img class="hero__image" src="hero.png" alt="" aria-hidden="true">
+    <!-- See index.html's identical comment on why this is a <picture>
+         with pre-generated WebP/AVIF variants rather than the bare PNG. -->
+    <picture>
+      <source type="image/avif" srcset="hero-480.avif 480w, hero-768.avif 768w, hero-1080.avif 1080w, hero-1536.avif 1536w" sizes="100vw">
+      <source type="image/webp" srcset="hero-480.webp 480w, hero-768.webp 768w, hero-1080.webp 1080w, hero-1536.webp 1536w" sizes="100vw">
+      <img class="hero__image" src="hero.png" width="1536" height="1024" decoding="async" fetchpriority="low" alt="" aria-hidden="true">
+    </picture>
     <div class="hero__overlay">
       <div class="hero__content">
         <h1 class="wordmark">modem</h1>
