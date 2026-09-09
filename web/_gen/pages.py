@@ -110,12 +110,16 @@ FOOTER = """<footer class="endorsement">
   </div>
 </footer>"""
 
-# analytics.js then consent.js, always in that order (GA4 must exist
-# before consent.js can call window.__dbhqEnableGA on Accept), then the
-# dialog itself. Every page that carries this region carries the dialog -
-# GA must never load anywhere without it, which has already been got
-# wrong once (see git history).
-CONSENT = """<script type="module" src="analytics.js"></script>
+# boot.js first - it decides whether the CRT power-on sweep plays at all
+# on this load (see that file), so it wants to run before anything else
+# has a chance to hold the main thread. Then analytics.js then consent.js,
+# always in that order (GA4 must exist before consent.js can call
+# window.__dbhqEnableGA on Accept), then the dialog itself. Every page
+# that carries this region carries the dialog - GA must never load
+# anywhere without it, which has already been got wrong once (see git
+# history).
+CONSENT = """<script type="module" src="boot.js"></script>
+<script type="module" src="analytics.js"></script>
 <script type="module" src="consent.js"></script>
 <dialog class="consent" data-consent aria-labelledby="consent-title">
   <h2 id="consent-title">CARRIER DETECT</h2>

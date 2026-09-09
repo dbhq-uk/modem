@@ -495,6 +495,21 @@ li {
      when somebody opening a shared link would hit it. Decoration must
      fail invisible, never opaque. */
   opacity: 0;
+}
+
+/* The sweep plays only when boot.js has decided this is a first arrival
+   rather than an internal navigation - see that file for why. Replaying
+   a 900ms full-viewport collapse-and-expand on every page load made
+   moving between Try, Explained and Prior art read as the page
+   breaking (Dan, 9 Sep 2026: "stop the jitter and flicker when changing
+   pages").
+
+   The animation lives on the scripted class rather than the element,
+   which also keeps the overlay's own standing rule true: the unscripted
+   default is transparent and static, so a page whose JavaScript never
+   runs shows no sweep instead of a black overlay with nothing to clear
+   it. */
+html.crt-boot .crt-warmup {
   animation: modem-crt-power-on 900ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
 }
 
