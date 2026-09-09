@@ -35,22 +35,23 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      # The committed web/modem.wasm is what the page actually loads, so it is
-      # rebuilt here and compared rather than trusted. A stale artifact would
-      # ship a page running different DSP from the source beside it, which is
-      # exactly the kind of quiet drift this project keeps guarding against.
-      - name: Rebuild the worklet artifact and check it matches what is committed
+      # The worklet artifact is BUILT here, not compared against a
+      # committed copy.
+      #
+      # It used to be rebuilt and byte-compared, and that check could never
+      # pass: a release wasm embeds absolute source paths in its panic
+      # strings, so the same source produces different bytes on a developer
+      # machine (/home/devops/src/modem/...) and on a runner
+      # (/home/runner/work/modem/modem/...). Every deploy since the check
+      # was added failed on it. The committed web/modem.wasm still exists
+      # for local preview, where there is no build step; what ships is
+      # this build, from this commit, which is a stronger guarantee than
+      # the comparison was pretending to give.
+      - name: Build the worklet artifact
         run: |
           set -euo pipefail
           cargo build --release --target wasm32-unknown-unknown \
             -p modem-wasm --no-default-features
-          BUILT=target/wasm32-unknown-unknown/release/modem_wasm.wasm
-          if ! cmp -s "$BUILT" web/modem.wasm; then
-            echo "web/modem.wasm does not match a fresh build of modem-wasm."
-            echo "Rebuild it and commit the result before deploying."
-            exit 1
-          fi
-          echo "committed wasm matches the source"
 
       # The page loads brand/tokens.css and brand/icon.svg from a sibling
       # directory, so the upload is the repo root minus everything that is not

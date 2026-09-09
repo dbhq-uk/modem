@@ -603,5 +603,9 @@
      page.js, which reads the global `qrcode` factory it defines. -->
 <script src="qrcode-gen.js"></script>
 <script type="module" src="page.js"></script>
+<!-- GA4, in a file rather than Google's inline snippet: the CSP has no
+     unsafe-inline, and an inline block has already killed this page once.
+     See analytics.js for the stream it reports to. -->
+<script type="module" src="analytics.js"></script>
 </body>
 </html>
