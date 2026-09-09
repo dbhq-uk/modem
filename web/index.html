@@ -603,9 +603,26 @@
      page.js, which reads the global `qrcode` factory it defines. -->
 <script src="qrcode-gen.js"></script>
 <script type="module" src="page.js"></script>
+
+<dialog class="consent" data-consent aria-labelledby="consent-title">
+  <h2 id="consent-title">CARRIER DETECT</h2>
+  <p>
+    We would like to count how many people come here to listen, using Google
+    Analytics. Cookies are only set if you accept, and the modem answers
+    exactly the same either way.
+  </p>
+  <div class="consent-actions">
+    <button type="button" class="dial-button" data-consent-decline>Decline</button>
+    <button type="button" class="dial-button" data-consent-accept autofocus>Accept</button>
+  </div>
+</dialog>
+
 <!-- GA4, in a file rather than Google's inline snippet: the CSP has no
      unsafe-inline, and an inline block has already killed this page once.
-     See analytics.js for the stream it reports to. -->
+     See analytics.js for the stream it reports to. Denied by default -
+     consent.js owns the prompt, and loads after analytics.js so that
+     __dbhqEnableGA is defined by the time Accept can be clicked. -->
 <script type="module" src="analytics.js"></script>
+<script type="module" src="consent.js"></script>
 </body>
 </html>
