@@ -1400,6 +1400,38 @@ body.app-mode {
 }
 
 /* ---------------------------------------------------------------------
+ * not-found - the 404 page. "NO CARRIER" rather than a bare error: it is
+ * the one real thing a Hayes-command modem printed when a call failed to
+ * go through, which is exactly what a broken or mistyped link is here.
+ * ------------------------------------------------------------------- */
+.not-found {
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: var(--modem-space-lg) var(--modem-space-md);
+  text-align: center;
+}
+
+.not-found .wordmark {
+  font-size: clamp(2rem, 8vw, 3.5rem);
+}
+
+.not-found__tagline {
+  margin: var(--modem-space-sm) auto;
+  max-width: 60ch;
+  font-size: var(--modem-type-scale-large);
+  color: var(--modem-white-bright);
+}
+
+.not-found__action {
+  margin-top: var(--modem-space-md);
+}
+
+.not-found__action .dial-button {
+  display: inline-block;
+  text-decoration: none;
+}
+
+/* ---------------------------------------------------------------------
  * Mobile - phones and small tablets. The threshold is 48rem (768px):
  * the generated frame's own font-size clamp (.screen pre, above) is
  * already pinned at its 0.6rem floor by about 738px, so below 768px
