@@ -500,11 +500,11 @@ section {
   text-shadow: none;
 }
 
-/* The secondary action beside the primary one - "Two devices" sits next
- * to Dial rather than behind a mode choice (see page.js's own doc on
- * why), so it needs to read as clearly lower-emphasis without a whole
- * second button style: same shape and touch target as .dial-button,
- * dimmer colour. */
+/* The two secondary launcher buttons ("Open originating modem", "Open
+ * receiving modem") sit beside the primary one ("Demo") rather than
+ * behind a mode choice - see page.js's own routing doc - so they need to
+ * read as clearly lower-emphasis without a whole second button style:
+ * same shape and touch target as .dial-button, dimmer colour. */
 .dial-button--secondary {
   color: var(--modem-white-dim);
   border-color: var(--modem-white-dim);
