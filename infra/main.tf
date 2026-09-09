@@ -77,3 +77,55 @@ resource "cloudflare_record" "modem" {
   ttl     = 1
   comment = "modem.dbhq.uk (Cloudflare Pages, project: modem)"
 }
+
+# ---------------------------------------------------------------------------
+# The code must revalidate, and only the zone can say so.
+#
+# Cloudflare Pages serves .js and .css with its own
+# `public, max-age=14400, must-revalidate` - four hours in the *browser*
+# cache - and `web/_headers` cannot override it. That was measured on the
+# live site in three shapes: `/*.js` and `/*.css` blocks (Pages' _headers
+# wildcard is a path splat, not a glob, so a suffix pattern matches
+# nothing), a `/*` block, and every file named outright. Only the HTML
+# routes ever changed. Pages sets the header on static assets after
+# _headers is applied and wins.
+#
+# Nothing in web/ carries a content hash in its filename, so four hours
+# means a returning visitor runs today's HTML against yesterday's
+# JavaScript, and the deploy's edge purge cannot help - it clears
+# Cloudflare's copy, not the one on the visitor's disk. On 9 Sep 2026 the
+# fix for a `modem.wasm` 404 was live, correct at the origin and still
+# invisible in the browser for exactly this reason, which cost most of an
+# afternoon: the deployed bytes and the running bytes were different
+# things and every check of the former said the site was fine.
+#
+# A response-header transform runs at the zone, after Pages, so it is the
+# one place that can actually set this. `no-cache` means "store it, but
+# revalidate before reuse" - the ordinary response becomes a 304 with no
+# body, and the ETags already exist.
+#
+# The better answer is hashed filenames plus `immutable`, which wants a
+# build step this site's plain JS does not have. If one ever arrives,
+# delete this rule rather than leaving both.
+resource "cloudflare_ruleset" "modem_code_revalidates" {
+  zone_id     = var.zone_id
+  name        = "modem.dbhq.uk - code revalidates"
+  description = "Pages caches .js/.css for 4h and _headers cannot override it; the code carries no content hash, so it must revalidate."
+  kind        = "zone"
+  phase       = "http_response_headers_transform"
+
+  rules {
+    action      = "rewrite"
+    description = "no-cache on modem.dbhq.uk scripts and styles"
+    enabled     = true
+    expression  = "(http.host eq \"${var.hostname}\" and (http.request.uri.path.extension eq \"js\" or http.request.uri.path.extension eq \"css\"))"
+
+    action_parameters {
+      headers {
+        name      = "Cache-Control"
+        operation = "set"
+        value     = "no-cache"
+      }
+    }
+  }
+}
