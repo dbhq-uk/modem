@@ -29,11 +29,27 @@ import { appendTerminalLine } from './terminal-line.js';
 // cannot prevent that, but it turns "nothing happens" into a line of
 // text naming the file and the line, which is the difference between a
 // five-minute diagnosis and an afternoon of one.
-window.addEventListener('error', (e) => {
+function reportFatal(what) {
   const el = document.getElementById('demo-diagnostic') || document.getElementById('mic-diagnostic');
   if (!el || el.textContent) return;
-  el.textContent = `The demo could not start: ${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`;
+  el.textContent = `The demo could not start: ${what}`;
+  el.className = 'diagnostic diagnostic--warning';
   el.hidden = false;
+}
+
+window.addEventListener('error', (e) => {
+  reportFatal(`${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`);
+});
+
+// Rejections as well as throws. The three launcher buttons call
+// `startRoute(...)` without awaiting it - deliberately, since nothing
+// after the call needs the result - so anything that rejects inside it
+// and is not caught there would otherwise go nowhere at all: no console
+// entry a visitor sees, no message on the page, just a button that
+// appears to do nothing. `startDemo` does catch its own failures and
+// says so; this is the backstop for the ones that do not.
+window.addEventListener('unhandledrejection', (e) => {
+  reportFatal(e.reason?.message || String(e.reason));
 });
 
 // The single fix most likely to matter on iOS - see audio-diagnostics.js's

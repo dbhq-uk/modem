@@ -76,9 +76,20 @@ export class ModemEndpoint extends EventTarget {
    * page can dial without ever prompting for one (Task 3's staged
    * design).
    *
+   * Both default URLs resolve against **this module's own URL**, never
+   * the document's - see `wired.js`'s matching note for the 404 that
+   * shipped when they were bare relative strings and the launcher's
+   * `history.pushState(null, '', '/originate/')` moved the document out
+   * from under them.
+   *
    * @param {{wasmUrl?: string, workletUrl?: string, role?: number, duplex?: number}} opts
    */
-  async init({ wasmUrl = 'modem.wasm', workletUrl = 'worklet.js', role = Role.ORIGINATE, duplex = Duplex.HALF_PING_PONG } = {}) {
+  async init({
+    wasmUrl = new URL('modem.wasm', import.meta.url).href,
+    workletUrl = new URL('worklet.js', import.meta.url).href,
+    role = Role.ORIGINATE,
+    duplex = Duplex.HALF_PING_PONG,
+  } = {}) {
     // spike/README.md finding 2: plain HTTP gives ctx.audioWorklet ===
     // undefined and a bare TypeError out of addModule. Check first and
     // say why, rather than let that unexplained TypeError surface.

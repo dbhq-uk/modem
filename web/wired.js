@@ -57,9 +57,29 @@ export class WiredEndpoint extends EventTarget {
    * prompt - the two ends never touch a real input device, only each
    * other.
    *
+   * The two default URLs are resolved against **this module's own URL**,
+   * not the document's. That distinction is the whole bug fixed on
+   * 9 Sep 2026: they used to be the bare strings `'modem.wasm'` and
+   * `'wired-worklet.js'`, which a `fetch` resolves against the current
+   * document URL - and `page.js`'s Demo button calls
+   * `history.pushState(null, '', '/demo/')` *before* calling this. So
+   * from the landing page the fetch went to `/demo/modem.wasm` and 404ed,
+   * while a direct link to `/demo/` worked, because the deploy injects
+   * `<base href="/">` into the route directories and that put the
+   * relative URL back at the root. Two paths to the same screen, one
+   * working and one not, with nothing on the page to say why.
+   *
+   * `import.meta.url` cannot be moved by `pushState`, a `<base>` tag, or
+   * which route the visitor came in on. The modules and the assets ship
+   * side by side, so this is always the right answer.
+   *
    * @param {{wasmUrl?: string, workletUrl?: string, duplex?: number}} opts
    */
-  async init({ wasmUrl = 'modem.wasm', workletUrl = 'wired-worklet.js', duplex = Duplex.HALF_PING_PONG } = {}) {
+  async init({
+    wasmUrl = new URL('modem.wasm', import.meta.url).href,
+    workletUrl = new URL('wired-worklet.js', import.meta.url).href,
+    duplex = Duplex.HALF_PING_PONG,
+  } = {}) {
     // spike/README.md finding 2: plain HTTP gives ctx.audioWorklet ===
     // undefined and a bare TypeError out of addModule.
     if (!window.isSecureContext) {
