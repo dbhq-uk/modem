@@ -23,8 +23,19 @@ jobs:
         # means an outage at dl.google.com cannot fail our build.
         run: |
           set -euo pipefail
-          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
-          sudo apt-get update
+          # Best effort: the runner image ships third-party apt sources
+          # (Google Chrome) this project has no use for, under a filename
+          # that has changed between image versions - so glob rather than
+          # name one.
+          sudo rm -f /etc/apt/sources.list.d/*google* || true
+          # `apt-get update` exits non-zero if ANY configured index is
+          # briefly inconsistent, even when every index we actually need
+          # downloaded fine ("old ones used instead"). That failed this
+          # build three times in a row today on a commit touching one CSS
+          # file. The install below is the real gate: if a package cannot
+          # be found the step still fails, which is the condition worth
+          # failing on.
+          sudo apt-get update || true
           sudo apt-get install -y minimodem libasound2-dev
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
@@ -187,8 +198,19 @@ jobs:
         # source is removed before updating.
         run: |
           set -euo pipefail
-          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
-          sudo apt-get update
+          # Best effort: the runner image ships third-party apt sources
+          # (Google Chrome) this project has no use for, under a filename
+          # that has changed between image versions - so glob rather than
+          # name one.
+          sudo rm -f /etc/apt/sources.list.d/*google* || true
+          # `apt-get update` exits non-zero if ANY configured index is
+          # briefly inconsistent, even when every index we actually need
+          # downloaded fine ("old ones used instead"). That failed this
+          # build three times in a row today on a commit touching one CSS
+          # file. The install below is the real gate: if a package cannot
+          # be found the step still fails, which is the condition worth
+          # failing on.
+          sudo apt-get update || true
           sudo apt-get install -y librsvg2-bin imagemagick libasound2-dev
       # Every generator, discovered rather than listed - a new one added
       # to brand/_gen/ or web/_gen/ is covered the moment it lands,
