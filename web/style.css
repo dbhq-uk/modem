@@ -521,6 +521,61 @@ section {
 }
 
 /* ---------------------------------------------------------------------
+ * sound-help - the diagnostics disclosure. A native <details> rather
+ * than a JS-toggled div: it opens and closes with no script at all, so
+ * a visitor can reach it even if page.js has failed before this point -
+ * exactly the situation it exists to help with.
+ * ------------------------------------------------------------------- */
+.sound-help {
+  border: 1px solid var(--modem-white-dim);
+  margin-top: var(--modem-space-sm);
+  padding: var(--modem-space-xs) var(--modem-space-sm);
+}
+
+.sound-help summary {
+  cursor: pointer;
+  color: var(--modem-green-bright);
+  padding: var(--modem-space-xs) 0;
+}
+
+.sound-help summary::marker {
+  color: var(--modem-green-dim);
+}
+
+.sound-help__body {
+  padding-top: var(--modem-space-xs);
+  border-top: 1px solid var(--modem-white-dim);
+}
+
+.sound-help__checkpoints {
+  list-style: none;
+  margin: var(--modem-space-sm) 0;
+  padding: 0;
+  font-size: var(--modem-type-scale-small);
+  color: var(--modem-white-bright);
+}
+
+.sound-help__checkpoints li {
+  padding: 2px 0;
+}
+
+.sound-help__state {
+  font-size: var(--modem-type-scale-small);
+  color: var(--modem-white-dim);
+  word-break: break-word;
+}
+
+.sound-help__report {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--modem-type-scale-small);
+  border: 1px solid var(--modem-white-dim);
+  padding: var(--modem-space-xs);
+  max-height: 16em;
+  overflow-y: auto;
+}
+
+/* ---------------------------------------------------------------------
  * The live endpoint panel (Task 2's real connection, wired up here)
  * ------------------------------------------------------------------- */
 .endpoint {

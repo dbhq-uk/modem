@@ -7,6 +7,21 @@
 import { instantiateModemModule, SessionHandle, Role, Duplex, SessionState, STAGE_NAMES } from './session.js';
 import { ModemEndpoint, summariseMicDiagnostics } from './modem.js';
 import { WiredEndpoint, decode as decodeWired } from './wired.js';
+import {
+  ensurePlaybackAudioSession,
+  attachSecurityPolicyListener,
+  cspViolations,
+  AudioDiagnostics,
+  computeRms,
+  waitForAudibleSignal,
+} from './audio-diagnostics.js';
+
+// The single fix most likely to matter on iOS - see audio-diagnostics.js's
+// own doc - set as early as the module can run, well before any click.
+// Harmless and idempotent to call this early: it only configures a
+// category, it does not play anything or need a gesture.
+ensurePlaybackAudioSession();
+attachSecurityPolicyListener();
 
 // ---------------------------------------------------------------------
 // The nine performed overture phases the explainer describes. Labels
@@ -47,6 +62,12 @@ const chatSendBtn = document.getElementById('chat-send');
 const chatLog = document.getElementById('chat-log');
 const canvas = document.getElementById('waterfall');
 const phaseListEl = document.getElementById('phase-list');
+
+const soundHelpCheckpoints = document.getElementById('sound-help-checkpoints');
+const soundHelpState = document.getElementById('sound-help-state');
+const resumeSoundBtn = document.getElementById('resume-sound-btn');
+const copyDiagnosticsBtn = document.getElementById('copy-diagnostics-btn');
+const copyDiagnosticsStatus = document.getElementById('copy-diagnostics-status');
 
 const wiredPanel = document.getElementById('wired-panel');
 const wiredPhase = document.getElementById('wired-phase');
@@ -194,6 +215,11 @@ function stopWiredWaterfall() {
 // -----------------------------------------------------------------------
 let audioCtx = null;
 let prerenderPromise = null;
+// The overture's own diagnostics - lighter than wired.js/modem.js's
+// (there is no separate worklet fetch/module for it to check in on: the
+// prerender runs on the main thread), but state history and resume
+// errors are just as real here as anywhere else audio gets played.
+const overtureDiagnostics = new AudioDiagnostics('overture');
 
 // Safari (desktop and every iOS browser - Apple requires all of them to
 // run WebKit) still ships this prefixed on some versions.
@@ -204,9 +230,11 @@ function ensureAudioContext() {
     if (!AudioContextCtor) {
       throw new Error('this browser exposes no AudioContext (or webkitAudioContext) at all');
     }
+    ensurePlaybackAudioSession();
     audioCtx = new AudioContextCtor();
+    overtureDiagnostics.recordState(audioCtx);
   }
-  if (audioCtx.state === 'suspended') {
+  if (audioCtx.state === 'suspended' || audioCtx.state === 'interrupted') {
     // Fired synchronously here, on first use - see this function's own
     // callers, every one of which is the first statement evaluated in a
     // click handler, before any await. WebKit only unlocks a context
@@ -215,9 +243,27 @@ function ensureAudioContext() {
     // suspended forever with no error. Not awaited here on purpose - see
     // reportIfAudioSuspended, which checks back once a caller's own
     // async setup has finished.
-    audioCtx.resume().catch(() => {});
+    audioCtx.resume().catch((err) => {
+      overtureDiagnostics.resumeError = String(err && err.message ? err.message : err);
+      overtureDiagnostics.log(`resume() rejected: ${overtureDiagnostics.resumeError}`);
+    });
   }
   return audioCtx;
+}
+
+/**
+ * The currently relevant diagnostics + analyser + ctx for the Sound
+ * help panel - whichever audio path the visitor most recently touched.
+ * There is no single "the" audio context on this page (the overture,
+ * the wired demo and the two-device endpoint can each exist
+ * independently), so the panel always reflects the last one used rather
+ * than trying to merge three into one report.
+ */
+let activeAudioSource = null; // { label, ctx, analyser, diagnostics }
+
+function setActiveAudioSource(label, ctx, analyser, diagnostics) {
+  activeAudioSource = { label, ctx, analyser, diagnostics };
+  renderSoundHelp();
 }
 
 /**
@@ -225,16 +271,163 @@ function ensureAudioContext() {
  * them looking at a demo that is visibly running but silent. Call once a
  * demo's own async setup has settled, so `ctx.state` reflects the real
  * outcome of the resume() call above rather than its still-pending
- * promise.
+ * promise. Also covers WebKit's `interrupted` state - see wired.js's own
+ * doc on https://bugs.webkit.org/show_bug.cgi?id=273511.
+ *
+ * This only catches the case `ctx.state` can actually see. A context
+ * that is `running` and genuinely producing no sound - the ambient
+ * session category respecting the iOS silent switch - reports nothing
+ * here by design; see `checkAudibleOrWarn` below for the check that
+ * covers that gap instead.
  */
 function reportIfAudioSuspended(ctx) {
-  if (ctx && ctx.state === 'suspended') {
-    micDiagnostic.textContent = 'Audio has not started for this tab yet - if this stays silent, check the device is not muted (the iOS silent switch mutes web audio too) and try the button again.';
+  if (ctx && (ctx.state === 'suspended' || ctx.state === 'interrupted')) {
+    micDiagnostic.textContent = ctx.state === 'interrupted'
+      ? 'Audio was interrupted (another app or a call likely took the audio session) - press the button again, or use Resume sound in Sound help below.'
+      : 'Audio has not started for this tab yet - if this stays silent, check the device is not muted (the iOS silent switch mutes web audio too) and try the button again.';
     micDiagnostic.className = 'diagnostic diagnostic--warning';
     return true;
   }
   return false;
 }
+
+/**
+ * The other half of the fix: a context can stay `running` throughout
+ * and still never produce audible output on iOS (WebKit's ambient
+ * session category respects the silent switch - see
+ * audio-diagnostics.js). `ensurePlaybackAudioSession` is the real fix
+ * for that; this is the honesty check on top of it, actually measuring
+ * output via the analyser rather than trusting `ctx.state` alone, which
+ * is exactly the case the old suspended-only warning always missed.
+ */
+async function checkAudibleOrWarn(ctx, analyser, diagnostics) {
+  const heard = await waitForAudibleSignal(ctx, analyser);
+  diagnostics.recordState(ctx);
+  if (heard) {
+    diagnostics.mark('rmsNonZero');
+    renderSoundHelp();
+    return true;
+  }
+  if (ctx && (ctx.state === 'suspended' || ctx.state === 'interrupted')) {
+    // Already reported by reportIfAudioSuspended - nothing new to add.
+    renderSoundHelp();
+    return false;
+  }
+  micDiagnostic.textContent = 'Audio is running but no sound has been detected - check the mute switch and volume, then try Resume sound in Sound help below.';
+  micDiagnostic.className = 'diagnostic diagnostic--warning';
+  renderSoundHelp();
+  return false;
+}
+
+// -----------------------------------------------------------------------
+// Sound help - a visitor on an iPhone is the only person who can ever
+// see whether this actually worked, and Dan is the only person who can
+// test on one. This panel exists so the page can tell him what it knows
+// rather than presenting a silent demo with nothing to go on.
+// -----------------------------------------------------------------------
+const CHECKPOINT_LABELS = {
+  fetched: 'WASM fetched',
+  moduleAdded: 'Worklet module loaded',
+  wasmReady: 'WASM instantiated and ready',
+  currentTimeAdvancing: 'Audio clock advancing',
+  rmsNonZero: 'Output signal detected',
+};
+
+function renderSoundHelp() {
+  soundHelpCheckpoints.innerHTML = '';
+  if (!activeAudioSource) {
+    const li = document.createElement('li');
+    li.textContent = 'Nothing has tried to play audio yet - press Dial, Play the whole overture, or Enable microphone.';
+    soundHelpCheckpoints.appendChild(li);
+    soundHelpState.textContent = '';
+    return;
+  }
+  const { label, ctx, analyser, diagnostics } = activeAudioSource;
+  diagnostics.recordState(ctx);
+  if (ctx && ctx.state === 'running' && analyser) {
+    diagnostics.checkpoints.currentTimeAdvancing = ctx.currentTime > 0;
+  }
+
+  for (const [key, text] of Object.entries(CHECKPOINT_LABELS)) {
+    const li = document.createElement('li');
+    const done = diagnostics.checkpoints[key];
+    li.textContent = `${done ? '[x]' : '[ ]'} ${text}`;
+    soundHelpCheckpoints.appendChild(li);
+  }
+
+  const rms = analyser ? computeRms(analyser) : null;
+  const stateLine = `${label}: context ${ctx ? ctx.state : 'not created'}${rms !== null ? `, output RMS ${rms.toFixed(4)}` : ''}${diagnostics.resumeError ? `, last resume() error: ${diagnostics.resumeError}` : ''}`;
+  soundHelpState.textContent = stateLine;
+}
+
+resumeSoundBtn.addEventListener('click', () => {
+  // A real click, unlike visibilitychange (see wired.js/modem.js's own
+  // doc on why that alone is not a guaranteed user-activation signal for
+  // WebKit's resume rules). Resumes everything that currently exists,
+  // regardless of the state each thinks it is in - harmless to call
+  // resume() on a context that is already running, and this button
+  // exists specifically for the case where the automatic path did not
+  // work and only a real gesture will.
+  ensurePlaybackAudioSession();
+  if (audioCtx) {
+    audioCtx.resume().catch((err) => {
+      overtureDiagnostics.resumeError = String(err && err.message ? err.message : err);
+    });
+  }
+  if (wired && wired.ctx) {
+    wired.ctx.resume().catch((err) => {
+      wired.diagnostics.resumeError = String(err && err.message ? err.message : err);
+    });
+  }
+  if (endpoint && endpoint.ctx) {
+    endpoint.ctx.resume().catch((err) => {
+      endpoint.diagnostics.resumeError = String(err && err.message ? err.message : err);
+    });
+  }
+  renderSoundHelp();
+});
+
+copyDiagnosticsBtn.addEventListener('click', async () => {
+  const lines = [
+    `modem.dbhq.uk diagnostics`,
+    `captured: ${new Date().toISOString()}`,
+    `page last-modified: ${document.lastModified}`,
+    `user agent: ${navigator.userAgent}`,
+    `secure context: ${window.isSecureContext}`,
+    `audioSession: ${'audioSession' in navigator ? (navigator.audioSession.type || '(no type set)') : 'not exposed by this browser'}`,
+  ];
+  if (activeAudioSource) {
+    const { label, ctx, analyser, diagnostics } = activeAudioSource;
+    diagnostics.recordState(ctx);
+    lines.push('', `active source: ${label}`, `context state: ${ctx ? ctx.state : 'none'}`, `currentTime: ${ctx ? ctx.currentTime.toFixed(3) : 'n/a'}`);
+    if (analyser) lines.push(`output RMS: ${computeRms(analyser).toFixed(5)}`);
+    lines.push(`checkpoints: ${JSON.stringify(diagnostics.checkpoints)}`);
+    lines.push(`state history: ${diagnostics.stateHistory.map((s) => `${s.t}ms:${s.state}`).join(' -> ')}`);
+    if (diagnostics.resumeError) lines.push(`last resume() error: ${diagnostics.resumeError}`);
+    lines.push('events:', ...diagnostics.events.map((e) => `  ${e.t}ms  ${e.text}`));
+  } else {
+    lines.push('', 'no audio path has been used yet this session');
+  }
+  lines.push('', `CSP violations: ${cspViolations.length}`);
+  for (const v of cspViolations) {
+    lines.push(`  ${v.directive} blocked ${v.blockedURI} (${v.sourceFile}:${v.lineNumber})`);
+  }
+
+  const report = lines.join('\n');
+  try {
+    await navigator.clipboard.writeText(report);
+    copyDiagnosticsStatus.textContent = 'Copied to clipboard.';
+  } catch (err) {
+    console.error('clipboard write failed', err);
+    copyDiagnosticsStatus.textContent = 'Could not copy automatically - select and copy the text below.';
+    const existing = copyDiagnosticsStatus.parentElement.querySelector('.sound-help__report');
+    if (existing) existing.remove();
+    const pre = document.createElement('pre');
+    pre.className = 'sound-help__report';
+    pre.textContent = report;
+    copyDiagnosticsStatus.after(pre);
+  }
+});
 
 // iOS suspends every AudioContext when the page is backgrounded, and
 // does not resume it automatically when the visitor comes back - left
@@ -242,12 +435,19 @@ function reportIfAudioSuspended(ctx) {
 // gone silent. Re-resume whatever is currently live the moment the page
 // is visible again, from inside the same visibilitychange handler that
 // fires the moment a person switches back to the tab (itself a strong
-// enough activation signal for WebKit's own resume rules).
+// enough activation signal for WebKit's own resume rules, though not
+// guaranteed - see the Resume sound button above for the explicit
+// fallback). Also covers `interrupted`, not only `suspended`.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  if (audioCtx && (audioCtx.state === 'suspended' || audioCtx.state === 'interrupted')) {
+    audioCtx.resume().catch((err) => {
+      overtureDiagnostics.resumeError = String(err && err.message ? err.message : err);
+    });
+  }
   if (wired) wired.resumeIfSuspended();
   if (endpoint) endpoint.resumeIfSuspended();
+  renderSoundHelp();
 });
 
 async function prerenderOverture(ctx) {
@@ -412,6 +612,7 @@ async function playFullOverture() {
 
   const rendered = await ensurePrerendered();
   reportIfAudioSuspended(audioCtx);
+  setActiveAudioSource('overture', audioCtx, null, overtureDiagnostics);
   appendTerminalLine(terminalOutput, 'ATDT01234567890', { command: true });
 
   clearScheduledAnnotations();
@@ -585,6 +786,7 @@ micEnableBtn.addEventListener('click', async () => {
     micDiagnostic.textContent = summary;
     micDiagnostic.className = diagnostics.warnings.length > 0 ? 'diagnostic diagnostic--warning' : 'diagnostic';
     reportIfAudioSuspended(endpoint.ctx);
+    setActiveAudioSource('two-device endpoint', endpoint.ctx, endpoint.analyser, endpoint.diagnostics);
 
     micIntro.hidden = true;
     endpointPanel.hidden = false;
@@ -630,6 +832,10 @@ endpointStopBtn.addEventListener('click', async () => {
   micDiagnostic.textContent = 'Microphone disconnected';
   micDiagnostic.className = 'diagnostic';
   twoDeviceBtn.disabled = false;
+  if (activeAudioSource && activeAudioSource.label === 'two-device endpoint') {
+    activeAudioSource = null;
+    renderSoundHelp();
+  }
 });
 
 chatSendBtn.addEventListener('click', () => {
@@ -720,6 +926,7 @@ dialBtn.addEventListener('click', async () => {
     wired = new WiredEndpoint();
     await wired.init({ duplex: Duplex.HALF_PING_PONG });
     reportIfAudioSuspended(wired.ctx);
+    setActiveAudioSource('one-device demo', wired.ctx, wired.analyser, wired.diagnostics);
 
     wired.addEventListener('status', (e) => {
       const { a, b } = e.detail;
@@ -750,6 +957,11 @@ dialBtn.addEventListener('click', async () => {
     // is that pressing it once is the entire demo, not the first of
     // several steps.
     dialWired();
+    // Not awaited - this is a background honesty check (see
+    // checkAudibleOrWarn's own doc), not something the dial flow itself
+    // should wait on. Dial tone starts within one render quantum of
+    // dialWired() above, so 1.5s is generous rather than tight.
+    checkAudibleOrWarn(wired.ctx, wired.analyser, wired.diagnostics);
   } catch (err) {
     console.error(err);
     micDiagnostic.textContent = `Could not start the demo: ${err.message || err}`;
@@ -787,6 +999,10 @@ wiredStopBtn.addEventListener('click', async () => {
   wiredPhase.textContent = 'IDLE - press ATDT to dial';
   updateWiredComposerEnablement();
   dialBtn.disabled = false;
+  if (activeAudioSource && activeAudioSource.label === 'one-device demo') {
+    activeAudioSource = null;
+    renderSoundHelp();
+  }
 });
 
 wiredSendBtn.addEventListener('click', () => {
@@ -810,3 +1026,8 @@ window.addEventListener('beforeunload', () => {
   if (endpoint) endpoint.stop();
   if (wired) wired.stop();
 });
+
+// Populates the "nothing tried yet" state rather than leaving the panel
+// empty until the first click - a visitor who opens Sound help before
+// pressing anything should see that reflected accurately, not a blank list.
+renderSoundHelp();

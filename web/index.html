@@ -72,6 +72,26 @@
 
       <noscript><p>The demo needs JavaScript. Everything else on this page reads fine without it.</p></noscript>
 
+      <!-- Dan is the only person who can test this page on an iPhone, and
+           he cannot attach a debugger to it - this panel is the page's
+           own report of what its audio pipeline has actually done, so a
+           silent demo has something more useful to say than "it didn't
+           work". Closed by default (a native <details>, no JS needed to
+           toggle it), populated and kept live by page.js. -->
+      <details class="sound-help" id="sound-help">
+        <summary>Sound help</summary>
+        <div class="sound-help__body">
+          <p>If Dial looks like it is running but nothing plays: check the mute switch and the volume, then try Resume sound below. This tracks what the audio pipeline has actually done, not just whether a button responded.</p>
+          <ul class="sound-help__checkpoints" id="sound-help-checkpoints"></ul>
+          <p class="sound-help__state" id="sound-help-state" role="status"></p>
+          <div class="demo__controls">
+            <button type="button" class="dial-button dial-button--secondary" id="resume-sound-btn">Resume sound</button>
+            <button type="button" class="dial-button dial-button--secondary" id="copy-diagnostics-btn">Copy diagnostics</button>
+          </div>
+          <p class="diagnostic" id="copy-diagnostics-status" role="status"></p>
+        </div>
+      </details>
+
       <div class="endpoint wired" id="wired-panel" hidden aria-labelledby="wired-heading">
         <h3 class="scenario__label" id="wired-heading">One device - both ends live, right here</h3>
         <p>Two real sessions, cross-wired in software exactly as the binary's own split-screen demo wires them - the link never crosses the air, so this is genuinely <span class="mode-badge">DEMO MODE</span>, the same honesty the terminal app's own status bar carries. Answer picked up and originate dialled automatically the moment you pressed Dial; redial with different digits below, or hang up and stop whenever you like.</p>

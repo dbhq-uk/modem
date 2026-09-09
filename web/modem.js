@@ -6,8 +6,11 @@
 // lives in worklet.js. See spike/README.md for why that split exists at
 // all.
 import { Duplex, Role, SessionState, STAGE_NAMES } from './session.js';
+import { ensurePlaybackAudioSession, withTimeout, AudioDiagnostics } from './audio-diagnostics.js';
 
 export { Duplex, Role, SessionState, STAGE_NAMES };
+
+const RESUME_TIMEOUT_MS = 4000;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -58,6 +61,12 @@ export class ModemEndpoint extends EventTarget {
     this.micStream = null;
     this._resolveReady = null;
     this._rejectReady = null;
+    // Exposed for page.js's Sound help panel - see audio-diagnostics.js.
+    // No analyser tap existed on this endpoint before (wired.js had one
+    // for its own waterfall) - added below so an RMS check is possible
+    // here too, not just on the one-device demo.
+    this.analyser = null;
+    this.diagnostics = new AudioDiagnostics('modem');
   }
 
   /**
@@ -84,15 +93,25 @@ export class ModemEndpoint extends EventTarget {
     if (!AudioContextCtor) {
       throw new Error('this browser exposes no AudioContext (or webkitAudioContext) at all');
     }
+    // WebKit's ambient-vs-playback session category - see
+    // audio-diagnostics.js's own doc and wired.js's identical call.
+    const sessionResult = ensurePlaybackAudioSession();
+    if (!sessionResult.ok) this.diagnostics.log(`audioSession not set to 'playback': ${sessionResult.reason}`);
     const ctx = new AudioContextCtor();
+    this.diagnostics.recordState(ctx);
     // Must happen here - the very first statement after construction,
     // still synchronous, before this function's first `await` - or the
     // user gesture that led to this call is spent. See wired.js's
     // identical doc on this same call for the full reasoning: this is
     // the call that was missing altogether before, on both live
     // endpoints, which is why they stayed silently dead on WebKit while
-    // passing every test run against desktop Chrome.
-    const resumePromise = ctx.resume().catch(() => {});
+    // passing every test run against desktop Chrome. The raw promise is
+    // captured (not swallowed) so a rejection reason survives, and
+    // awaited with a deadline near the end of `init` - see wired.js.
+    const resumePromise = ctx.resume().catch((err) => {
+      this.diagnostics.resumeError = String(err && err.message ? err.message : err);
+      this.diagnostics.log(`resume() rejected: ${this.diagnostics.resumeError}`);
+    });
     if (!ctx.audioWorklet) {
       throw new Error('this browser exposes no audioWorklet API even in a secure context');
     }
@@ -105,14 +124,21 @@ export class ModemEndpoint extends EventTarget {
       throw new Error(`could not fetch ${wasmUrl}: ${response.status} ${response.statusText}`);
     }
     const wasmBytes = await response.arrayBuffer();
+    this.diagnostics.mark('fetched');
 
     await ctx.audioWorklet.addModule(workletUrl);
+    this.diagnostics.mark('moduleAdded');
     const node = new AudioWorkletNode(ctx, 'modem-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
       outputChannelCount: [1],
     });
     node.port.onmessage = (e) => this._handleWorkletMessage(e.data);
+    // See wired.js's identical listener: neither live endpoint listened
+    // for this at all before, so a processor throwing inside process()
+    // (as opposed to message handling, which already has a try/catch)
+    // vanished with no signal anywhere.
+    node.addEventListener('processorerror', (event) => this.diagnostics.onProcessorError(event));
 
     this.ctx = ctx;
     this.node = node;
@@ -127,29 +153,45 @@ export class ModemEndpoint extends EventTarget {
     // thread again.
     node.port.postMessage({ type: 'wasm', bytes: wasmBytes, role, duplex }, [wasmBytes]);
     await ready;
+    this.diagnostics.mark('wasmReady');
 
     // Always connected: an idle or dialling session transmits silence
     // or the performed overture, never anything unexpected, so nothing
-    // is gained by deferring this until later.
-    node.connect(ctx.destination);
+    // is gained by deferring this until later. Routed through an
+    // AnalyserNode - see wired.js's identical tap - so a caller (the
+    // Sound help panel) can measure real output RMS rather than trust
+    // `ctx.state` alone.
+    this.analyser = ctx.createAnalyser();
+    this.analyser.fftSize = 2048;
+    node.connect(this.analyser);
+    this.analyser.connect(ctx.destination);
 
-    // See wired.js's identical await on its own resumePromise: this is
-    // where a caller can find out whether the resume() above actually
-    // took hold, via `this.ctx.state`, rather than staying silent about
-    // a context that never started.
-    await resumePromise;
+    // See wired.js's identical await: this is where a caller finds out
+    // whether the resume() above actually took hold, via `ctx.state`,
+    // raced against a deadline rather than awaited bare so this cannot
+    // hang init() forever.
+    await withTimeout(resumePromise, RESUME_TIMEOUT_MS, `ctx.resume() did not settle within ${RESUME_TIMEOUT_MS}ms`).catch((err) => {
+      this.diagnostics.log(String(err));
+    });
+    this.diagnostics.recordState(ctx);
   }
 
   /**
    * Re-resumes the context if the page backgrounding suspended it - see
    * spike/README.md finding 5's own point about not leaving a live call
    * running unattended, and iOS's habit of suspending on backgrounding.
-   * A no-op if the context is already running or never got this far.
+   * Also covers WebKit's own `interrupted` state - see wired.js's
+   * identical method for the full reasoning. A no-op if the context is
+   * already running or never got this far.
    */
   resumeIfSuspended() {
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
+    if (this.ctx && (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted')) {
+      this.ctx.resume().catch((err) => {
+        this.diagnostics.resumeError = String(err && err.message ? err.message : err);
+        this.diagnostics.log(`resume() rejected (resumeIfSuspended): ${this.diagnostics.resumeError}`);
+      });
     }
+    this.diagnostics.recordState(this.ctx);
   }
 
   _handleWorkletMessage(msg) {

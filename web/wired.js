@@ -10,8 +10,11 @@
 // everything that has to run on the audio rendering thread lives in
 // wired-worklet.js.
 import { Duplex, Role, SessionState, STAGE_NAMES } from './session.js';
+import { ensurePlaybackAudioSession, withTimeout, AudioDiagnostics } from './audio-diagnostics.js';
 
 export { Duplex, Role, SessionState, STAGE_NAMES };
+
+const RESUME_TIMEOUT_MS = 4000;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -44,6 +47,8 @@ export class WiredEndpoint extends EventTarget {
     this.analyser = null;
     this._resolveReady = null;
     this._rejectReady = null;
+    // Exposed for page.js's Sound help panel - see audio-diagnostics.js.
+    this.diagnostics = new AudioDiagnostics('wired');
   }
 
   /**
@@ -68,19 +73,32 @@ export class WiredEndpoint extends EventTarget {
     if (!AudioContextCtor) {
       throw new Error('this browser exposes no AudioContext (or webkitAudioContext) at all');
     }
+    // WebKit's ambient-vs-playback session category (see
+    // audio-diagnostics.js's own doc) - set before the context is even
+    // constructed, since it configures the page's audio session as a
+    // whole rather than anything owned by this one context.
+    const sessionResult = ensurePlaybackAudioSession();
+    if (!sessionResult.ok) this.diagnostics.log(`audioSession not set to 'playback': ${sessionResult.reason}`);
     const ctx = new AudioContextCtor();
+    this.diagnostics.recordState(ctx);
     // Must happen here - the very first statement after construction,
     // still synchronous, before this function's first `await` - or the
     // user gesture that led to this call is spent. Desktop Chrome
     // auto-runs a context created inside a gesture even without this
     // call, which is exactly why the one-device demo passed testing on
     // it while staying silently dead on WebKit: no resume() call was
-    // ever made at all. The promise is not awaited here on purpose -
-    // only the call itself needs to land inside the gesture. `init`
-    // awaits it near the end instead, once the rest of setup is done, so
-    // a caller can read back whether it actually took hold (see the
-    // `await resumePromise` below and page.js's own use of `ctx.state`).
-    const resumePromise = ctx.resume().catch(() => {});
+    // ever made at all. The call itself is not awaited here on purpose -
+    // only the call needs to land inside the gesture; the raw promise is
+    // captured so its rejection reason survives (previously swallowed by
+    // an unconditional `.catch(() => {})`) and awaited with a deadline
+    // near the end of `init`, once the rest of setup is done, so a
+    // caller can read back whether it actually took hold rather than
+    // waiting on a promise that might never settle at all (see
+    // https://bugs.webkit.org/show_bug.cgi?id=273511).
+    const resumePromise = ctx.resume().catch((err) => {
+      this.diagnostics.resumeError = String(err && err.message ? err.message : err);
+      this.diagnostics.log(`resume() rejected: ${this.diagnostics.resumeError}`);
+    });
     if (!ctx.audioWorklet) {
       throw new Error('this browser exposes no audioWorklet API even in a secure context');
     }
@@ -93,8 +111,10 @@ export class WiredEndpoint extends EventTarget {
       throw new Error(`could not fetch ${wasmUrl}: ${response.status} ${response.statusText}`);
     }
     const wasmBytes = await response.arrayBuffer();
+    this.diagnostics.mark('fetched');
 
     await ctx.audioWorklet.addModule(workletUrl);
+    this.diagnostics.mark('moduleAdded');
     // No input needed - the two Sessions are fed from each other, never
     // from a real device - so this node declares zero inputs.
     const node = new AudioWorkletNode(ctx, 'wired-processor', {
@@ -103,6 +123,11 @@ export class WiredEndpoint extends EventTarget {
       outputChannelCount: [1],
     });
     node.port.onmessage = (e) => this._handleWorkletMessage(e.data);
+    // Neither live endpoint listened for this at all before - a
+    // processor that throws inside process() (rather than during
+    // message handling, which already has its own try/catch) previously
+    // vanished with nothing on the port and nothing in the console.
+    node.addEventListener('processorerror', (event) => this.diagnostics.onProcessorError(event));
 
     this.ctx = ctx;
     this.node = node;
@@ -114,6 +139,7 @@ export class WiredEndpoint extends EventTarget {
     // Transferred, not copied - see modem.js's identical `init` for why.
     node.port.postMessage({ type: 'wasm', bytes: wasmBytes, duplex }, [wasmBytes]);
     await ready;
+    this.diagnostics.mark('wasmReady');
 
     // Always connected: an idle pair transmits silence, never anything
     // unexpected, so nothing is gained by deferring this. Routed through
@@ -131,21 +157,35 @@ export class WiredEndpoint extends EventTarget {
     // Now that the rest of setup is done, find out whether the resume()
     // fired above actually took hold - `ctx.state` is the only honest
     // answer; a resolved promise does not by itself mean 'running' (it
-    // also resolves if the context was already there). A caller (page.js)
-    // reads this back to tell a visitor rather than stay silent about it.
-    await resumePromise;
+    // also resolves if the context was already there). Raced against a
+    // deadline rather than awaited bare: a caller (page.js) previously
+    // had no way to ever find out if this hung, because nothing here
+    // would ever settle to tell it so - the state warning and the panel
+    // reveal both sat behind this same await.
+    await withTimeout(resumePromise, RESUME_TIMEOUT_MS, `ctx.resume() did not settle within ${RESUME_TIMEOUT_MS}ms`).catch((err) => {
+      this.diagnostics.log(String(err));
+    });
+    this.diagnostics.recordState(ctx);
   }
 
   /**
    * Re-resumes the context if the page backgrounding suspended it - see
    * spike/README.md finding 5's own point about not leaving a live call
    * running unattended, and iOS's habit of suspending on backgrounding.
-   * A no-op if the context is already running or never got this far.
+   * Also covers WebKit's own `interrupted` state (a phone call or
+   * another app taking the audio session - see
+   * https://bugs.webkit.org/show_bug.cgi?id=273511), which the
+   * `suspended`-only check here used to miss entirely. A no-op if the
+   * context is already running or never got this far.
    */
   resumeIfSuspended() {
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
+    if (this.ctx && (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted')) {
+      this.ctx.resume().catch((err) => {
+        this.diagnostics.resumeError = String(err && err.message ? err.message : err);
+        this.diagnostics.log(`resume() rejected (resumeIfSuspended): ${this.diagnostics.resumeError}`);
+      });
     }
+    this.diagnostics.recordState(this.ctx);
   }
 
   _handleWorkletMessage(msg) {
