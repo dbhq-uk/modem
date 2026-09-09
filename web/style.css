@@ -17,9 +17,10 @@
  * parallel instead. See index.html/links.html's own comment beside
  * their tokens.css <link>. */
 
-/* Two page-only constants - not brand/tokens.json values: that file is
-   for colour, type and CRT-effect values the TUI and the page must
-   agree on, and a browser container width has no terminal equivalent.
+/* Page-only constants - not brand/tokens.json values: that file is for
+   colour, type and CRT-effect values the TUI and the page must agree on,
+   and a browser container width (or a UI-chrome font stack the terminal
+   has no equivalent for) has no terminal side to agree with.
    --page-max-width is the outer shell (hero and main line up at every
    viewport instead of two hand-matched numbers drifting apart).
    --content-max-width is the page's own reading column: rem, not ch -
@@ -29,10 +30,30 @@
    size regardless of which element carries it. Wide artefacts (the
    terminal transcript and its waterfall, the generated terminal-window
    frames, the live wired/endpoint panels) keep --page-max-width's full
-   main instead - see the "Content column" rule below. */
+   main instead - see the "Content column" rule below.
+
+   --modem-type-face-ui is the primary nav's own font (Dan, 9 Sep 2026:
+   "a modern sans, not the monospace ... sets the chrome apart from the
+   machine" - the terminal frames, transcripts and phase names stay
+   monospace, character-cell content that the nav is not). Dan's
+   reference was Satoshi (Fontshare/Indian Type Foundry). Its ITF FFL
+   license page renders client-side and would not yield its actual text
+   to a headless fetch, and the secondary sources that describe it
+   flatly disagree with each other on whether self-hosting the font
+   files is permitted alongside Fontshare's own API - one says self-
+   hosting needs ITF's written consent, another lists it as a plain
+   licensed option. That is exactly the "terms not read" case the
+   standing rule exists for (do not ship a font whose terms you have not
+   read), so this falls back to a system sans stack rather than Satoshi
+   or a font CDN - a CDN would also need a new script/style origin in
+   web/_headers' CSP for a single nav label, which is not a trade worth
+   making. A system stack costs nothing, needs no CSP change (font-src
+   'self' already covers it, because nothing is fetched at all), and at
+   nav size reads close enough to a geometric grotesque like Satoshi. */
 :root {
   --page-max-width: 1320px;
   --content-max-width: 42rem;
+  --modem-type-face-ui: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 * {
@@ -84,14 +105,22 @@ body {
 }
 
 /* ---------------------------------------------------------------------
- * site-nav - the sticky primary nav: Try, Explained, and three same-page
- * anchors (Downloads, Projects, About) that resolve to a real section on
- * the home page - on /explained they jump back here instead. Placed
+ * site-nav - the sticky primary nav: six real pages (Try, Explained,
+ * Prior art, Downloads, Projects, About) as of task 3n, 9 Sep 2026 - no
+ * item is an anchor any more (see web/_gen/pages.py's own doc). Placed
  * ahead of .hero in the markup rather than overlaid on it: a nav painted
  * on top of a full-bleed hero would eat into the image it exists to
  * show, so this is a normal, non-overlapping block instead, sticky only
  * once its own top edge would otherwise scroll out of view - which, sat
  * at the very top of the page, is immediately.
+ *
+ * It is chrome, not page content, and reads that way on purpose: a
+ * quieter dim colour instead of the page's own bright phosphor green,
+ * a plain system sans instead of the monospace every character-cell
+ * surface uses, and a smaller size than any body text on the page (Dan,
+ * 9 Sep 2026 - "quiet, secondary, clearly not part of the page's own
+ * voice"). See --modem-type-face-ui's own comment, above, for why a
+ * system stack rather than Satoshi.
  *
  * --site-nav-height is fixed, not the box's own intrinsic height,
  * because every fragment target on the page needs to subtract the exact
@@ -109,13 +138,23 @@ body {
   z-index: 60;
   display: flex;
   align-items: center;
-  justify-content: center;
-  /* Tighter than the space-sm gap most rows on this page use - five
-     items plus four gaps at that spacing measured 7px over a 390px
-     viewport (verified directly with a real browser at 390 and 1440px);
-     space-xs closes that with room to spare. overflow-x: auto stays as
-     a defensive fallback regardless - see the media query below for the
-     actual collapse behaviour on anything narrower still. */
+  /* safe center, not plain center: once six items genuinely overflow a
+     narrow viewport, plain `center` is "unsafe" per the CSS Box
+     Alignment spec, and some engines resolve an overflowing unsafe
+     center to a start-anchored scroll position - visually
+     indistinguishable from left-aligned chrome, which is the exact
+     complaint this replaces (Dan, 9 Sep 2026: "not left-aligned against
+     the wordmark"). `safe` only ever falls back to start alignment once
+     centering would itself overflow, so this centers for real up to
+     the point six items stop fitting. */
+  justify-content: safe center;
+  /* Tighter than the space-sm gap most rows on this page use - measured
+     directly with a real browser at 390 and 1440px (see the design
+     spec's own "sticky nav behaviour"); space-xs leaves six items room
+     to spare at the smaller nav-only type scale below. overflow-x: auto
+     stays as a defensive fallback regardless, for anything narrower
+     still - a hamburger was explicitly rejected for a handful of links
+     (see the spec's "Out of scope"). */
   gap: var(--modem-space-xs);
   height: var(--site-nav-height);
   padding: 0 var(--modem-space-xs);
@@ -125,11 +164,12 @@ body {
 }
 
 .site-nav__link {
-  color: var(--modem-green-bright);
+  font-family: var(--modem-type-face-ui);
+  color: var(--modem-white-dim);
   text-decoration: none;
   white-space: nowrap;
-  font-size: var(--modem-type-scale-small);
-  letter-spacing: 0.02em;
+  font-size: 0.75rem;
+  letter-spacing: 0.01em;
   padding: 0 2px;
 }
 
@@ -140,34 +180,20 @@ body {
 
 /* The current page, not a hover state - a solid underline rather than
    reusing the hover/focus colour, so the two states never look the
-   same. */
+   same. Still the brand's own green, not the nav's resting dim - the
+   one moment the chrome is allowed to say which page you are actually
+   on. */
 .site-nav__link[aria-current="page"] {
   color: var(--modem-white-bright);
   border-bottom: 2px solid var(--modem-green-bright);
 }
 
-/* Five items fit a 390px phone at this type scale and this gap -
-   verified directly (see the design spec's own "sticky nav behaviour").
-   Kept as a defensive floor for anything narrower still: Try and
-   Explained (the two real pages) stay, the three same-page anchors
-   collapse - a hamburger was explicitly rejected for three links (see
-   the spec's "Out of scope"), so collapsing is the fallback, not a
-   drawer. */
-@media (max-width: 320px) {
-  .site-nav__link--anchor {
-    display: none;
-  }
-}
-
 /* Every fragment-navigation target on the site needs this, or the
    sticky nav above lands on top of it the moment the jump completes -
    see the design spec's own "sticky nav behaviour". #main covers the
-   skip link's own destination; the rest are the nav's own anchors and
-   (on explained.html) its contents list and each phase row. */
+   skip link's own destination; .section-anchor and .phase-row are
+   /explained's and /prior-art's own contents-list targets. */
 #main,
-#downloads,
-#about,
-#projects,
 .section-anchor,
 .phase-row {
   scroll-margin-top: var(--site-nav-height);
