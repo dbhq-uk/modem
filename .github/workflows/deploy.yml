@@ -67,7 +67,7 @@ jobs:
           # the demo is blocked at the edge. _redirects is what makes
           # /demo, /originate and /receive serve index.html while
           # keeping the URL - without it those three routes 404.
-          cp web/_headers web/_redirects web/manifest.json dist/web/
+          cp web/_headers web/_redirects web/manifest.json web/robots.txt web/sitemap.xml dist/web/
           cp brand/tokens.css brand/icon.svg brand/icon-*.png brand/favicon.ico dist/brand/
           cp brand/wordmark.svg dist/brand/ 2>/dev/null || true
           # The page is served at the root, not at /web/.
@@ -83,15 +83,35 @@ jobs:
           # copy of the one index.html with <base href="/"> injected, so its
           # relative assets still resolve from the root while
           # location.pathname stays /demo/, /originate/ or /receive/.
+          # Canonical and og:url also need to be per-route, not copied
+          # verbatim from index.html's own "/" - a route is real,
+          # separately-listed content (see web/sitemap.xml), and its
+          # canonical has to say so itself. Getting this wrong silently
+          # tells search engines every one of /demo, /originate and
+          # /receive is a duplicate of "/", which is the opposite of
+          # what listing them in the sitemap is for. Cloudflare Pages
+          # 308s the slash-less path to this one (each route is a real
+          # directory), so the trailing-slash form is the one and only
+          # canonical for each - see the SEO task's own note on why
+          # /demo and /demo/ must not both be canonical.
           python3 - <<'PY'
           from pathlib import Path
           src = Path('dist/index.html').read_text()
           assert '<base' not in src, 'index.html already has a <base>; rework this step'
           out = src.replace('<head>', '<head>\n<base href="/">', 1)
+          canonical = '<link rel="canonical" href="https://modem.dbhq.uk/">'
+          og_url = '<meta property="og:url" content="https://modem.dbhq.uk/">'
+          assert out.count(canonical) == 1, 'expected exactly one canonical link to rewrite per route'
+          assert out.count(og_url) == 1, 'expected exactly one og:url meta to rewrite per route'
           for route in ('demo', 'originate', 'receive'):
               d = Path('dist') / route
               d.mkdir(parents=True, exist_ok=True)
-              (d / 'index.html').write_text(out)
+              route_out = out.replace(
+                  canonical, f'<link rel="canonical" href="https://modem.dbhq.uk/{route}/">',
+              ).replace(
+                  og_url, f'<meta property="og:url" content="https://modem.dbhq.uk/{route}/">',
+              )
+              (d / 'index.html').write_text(route_out)
               print('wrote', d / 'index.html')
           PY
 
