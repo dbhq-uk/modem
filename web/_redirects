@@ -1,0 +1,10 @@
+# Rewrites, not redirects (status 200): the URL stays exactly where a
+# visitor put it, only the served bytes change. One application behind
+# all three routes - see page.js's own routing doc - so each of these
+# just serves the same index.html, which then reads location.pathname
+# itself to decide which of the three it is. spike/serve.py's own
+# RewritingHandler does the same thing for local preview, since this
+# file only has an effect on Cloudflare Pages.
+/demo       /index.html   200
+/originate  /index.html   200
+/receive    /index.html   200

@@ -176,6 +176,14 @@ export class SessionHandle {
     return this.exports.session_has_turn(this.ptr) !== 0;
   }
 
+  /** Hands the turn to the far end - see modem-wasm's own doc on why
+   * this export exists: under Duplex.HALF_PING_PONG, nothing the far
+   * end sends can ever reach the wire until this is called at least
+   * once from whichever end is currently holding the turn. */
+  yieldTurn() {
+    this.exports.session_yield_turn(this.ptr);
+  }
+
   carrierDetected() {
     return this.exports.session_carrier_detected(this.ptr) !== 0;
   }

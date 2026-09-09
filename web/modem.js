@@ -230,6 +230,13 @@ export class ModemEndpoint extends EventTarget {
     this.node.port.postMessage({ type: 'send', bytes: encode(text) });
   }
 
+  /** Hands the turn to the far end - see session.js's own doc on why
+   * this is the only way anything this end sends can ever reach the far
+   * end under half duplex once the far end needs to reply. */
+  yieldTurn() {
+    this.node.port.postMessage({ type: 'yieldTurn' });
+  }
+
   /**
    * Asks for the microphone with every processing feature turned off as
    * a required constraint, not a hint - `{exact: false}`, not a plain

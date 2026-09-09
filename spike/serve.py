@@ -38,6 +38,26 @@ def tailscale_hostname() -> str:
     return json.loads(out.stdout)["Self"]["DNSName"].rstrip(".")
 
 
+# The three routes web/_redirects rewrites to index.html on Cloudflare
+# Pages (a 200 rewrite, not a redirect - the URL stays put, only the
+# served bytes change). SimpleHTTPRequestHandler has no equivalent, so a
+# local `GET /demo` 404s unless this handler does the same rewrite
+# itself - and the whole point of page.js's routing is what happens on a
+# fresh load of exactly these paths, which is untestable locally without
+# it. Kept as a literal list, not derived from _redirects, since a
+# three-line file is not worth a parser: if _redirects ever grows a
+# fourth route, this needs the same line added by hand.
+REWRITE_TO_INDEX = {"/demo", "/originate", "/receive"}
+
+
+class RewritingHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        path = self.path.split("?", 1)[0].split("#", 1)[0]
+        if path in REWRITE_TO_INDEX:
+            self.path = "/index.html"
+        super().do_GET()
+
+
 def main() -> int:
     try:
         host = tailscale_hostname()
@@ -53,7 +73,7 @@ def main() -> int:
         print(f"run: sudo tailscale cert {host}", file=sys.stderr)
         return 1
 
-    handler = http.server.SimpleHTTPRequestHandler
+    handler = RewritingHandler
     httpd = http.server.ThreadingHTTPServer((HOST, PORT), handler)
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

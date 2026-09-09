@@ -296,6 +296,21 @@ pub unsafe extern "C" fn session_has_turn(ptr: *mut Session) -> u32 {
     (*ptr).has_turn() as u32
 }
 
+/// Hands the turn to the far end - see [`Session::yield_turn`]'s own
+/// doc. Never exposed over this ABI before Task 3i: without it, nothing
+/// in a browser page could ever move the turn from originate to answer
+/// under `Duplex::HalfPingPong`, so the answer side's own "Send" control
+/// queued real bytes that had no way to ever actually reach the wire -
+/// exactly the silent, one-directional failure the task brief warns a
+/// convincing-looking call can hide.
+///
+/// # Safety
+/// `ptr` must be a live `Session`.
+#[no_mangle]
+pub unsafe extern "C" fn session_yield_turn(ptr: *mut Session) {
+    (*ptr).yield_turn();
+}
+
 /// 1 if the receiver currently reports in-band energy above the noise
 /// floor, 0 otherwise.
 ///

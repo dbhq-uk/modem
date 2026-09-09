@@ -645,18 +645,6 @@ section {
 }
 
 /* ---------------------------------------------------------------------
- * mic-intro - what "Two devices" reveals before it asks for anything:
- * the second-machine requirement and one explicit "Enable microphone"
- * action, so the browser's own permission prompt is not the first thing
- * that happens with no explanation attached to it yet.
- * ------------------------------------------------------------------- */
-.mic-intro {
-  border: 1px solid var(--modem-green-dim);
-  padding: var(--modem-space-sm);
-  margin-top: var(--modem-space-sm);
-}
-
-/* ---------------------------------------------------------------------
  * wired - the live "one device" split-screen demo: two real Sessions,
  * cross-wired in software exactly as modem-audio's own WiredTransport
  * wires them (see modem-audio/src/transport.rs). Built on `.endpoint`'s
@@ -665,15 +653,20 @@ section {
  * (originate) and one green-dim (answer), the same pairing the
  * generated frames above already draw for the two bands.
  * ------------------------------------------------------------------- */
+/* Always stacked, above and below - on a desktop viewport too (Dan, 8
+ * Sep 2026: "it can be above and below for desktop as well"), not the
+ * side-by-side layout a wide `flex-wrap: wrap` row would otherwise
+ * settle into. Watching both ends at once is the point on every screen
+ * size, not only a phone's. */
 .wired__panels {
   display: flex;
+  flex-direction: column;
   gap: var(--modem-space-sm);
-  flex-wrap: wrap;
   margin: var(--modem-space-sm) 0;
 }
 
 .wired__panel {
-  flex: 1 1 320px;
+  flex: 1 1 auto;
   min-width: 0;
   border: 1px solid var(--modem-green-bright);
   padding: var(--modem-space-sm);
@@ -733,12 +726,16 @@ section {
 }
 
 /* ---------------------------------------------------------------------
- * app-mode - the full-viewport phone view of the wired demo (Dan, 8 Sep
- * 2026: "make the demo fill the phone screen on mobile nicely, almost
- * become an app"). Toggled by page.js: #app-mode-btn, or a shared link
- * landing on #demo while the viewport is phone-width. The panel itself
- * (`.wired`, `#wired-panel`) is what goes fixed/full-viewport - nothing
- * else on the page needs hiding, it is simply covered.
+ * app-mode - the full-viewport view every one of the three routes gets
+ * while live (Dan, 8 Sep 2026: "make the demo fill the phone screen on
+ * mobile nicely, almost become an app" - now applied on every viewport
+ * size, and to /originate and /receive's own live view too, not the
+ * wired demo only). Toggled by page.js's routing, not a button: whichever
+ * of `#wired-panel` or `#endpoint-panel` is the current route's own view
+ * goes fixed/full-viewport - nothing else on the page needs hiding, it
+ * is simply covered. Both share the `.endpoint` class, so the shell
+ * rules below target that; wired-specific sub-rules stay scoped to
+ * `.wired.app-mode`.
  *
  * `min-height: 0` on every flex child below matters more than it looks:
  * without it a flex item's default `min-height: auto` refuses to shrink
@@ -746,14 +743,6 @@ section {
  * controls off the bottom of the screen instead of scrolling internally
  * within the space actually available.
  * ------------------------------------------------------------------- */
-@media (min-width: 48.0625rem) {
-  /* The affordance only exists on phones - a desktop viewport already
-     shows both panels comfortably in the page's own flow. */
-  #app-mode-btn {
-    display: none;
-  }
-}
-
 .app-mode-back {
   display: none;
 }
@@ -762,7 +751,7 @@ body.app-mode {
   overflow: hidden;
 }
 
-.wired.app-mode {
+.endpoint.app-mode {
   position: fixed;
   inset: 0;
   z-index: 300;
@@ -791,11 +780,17 @@ body.app-mode {
   padding-right: calc(var(--modem-space-sm) + env(safe-area-inset-right, 0px));
 }
 
-.wired.app-mode .app-mode-back {
+.endpoint.app-mode .app-mode-back {
   display: inline-block;
   align-self: flex-start;
   flex-shrink: 0;
   margin-bottom: var(--modem-space-xs);
+}
+
+.endpoint.app-mode .scenario__label {
+  flex-shrink: 0;
+  font-size: var(--modem-type-scale-base);
+  margin: 0;
 }
 
 /* The long explanation is worth reading once, in the page's own flow -
@@ -803,12 +798,6 @@ body.app-mode {
    transcripts, which are the entire reason to be in this view. */
 .wired.app-mode .wired__intro {
   display: none;
-}
-
-.wired.app-mode .scenario__label {
-  flex-shrink: 0;
-  font-size: var(--modem-type-scale-base);
-  margin: 0;
 }
 
 .wired.app-mode .wired__phase {
@@ -891,6 +880,136 @@ body.app-mode {
 
 .wired.app-mode .wired__controls .endpoint__row {
   margin-bottom: var(--modem-space-xs);
+}
+
+/* /originate and /receive's own live view - the same fixed shell,
+ * flexing its own transcript to fill the space instead of the wired
+ * demo's two compact ones. */
+.endpoint.app-mode #endpoint-intro {
+  flex-shrink: 0;
+}
+
+.endpoint.app-mode #chat-log {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.endpoint.app-mode .endpoint__row {
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------------------
+ * route-start - the single button a direct link or a reload on /demo,
+ * /originate or /receive shows before anything plays or any permission
+ * is asked for (see page.js's own routing doc: arriving must never do
+ * either on its own). Same shape as the landing buttons, not a special
+ * treatment - it is the same kind of first action, just for one route
+ * instead of three.
+ * ------------------------------------------------------------------- */
+.route-start p {
+  width: 100%;
+  margin: 0 0 var(--modem-space-xs) 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Captions - a phase's plain-English gloss, always outside the modem
+ * transcript it sits beside (see page.js's own doc: real modem output
+ * and this page's own explanatory text must never be the same element).
+ * ------------------------------------------------------------------- */
+.wired__caption,
+.endpoint__caption {
+  font-size: var(--modem-type-scale-small);
+  color: var(--modem-white-dim);
+  min-height: 1.4em;
+  margin: 0 0 var(--modem-space-xs) 0;
+}
+
+/* ---------------------------------------------------------------------
+ * share-block - /originate's own way to get a second device onto
+ * /receive without typing anything: a QR code and a copyable link, side
+ * by side with the same "near each other" fact /receive states on its
+ * own account.
+ * ------------------------------------------------------------------- */
+.share-block {
+  border: 1px solid var(--modem-green-dim);
+  padding: var(--modem-space-sm);
+  margin: var(--modem-space-sm) 0;
+}
+
+.share-block__link {
+  display: flex;
+  gap: var(--modem-space-xs);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.share-block__link input[type="text"] {
+  flex: 1 1 16em;
+  min-width: 0;
+}
+
+/* The QR code itself: the vendored generator's own SVG, coloured to the
+ * brand tokens via CSS rather than by hand-editing its output (see
+ * qrcode-gen.js's own doc) - a presentation attribute like the
+ * library's `fill="black"` always loses to a stylesheet rule, no
+ * `!important` needed. Sized in rem, not the library's own px, so it
+ * scales with the rest of the page's type. */
+.qr-code {
+  display: inline-block;
+  max-width: 10rem;
+  background: var(--modem-ground);
+  padding: var(--modem-space-xs);
+  border: 1px solid var(--modem-white-dim);
+}
+
+.qr-code svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.qr-code svg rect {
+  fill: var(--modem-ground);
+}
+
+.qr-code svg path {
+  fill: var(--modem-green-bright);
+}
+
+/* ---------------------------------------------------------------------
+ * signal-indicators - microphone activity and modem signal detected are
+ * two separate, honestly distinct readings (see page.js's own doc: noise
+ * moving a meter is not evidence of a modem). Never merged into one.
+ * ------------------------------------------------------------------- */
+.signal-indicators {
+  display: flex;
+  gap: var(--modem-space-md);
+  flex-wrap: wrap;
+  margin: var(--modem-space-sm) 0;
+  font-size: var(--modem-type-scale-small);
+}
+
+.signal-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--modem-space-xs);
+  color: var(--modem-white-dim);
+  margin: 0;
+}
+
+.signal-indicator__dot {
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: var(--modem-white-dim);
+  box-shadow: none;
+}
+
+.signal-indicator__dot--active {
+  background: var(--modem-green-bright);
+  box-shadow: 0 0 var(--modem-bloom-radius) var(--modem-green-bright);
 }
 
 .mode-badge {
@@ -1141,6 +1260,15 @@ body.app-mode {
   margin-top: var(--modem-space-xs);
 }
 
+/* The sibling DBHQ experiments row - a second, visually quieter line
+ * under the project's own links, not merged into them: "GitHub / Links"
+ * is about this project, "DBHQ / BBS / heliograph" is cross-promotion,
+ * and keeping them apart is what keeps the second one from reading as
+ * more of this project's own material than it is. */
+.endorsement__siblings {
+  opacity: 0.8;
+}
+
 /* ---------------------------------------------------------------------
  * resource-row - one external link and the one sentence saying why it
  * is worth a visitor's time, on links.html. Same header-plus-
@@ -1216,30 +1344,6 @@ body.app-mode {
     display: flex;
     flex-direction: column;
     gap: var(--modem-space-sm);
-  }
-
-  /* The live wired demo: stacked, not side by side pressed down to an
-     unreadable column width. flex-basis: 320px on .wired__panel (see
-     above) is wider than a phone's own content width, so without this
-     the two panels would sit on one line, each squeezed far narrower
-     than 320px, rather than each getting the full width in turn. */
-  .wired__panels {
-    flex-direction: column;
-    /* flex-wrap: wrap (base rule, above) is for the row-direction desktop
-       layout - a genuine safety net if a panel could not shrink to fit
-       beside the other. In column direction, wrapping instead opens a
-       second *column* (side by side, not stacked) the moment the two
-       panels' combined natural height exceeds whatever height is
-       available - invisible in normal page flow (nothing caps the
-       height there) but very visible in app mode's fixed-height view,
-       where it silently overlapped the two panels instead of shrinking
-       them. Stacking, never a second column, is the only layout that
-       ever made sense here below this breakpoint. */
-    flex-wrap: nowrap;
-  }
-
-  .wired__panel {
-    flex-basis: auto;
   }
 
   /* Touch targets: 44px is the WCAG 2.2 / iOS minimum comfortable

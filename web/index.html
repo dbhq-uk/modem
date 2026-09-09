@@ -82,23 +82,36 @@
       <p>Fast data-over-sound tools such as minimodem already move bytes across a room quicker than this ever will, and that is not what this is for. They have no interest in the dial tone, the DTMF, the answer tone or the negotiation, because none of it makes them faster. This performs exactly the parts a fast tool has no reason to want.</p>
     </section>
 
-    <!-- id="demo" is the shared-link landing point for the full-viewport
-         phone view (see page.js and style.css's own "app-mode" doc): a
-         desktop browser just scrolls here as a normal anchor, a phone
-         gets the fixed full-viewport view instead. -->
+    <!-- id="demo" is the shared-link landing point (see page.js's own
+         routing doc): three routes live behind this one section -
+         /demo, /originate and /receive - and #demo on the plain root
+         path is kept working as a legacy alias for /demo. Which one of
+         #launcher / #route-start-block / #wired-panel / #endpoint-panel
+         is visible is entirely page.js's doing; every control inside
+         still no-ops safely before JS has run (see page.js's own
+         guards). -->
     <section class="demo" id="demo" aria-labelledby="demo-heading">
-      <h2 id="demo-heading">Dial</h2>
-      <p>Press Dial and two real sessions connect right here, cross-wired in software: dial tone, DTMF, ringback and the answer tone, then a real 300 baud connection, both transcripts filling in as it goes - all through your speakers. No microphone, no second machine.</p>
+      <h2 id="demo-heading">Try it</h2>
+      <p>Three ways in. Watch a full handshake and a real connection right here, nothing to set up. Or open this device as one real end of an acoustic call - dial from one, answer on the other, the sound genuinely crossing the room between them.</p>
 
-      <div class="demo__controls">
-        <button class="dial-button" id="dial-btn" type="button">Dial</button>
-        <button class="dial-button dial-button--secondary" id="two-device-btn" type="button">Two devices instead</button>
-        <!-- Phones only (see style.css) - a dedicated full-viewport view
-             of the panel below, reachable straight from a shared link at
-             #demo (see page.js). "Full screen" rather than duplicating
-             Dial's own label: this does not start anything by itself,
-             it only changes how the same panel is shown. -->
-        <button class="dial-button dial-button--secondary" id="app-mode-btn" type="button">Full screen</button>
+      <!-- The landing state: on screen only at the plain root path. An
+           internal tap on any of these starts that route immediately
+           (see page.js) - no second click, because clicking one of
+           these three buttons is itself the explicit gesture. -->
+      <div class="demo__controls" id="launcher">
+        <button class="dial-button" id="launch-demo-btn" type="button">Demo</button>
+        <button class="dial-button dial-button--secondary" id="launch-originate-btn" type="button">Open originating modem</button>
+        <button class="dial-button dial-button--secondary" id="launch-receive-btn" type="button">Open receiving modem</button>
+      </div>
+
+      <!-- A direct link or a reload on /demo, /originate or /receive
+           must never play audio or ask for a microphone before a real
+           click of its own - see page.js's own routing doc. This is
+           that click: one button, its label and the paragraph above it
+           set per route by page.js. -->
+      <div class="demo__controls route-start" id="route-start-block" hidden>
+        <p id="route-start-copy"></p>
+        <button class="dial-button" id="route-start-btn" type="button">Start</button>
       </div>
 
       <noscript><p>The demo needs JavaScript. Everything else on this page reads fine without it.</p></noscript>
@@ -123,20 +136,15 @@
         </div>
       </details>
 
-      <!-- No longer `hidden` by default: the idle two-terminal interface
-           and a working way to start it (the "ATDT (dial)" button below)
-           are on screen before any click, so a shared link shows what
-           there is to try immediately rather than an empty page - the
-           highest-value single change Codex's review called out. Every
-           control inside still no-ops safely until `wired` exists (see
-           page.js's own guards). -->
-      <div class="endpoint wired" id="wired-panel" aria-labelledby="wired-heading">
-        <!-- Only shown in full-viewport phone app mode (see style.css) -
-             the panel is reachable in normal page flow the rest of the
-             time, so "back" has nothing to mean there. -->
+      <!-- The /demo route's own full-viewport view - two terminals
+           stacked, above and below, on every screen size (Dan: "it can
+           be above and below for desktop as well", not phones only).
+           Hidden until page.js actually starts the route; see its own
+           doc on the landing/route-start/live split. -->
+      <div class="endpoint wired" id="wired-panel" aria-labelledby="wired-heading" hidden>
         <button type="button" class="dial-button dial-button--secondary app-mode-back" id="app-mode-back-btn">Back</button>
-        <h3 class="scenario__label" id="wired-heading">One device - both ends live, right here</h3>
-        <p class="wired__intro">Two real sessions, cross-wired in software exactly as the binary's own split-screen demo wires them - the link never crosses the air, so this is genuinely <span class="mode-badge">DEMO MODE</span>, the same honesty the terminal app's own status bar carries. Answer picked up and originate dialled automatically the moment you press Dial; redial with different digits below, or hang up and stop whenever you like.</p>
+        <h3 class="scenario__label" id="wired-heading">Demo - both ends live, right here</h3>
+        <p class="wired__intro">Two real sessions, cross-wired in software exactly as the binary's own split-screen demo wires them - the link never crosses the air, so this is genuinely <span class="mode-badge">DEMO MODE</span>, the same honesty the terminal app's own status bar carries. Answer picked up and originate dialled automatically; redial with different digits below, or hang up and stop whenever you like.</p>
 
         <p class="wired__phase" id="wired-phase" role="status">IDLE - press ATDT to dial</p>
 
@@ -144,11 +152,17 @@
           <div class="wired__panel">
             <div class="wired__panel-bar">ORIGINATE &middot; 1270/1070 Hz</div>
             <p class="endpoint__status endpoint__status--short" id="wired-status-a" role="status">IDLE</p>
+            <!-- Outside the transcript below on purpose - real modem
+                 output and this page's own explanatory captions must
+                 never be the same element (see page.js's own doc: "no
+                 OK/ATA/RING lines for commands that never ran"). -->
+            <p class="wired__caption" id="wired-caption-a"></p>
             <div class="terminal__output terminal__output--compact" id="wired-log-a" role="log" aria-label="Originate transcript"></div>
           </div>
           <div class="wired__panel wired__panel--answer">
             <div class="wired__panel-bar">ANSWER &middot; 2225/2025 Hz</div>
             <p class="endpoint__status endpoint__status--short" id="wired-status-b" role="status">IDLE</p>
+            <p class="wired__caption" id="wired-caption-b"></p>
             <div class="terminal__output terminal__output--compact" id="wired-log-b" role="log" aria-label="Answer transcript"></div>
           </div>
         </div>
@@ -156,6 +170,8 @@
         <div class="waterfall-wrap wired__waterfall-wrap">
           <canvas class="waterfall wired__waterfall" id="wired-waterfall" width="960" height="120" aria-hidden="true"></canvas>
         </div>
+
+        <p class="diagnostic" id="wired-databcheck" role="status"></p>
 
         <div class="wired__controls">
           <div class="endpoint__row">
@@ -182,21 +198,45 @@
 
       <p class="diagnostic" id="mic-diagnostic" role="status"></p>
 
-      <div class="mic-intro" id="mic-intro" hidden>
-        <p>The real thing needs a second machine nearby, running <code>modem --single --acoustic</code>, speakers and microphone facing this one. This tab will ask for microphone access - nothing leaves your browser except sound.</p>
-        <button type="button" class="dial-button" id="mic-enable-btn">Enable microphone</button>
-      </div>
+      <!-- The /originate and /receive routes' own live view - one real
+           endpoint, a raw microphone, role fixed by the route rather
+           than chosen here. Hidden until page.js starts it. -->
+      <div class="endpoint" id="endpoint-panel" hidden aria-labelledby="endpoint-heading">
+        <button type="button" class="dial-button dial-button--secondary app-mode-back" id="endpoint-back-btn">Back</button>
+        <h3 class="scenario__label" id="endpoint-heading"></h3>
+        <p id="endpoint-intro"></p>
 
-      <div class="endpoint" id="endpoint-panel" hidden>
-        <p>This tab is a real endpoint, listening on a raw microphone. Dial or answer from here to meet the second machine.</p>
-        <p class="endpoint__status" id="endpoint-status" role="status">IDLE</p>
-        <div class="endpoint__row">
-          <label for="dial-digits">Digits</label>
-          <input type="text" id="dial-digits" value="5551234" size="12" autocomplete="off">
-          <button type="button" id="endpoint-dial">ATDT (dial)</button>
-          <button type="button" id="endpoint-answer">ATA (answer)</button>
-          <button type="button" id="endpoint-hangup" disabled>Hang up</button>
+        <!-- /originate only: how to get a second device onto /receive
+             without typing anything - a QR code (rendered by the
+             vendored qrcode-gen.js, never a third-party script) and a
+             copyable link, side by side with the same "near each
+             other" fact /receive states on its own. -->
+        <div class="share-block" id="share-block" hidden>
+          <p>Open receiving modem on your phone:</p>
+          <div class="qr-code" id="qr-code" aria-hidden="true"></div>
+          <p class="share-block__link">
+            <label for="share-link" class="sr-only">Receiving modem link</label>
+            <input type="text" id="share-link" readonly>
+            <button type="button" id="share-copy-btn">Copy link</button>
+          </p>
+          <p class="diagnostic" id="share-copy-status" role="status"></p>
+          <p>The two devices need to be near each other for this to have any chance of working.</p>
         </div>
+
+        <p class="endpoint__status" id="endpoint-status" role="status">IDLE</p>
+        <p class="endpoint__caption" id="endpoint-caption"></p>
+
+        <!-- Two separate, honestly distinct readings - noise moving a
+             meter is not evidence of a modem (see page.js's own doc).
+             Hidden until the microphone is actually capturing. -->
+        <div class="signal-indicators" id="signal-indicators" hidden>
+          <p class="signal-indicator" id="mic-activity-indicator">Microphone activity <span class="signal-indicator__dot" id="mic-activity-dot"></span></p>
+          <p class="signal-indicator" id="modem-signal-indicator">Modem signal detected <span class="signal-indicator__dot" id="modem-signal-dot"></span></p>
+        </div>
+
+        <p class="diagnostic" id="endpoint-deadline" role="status"></p>
+        <p class="diagnostic" id="endpoint-databcheck" role="status"></p>
+
         <div class="endpoint__row">
           <label for="chat-input" class="sr-only">Message to send</label>
           <input type="text" id="chat-input" placeholder="Type once CONNECTED" size="30" autocomplete="off" disabled>
@@ -204,7 +244,8 @@
         </div>
         <div class="terminal__output" id="chat-log" role="log" aria-label="Received characters"></div>
         <div class="endpoint__row">
-          <button type="button" id="endpoint-stop">Disconnect microphone</button>
+          <button type="button" id="endpoint-hangup" disabled>Hang up</button>
+          <button type="button" id="endpoint-stop">Stop</button>
         </div>
       </div>
     </section>
@@ -406,12 +447,25 @@
     <p>a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a></p>
     <p class="endorsement__links">
       <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
+      <a href="https://github.com/dbhq-uk/modem/releases" rel="noopener">Releases</a>
       <a href="links.html">Links</a>
+    </p>
+    <!-- The sibling DBHQ experiments - "what other sites do for
+         cross-promotion" (Dan, 8 Sep 2026). All plain links, no
+         interstitial, no banner. -->
+    <p class="endorsement__links endorsement__siblings">
+      <a href="https://dbhq.uk">DBHQ</a>
+      <a href="https://bbs.dbhq.uk">BBS</a>
+      <a href="https://heliograph.dbhq.uk">heliograph</a>
     </p>
   </footer>
 
 </div>
 
+<!-- Vendored, not fetched from a CDN - see qrcode-gen.js's own header for
+     why the CSP requires that. A plain classic script, loaded before
+     page.js, which reads the global `qrcode` factory it defines. -->
+<script src="qrcode-gen.js"></script>
 <script type="module" src="page.js"></script>
 </body>
 </html>

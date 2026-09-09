@@ -58,6 +58,9 @@ class ModemProcessor extends AudioWorkletProcessor {
         case 'send':
           this.requireSession().send(msg.bytes);
           break;
+        case 'yieldTurn':
+          this.requireSession().yieldTurn();
+          break;
         default:
           break;
       }

@@ -88,6 +88,10 @@ class WiredProcessor extends AudioWorkletProcessor {
           this.requireSessions();
           (msg.side === 'b' ? this.b : this.a).send(msg.bytes);
           break;
+        case 'yieldTurn':
+          this.requireSessions();
+          (msg.side === 'b' ? this.b : this.a).yieldTurn();
+          break;
         default:
           break;
       }

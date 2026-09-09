@@ -228,6 +228,11 @@ export class WiredEndpoint extends EventTarget {
     this.node.port.postMessage({ type: 'send', side, bytes: encode(text) });
   }
 
+  /** @param {'a'|'b'} side - hands that side's turn to the other. */
+  yieldTurn(side) {
+    this.node.port.postMessage({ type: 'yieldTurn', side });
+  }
+
   /**
    * Tears down the audio graph and closes the context. See modem.js's
    * `stop()` doc: spike/README.md finding 5 is not only about a
