@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Also from DBHQ: BBS and heliograph | modem</title>
+<meta name="description" content="Other DBHQ experiments worth a look: BBS, a bulletin board system to explore, and heliograph, which debugs a remote machine through an operator using Git.">
+<link rel="canonical" href="https://modem.dbhq.uk/projects">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://modem.dbhq.uk/projects">
+<meta property="og:title" content="Also from DBHQ: BBS and heliograph | modem">
+<meta property="og:description" content="Other DBHQ experiments worth a look: BBS, a bulletin board system to explore, and heliograph, which debugs a remote machine through an operator using Git.">
+<meta property="og:image" content="https://modem.dbhq.uk/hero.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1536">
+<meta property="og:image:height" content="1024">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Also from DBHQ: BBS and heliograph | modem">
+<meta name="twitter:description" content="Other DBHQ experiments worth a look: BBS, a bulletin board system to explore, and heliograph, which debugs a remote machine through an operator using Git.">
+<meta name="twitter:image" content="https://modem.dbhq.uk/hero.png">
+<link rel="icon" href="../brand/icon.svg" type="image/svg+xml">
+<link rel="icon" href="../brand/icon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="../brand/icon-180.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0A0A0A">
+<!-- See index.html's identical comment: an explicit <link> fetches in
+     parallel with style.css; style.css's own @import made this a serial
+     fetch instead. -->
+<link rel="stylesheet" href="../brand/tokens.css">
+<link rel="stylesheet" href="style.css">
+<!-- Structured data: application/ld+json is data, not script - see
+     index.html's identical comment on why this is exempt from
+     script-src under this site's strict CSP. New page on 9 Sep 2026
+     (task 3n): Projects was an anchor landing on the footer's own "Also
+     from DBHQ" group; it is a real destination now, and the footer
+     keeps its own compact copy of the same three siblings regardless -
+     see web/_gen/pages.py's own doc on why that is accepted duplication,
+     not the kind this task exists to remove. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://modem.dbhq.uk/#website",
+      "url": "https://modem.dbhq.uk/",
+      "name": "modem",
+      "publisher": { "@id": "https://dbhq.uk/#organization" },
+      "inLanguage": "en-GB"
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://modem.dbhq.uk/projects#webpage",
+      "url": "https://modem.dbhq.uk/projects",
+      "name": "Also from DBHQ: BBS and heliograph | modem",
+      "description": "Other DBHQ experiments worth a look: BBS, a bulletin board system to explore, and heliograph, which debugs a remote machine through an operator using Git.",
+      "isPartOf": { "@id": "https://modem.dbhq.uk/#website" },
+      "inLanguage": "en-GB"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<!-- Same cosmetic CRT power-on overlay as index.html - see that file's
+     own comment. Purely decorative, never intercepts a click, hidden
+     outright under prefers-reduced-motion. -->
+<div class="crt-warmup" aria-hidden="true"></div>
+
+<div class="crt-frame">
+
+  <!-- Six real pages - see index.html's identical comment and
+       web/_gen/pages.py, the single source for this nav, the footer and
+       the consent block shared by all six. -->
+  <!-- BEGIN generated: nav (web/_gen/pages.py - do not hand-edit) -->
+<nav class="site-nav" aria-label="Primary">
+  <a class="site-nav__link" href="/">Try</a>
+  <a class="site-nav__link" href="/explained">Explained</a>
+  <a class="site-nav__link" href="/prior-art">Prior art</a>
+  <a class="site-nav__link" href="/downloads">Downloads</a>
+  <a class="site-nav__link" href="/projects" aria-current="page">Projects</a>
+  <a class="site-nav__link" href="/about">About</a>
+</nav>
+<!-- END generated: nav -->
+
+  <header class="hero">
+    <!-- See index.html's identical comment on why this is a <picture>
+         with pre-generated WebP/AVIF variants rather than the bare PNG. -->
+    <picture>
+      <source type="image/avif" srcset="hero-480.avif 480w, hero-768.avif 768w, hero-1080.avif 1080w, hero-1536.avif 1536w" sizes="100vw">
+      <source type="image/webp" srcset="hero-480.webp 480w, hero-768.webp 768w, hero-1080.webp 1080w, hero-1536.webp 1536w" sizes="100vw">
+      <img class="hero__image" src="hero.png" width="1536" height="1024" decoding="async" fetchpriority="low" alt="" aria-hidden="true">
+    </picture>
+    <div class="hero__overlay">
+      <div class="hero__content">
+        <p class="wordmark">modem</p>
+        <h1 class="hero__heading">Also from DBHQ</h1>
+        <p class="hero__tagline">The practice behind this experiment, and its siblings</p>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- The same three siblings the footer names on every page (see
+         web/_gen/pages.py), given the room a dedicated page allows -
+         each with the one-sentence reason to click a bare name never
+         gave (see the design spec's defect 3). Styled with the same
+         resource-row pattern /prior-art uses for its own external
+         links, rather than inventing a second "sibling row" component
+         for what is the same shape of content: a link, and one sentence
+         on why it is worth a visitor's time. -->
+    <section class="resources" aria-labelledby="siblings-heading">
+      <h2 id="siblings-heading">Other DBHQ experiments</h2>
+      <p>modem links the other three; each names itself without linking to itself - the same rule on every site in the estate.</p>
+      <ul class="resource-list">
+        <li class="resource-row">
+          <a class="resource-row__link" href="https://dbhq.uk" rel="noopener">DBHQ</a>
+          <p class="resource-row__description">The practice behind these experiments.</p>
+        </li>
+        <li class="resource-row">
+          <a class="resource-row__link" href="https://bbs.dbhq.uk" rel="noopener">BBS</a>
+          <p class="resource-row__description">Explore a bulletin board system.</p>
+        </li>
+        <li class="resource-row">
+          <a class="resource-row__link" href="https://heliograph.dbhq.uk" rel="noopener">heliograph</a>
+          <p class="resource-row__description">Debug a remote machine through an operator, using Git.</p>
+        </li>
+      </ul>
+    </section>
+
+  </main>
+
+  <!-- BEGIN generated: footer (web/_gen/pages.py - do not hand-edit) -->
+<footer class="endorsement">
+  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. The full workspace - modem-core, modem-audio, modem-tui, modem-wasm and this page - lives on <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>, MIT licensed.</p>
+
+  <div class="endorsement__groups">
+    <div class="endorsement__group">
+      <p class="endorsement__group-label">This project</p>
+      <p class="endorsement__links">
+        <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
+      </p>
+    </div>
+
+    <div class="endorsement__group">
+      <p class="endorsement__group-label">Also from DBHQ</p>
+      <ul class="endorsement__siblings">
+        <li><a href="https://dbhq.uk">DBHQ</a> - the practice behind these experiments.</li>
+        <li><a href="https://bbs.dbhq.uk">BBS</a> - explore a bulletin board system.</li>
+        <li><a href="https://heliograph.dbhq.uk">heliograph</a> - debug a remote machine through an operator, using Git.</li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<!-- END generated: footer -->
+
+</div>
+
+<!-- GA4, in a file rather than Google's inline snippet - see index.html's
+     identical comment. Every page carries this - see web/_gen/pages.py. -->
+<!-- BEGIN generated: consent (web/_gen/pages.py - do not hand-edit) -->
+<script type="module" src="analytics.js"></script>
+<script type="module" src="consent.js"></script>
+<dialog class="consent" data-consent aria-labelledby="consent-title">
+  <h2 id="consent-title">CARRIER DETECT</h2>
+  <p>
+    We would like to count how many people come here to listen, using Google
+    Analytics. Cookies are only set if you accept, and the modem answers
+    exactly the same either way.
+  </p>
+  <div class="consent-actions">
+    <button type="button" class="dial-button" data-consent-decline>Decline</button>
+    <button type="button" class="dial-button" data-consent-accept autofocus>Accept</button>
+  </div>
+</dialog>
+<!-- END generated: consent -->
+</body>
+</html>

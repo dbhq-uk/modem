@@ -21,12 +21,51 @@
 </head>
 <body>
 <div class="crt-frame">
+  <!-- Nav and footer added 9 Sep 2026 (task 3n) so a 404 is not a dead
+       end - noindexed, so this is about a lost visitor finding their way
+       back, not search. Absolute paths throughout (the nav's own hrefs,
+       the footer's GitHub/sibling links), so <base href="/"> above has
+       nothing to do here: only this file's own relative asset links
+       (style.css, brand/icon*) needed it. -->
+  <!-- BEGIN generated: nav (web/_gen/pages.py - do not hand-edit) -->
+<nav class="site-nav" aria-label="Primary">
+  <a class="site-nav__link" href="/">Try</a>
+  <a class="site-nav__link" href="/explained">Explained</a>
+  <a class="site-nav__link" href="/prior-art">Prior art</a>
+  <a class="site-nav__link" href="/downloads">Downloads</a>
+  <a class="site-nav__link" href="/projects">Projects</a>
+  <a class="site-nav__link" href="/about">About</a>
+</nav>
+<!-- END generated: nav -->
   <main id="main" class="not-found">
     <h1 class="wordmark">NO CARRIER</h1>
     <p class="not-found__tagline">This page could not be found</p>
     <p>The link that brought you here is broken, or the page has moved. The demo, the explainer and the rest of modem are still on the line.</p>
     <p class="not-found__action"><a class="dial-button" href="/">Back to modem</a></p>
   </main>
+  <!-- BEGIN generated: footer (web/_gen/pages.py - do not hand-edit) -->
+<footer class="endorsement">
+  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. The full workspace - modem-core, modem-audio, modem-tui, modem-wasm and this page - lives on <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>, MIT licensed.</p>
+
+  <div class="endorsement__groups">
+    <div class="endorsement__group">
+      <p class="endorsement__group-label">This project</p>
+      <p class="endorsement__links">
+        <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
+      </p>
+    </div>
+
+    <div class="endorsement__group">
+      <p class="endorsement__group-label">Also from DBHQ</p>
+      <ul class="endorsement__siblings">
+        <li><a href="https://dbhq.uk">DBHQ</a> - the practice behind these experiments.</li>
+        <li><a href="https://bbs.dbhq.uk">BBS</a> - explore a bulletin board system.</li>
+        <li><a href="https://heliograph.dbhq.uk">heliograph</a> - debug a remote machine through an operator, using Git.</li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<!-- END generated: footer -->
 </div>
 </body>
 </html>

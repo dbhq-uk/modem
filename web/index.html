@@ -97,21 +97,25 @@
 
 <div class="crt-frame">
 
-  <!-- Sticky, five items, in Dan's own words rather than invented verbs -
-       see the design spec's own "Navigation" table. Try and Explained are
-       real pages; Downloads/Projects/About are anchors on this page, and
-       stay anchors on /explained too (jumping back here) rather than
-       becoming their own pages - see the spec's "Two pages, not five".
+  <!-- Six real pages now (task 3n, 9 Sep 2026) - Downloads, Projects and
+       About were anchors on this page; each is its own destination now,
+       per the owner's own correction that the two-page structure was an
+       over-consolidation. Generated - see web/_gen/pages.py, which is
+       the single source for this nav, the footer and the consent block
+       shared by all six pages; never hand-edit between these markers.
        Placed ahead of .hero, not overlaid on it, so the hero still
        renders full-bleed on load - an overlay nav would eat into the
        image it exists to show. -->
-  <nav class="site-nav" aria-label="Primary">
-    <a class="site-nav__link" href="/" aria-current="page">Try</a>
-    <a class="site-nav__link" href="/explained">Explained</a>
-    <a class="site-nav__link site-nav__link--anchor" href="/#downloads">Downloads</a>
-    <a class="site-nav__link site-nav__link--anchor" href="/#projects">Projects</a>
-    <a class="site-nav__link site-nav__link--anchor" href="/#about">About</a>
-  </nav>
+  <!-- BEGIN generated: nav (web/_gen/pages.py - do not hand-edit) -->
+<nav class="site-nav" aria-label="Primary">
+  <a class="site-nav__link" href="/" aria-current="page">Try</a>
+  <a class="site-nav__link" href="/explained">Explained</a>
+  <a class="site-nav__link" href="/prior-art">Prior art</a>
+  <a class="site-nav__link" href="/downloads">Downloads</a>
+  <a class="site-nav__link" href="/projects">Projects</a>
+  <a class="site-nav__link" href="/about">About</a>
+</nav>
+<!-- END generated: nav -->
 
   <header class="hero">
     <!-- hero.png (2.2 MB) stays committed as the source of truth; a
@@ -479,10 +483,11 @@
       </div>
     </section>
 
-    <!-- The full phase-by-phase explainer (the nine phases, the overture
-         playback, Bell 103/FSK, standards, prior art, history) now lives
-         at /explained, where it has a URL of its own to rank on - see
-         explained.html's own doc. This is deliberately just a teaser: a
+    <!-- The phase-by-phase explainer (the nine phases, the overture
+         playback, Bell 103/FSK) lives at /explained, where it has a URL
+         of its own to rank on; the standards/prior art/history that used
+         to sit alongside it split out again to /prior-art on 9 Sep 2026 -
+         see that page's own doc. This is deliberately just a teaser: a
          reason to go there, not a second copy of what is there. -->
     <section class="explainer-teaser" aria-labelledby="explainer-teaser-heading">
       <h2 id="explainer-teaser-heading">Why dial-up sounded like that</h2>
@@ -490,67 +495,31 @@
       <p><a class="dial-button" href="/explained">Hear every phase explained</a></p>
     </section>
 
-    <section class="downloads" id="downloads" aria-labelledby="downloads-heading">
-      <h2 id="downloads-heading">Get modem</h2>
-      <p>Native binaries for Linux, macOS and Windows are built by the project's release workflow.</p>
-      <ul class="download-list">
-        <li class="download-row">
-          <span class="download-row__platform">Linux</span>
-          <a class="download-row__link" href="https://github.com/dbhq-uk/modem/releases" rel="noopener">Releases</a>
-        </li>
-        <li class="download-row">
-          <span class="download-row__platform">macOS</span>
-          <a class="download-row__link" href="https://github.com/dbhq-uk/modem/releases" rel="noopener">Releases</a>
-        </li>
-        <li class="download-row">
-          <span class="download-row__platform">Windows</span>
-          <a class="download-row__link" href="https://github.com/dbhq-uk/modem/releases" rel="noopener">Releases</a>
-        </li>
-      </ul>
-      <p class="downloads__note">No release has been tagged yet - the releases page will list binaries once one has.</p>
-      <p><a href="https://github.com/dbhq-uk/modem" rel="noopener">View the source on GitHub</a></p>
-      <p><a href="/explained">The technical record, the prior art, and why this exists</a></p>
-    </section>
-
   </main>
 
-  <!-- id="about" - this byline is the whole of "About" (see the design
-       spec: "About is a byline", not a separate section worth its own
-       prose). The nav's About anchor lands here. -->
-  <footer class="endorsement" id="about">
-    <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. The full workspace - modem-core, modem-audio, modem-tui, modem-wasm and this page - lives on <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>, MIT licensed.</p>
+  <!-- BEGIN generated: footer (web/_gen/pages.py - do not hand-edit) -->
+<footer class="endorsement">
+  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. The full workspace - modem-core, modem-audio, modem-tui, modem-wasm and this page - lives on <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>, MIT licensed.</p>
 
-    <!-- Two labelled groups, not three undifferentiated rows: this
-         project's own links, then the sibling DBHQ experiments -
-         "what other sites do for cross-promotion" (Dan, 8 Sep 2026).
-         dbhq.uk and the releases page are already linked above (the
-         byline, and the three platform rows just above this footer),
-         so neither is repeated here.
-
-         id="projects" on the second group - the nav's Projects anchor
-         lands here: three live siblings each with a real reason to
-         click, not the two bare names this used to be (see the design
-         spec's defect 3: "the sibling links give nobody a reason to
-         click"). -->
-    <div class="endorsement__groups">
-      <div class="endorsement__group">
-        <p class="endorsement__group-label">This project</p>
-        <p class="endorsement__links">
-          <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
-          <a href="/explained">Explained</a>
-        </p>
-      </div>
-
-      <div class="endorsement__group" id="projects">
-        <p class="endorsement__group-label">Also from DBHQ</p>
-        <ul class="endorsement__siblings">
-          <li><a href="https://dbhq.uk">DBHQ</a> - the practice behind these experiments.</li>
-          <li><a href="https://bbs.dbhq.uk">BBS</a> - explore a bulletin board system.</li>
-          <li><a href="https://heliograph.dbhq.uk">heliograph</a> - debug a remote machine through an operator, using Git.</li>
-        </ul>
-      </div>
+  <div class="endorsement__groups">
+    <div class="endorsement__group">
+      <p class="endorsement__group-label">This project</p>
+      <p class="endorsement__links">
+        <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
+      </p>
     </div>
-  </footer>
+
+    <div class="endorsement__group">
+      <p class="endorsement__group-label">Also from DBHQ</p>
+      <ul class="endorsement__siblings">
+        <li><a href="https://dbhq.uk">DBHQ</a> - the practice behind these experiments.</li>
+        <li><a href="https://bbs.dbhq.uk">BBS</a> - explore a bulletin board system.</li>
+        <li><a href="https://heliograph.dbhq.uk">heliograph</a> - debug a remote machine through an operator, using Git.</li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<!-- END generated: footer -->
 
 </div>
 
@@ -560,6 +529,15 @@
 <script src="qrcode-gen.js"></script>
 <script type="module" src="page.js"></script>
 
+<!-- GA4, in a file rather than Google's inline snippet: the CSP has no
+     unsafe-inline, and an inline block has already killed this page once.
+     See analytics.js for the stream it reports to. Denied by default -
+     consent.js owns the prompt, and loads after analytics.js so that
+     __dbhqEnableGA is defined by the time Accept can be clicked. Every
+     page carries this - see web/_gen/pages.py. -->
+<!-- BEGIN generated: consent (web/_gen/pages.py - do not hand-edit) -->
+<script type="module" src="analytics.js"></script>
+<script type="module" src="consent.js"></script>
 <dialog class="consent" data-consent aria-labelledby="consent-title">
   <h2 id="consent-title">CARRIER DETECT</h2>
   <p>
@@ -572,13 +550,6 @@
     <button type="button" class="dial-button" data-consent-accept autofocus>Accept</button>
   </div>
 </dialog>
-
-<!-- GA4, in a file rather than Google's inline snippet: the CSP has no
-     unsafe-inline, and an inline block has already killed this page once.
-     See analytics.js for the stream it reports to. Denied by default -
-     consent.js owns the prompt, and loads after analytics.js so that
-     __dbhqEnableGA is defined by the time Accept can be clicked. -->
-<script type="module" src="analytics.js"></script>
-<script type="module" src="consent.js"></script>
+<!-- END generated: consent -->
 </body>
 </html>

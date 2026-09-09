@@ -3,20 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Dial-up modem sounds explained: handshake and prior art | modem</title>
-<meta name="description" content="Every phase of modem's dial-up overture explained - what each sound was for, the Bell 103 and FSK standards behind the real connection underneath it, the prior art worth trying if speed rather than ceremony is the point, and the history that made this worth building.">
+<title>Dial-up modem sounds explained: the handshake, phase by phase | modem</title>
+<meta name="description" content="Every phase of modem's dial-up overture explained - what each sound was for, and the Bell 103 and FSK standards behind the real connection underneath it.">
 <link rel="canonical" href="https://modem.dbhq.uk/explained">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://modem.dbhq.uk/explained">
-<meta property="og:title" content="Dial-up modem sounds explained: handshake and prior art | modem">
-<meta property="og:description" content="Every phase of modem's dial-up overture explained - what each sound was for, the standards behind Bell 103 and FSK, the prior art, and the history.">
+<meta property="og:title" content="Dial-up modem sounds explained: the handshake, phase by phase | modem">
+<meta property="og:description" content="Every phase of modem's dial-up overture explained - what each sound was for, and the Bell 103/FSK standards underneath it.">
 <meta property="og:image" content="https://modem.dbhq.uk/hero.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1536">
 <meta property="og:image:height" content="1024">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Dial-up modem sounds explained: handshake and prior art | modem">
-<meta name="twitter:description" content="Every phase of modem's dial-up overture explained - what each sound was for, the standards behind Bell 103 and FSK, the prior art, and the history.">
+<meta name="twitter:title" content="Dial-up modem sounds explained: the handshake, phase by phase | modem">
+<meta name="twitter:description" content="Every phase of modem's dial-up overture explained - what each sound was for, and the Bell 103/FSK standards underneath it.">
 <meta name="twitter:image" content="https://modem.dbhq.uk/hero.png">
 <link rel="icon" href="../brand/icon.svg" type="image/svg+xml">
 <link rel="icon" href="../brand/icon-32.png" sizes="32x32">
@@ -38,7 +38,9 @@
      structured-data guidelines warn against. The FAQ answers mirror
      this page's own "What you're hearing" and "Bell 103 and FSK after
      CONNECT" sections and the phase rows below - if one changes, update
-     the other. -->
+     the other. Standards/prior art/history split back out to their own
+     page, /prior-art, on 9 Sep 2026 (task 3n) - this page's own
+     description below was trimmed to match what is actually still here. -->
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -55,8 +57,8 @@
       "@type": "WebPage",
       "@id": "https://modem.dbhq.uk/explained#webpage",
       "url": "https://modem.dbhq.uk/explained",
-      "name": "Dial-up modem sounds explained: handshake and prior art | modem",
-      "description": "Every phase of modem's dial-up overture explained - what each sound was for, the Bell 103 and FSK standards behind the real connection underneath it, the prior art worth trying if speed rather than ceremony is the point, and the history that made this worth building.",
+      "name": "Dial-up modem sounds explained: the handshake, phase by phase | modem",
+      "description": "Every phase of modem's dial-up overture explained - what each sound was for, and the Bell 103 and FSK standards behind the real connection underneath it.",
       "isPartOf": { "@id": "https://modem.dbhq.uk/#website" },
       "mainEntity": { "@id": "https://modem.dbhq.uk/explained#faq" },
       "inLanguage": "en-GB"
@@ -137,18 +139,19 @@
 
 <div class="crt-frame">
 
-  <!-- Identical five items to index.html's own nav - see that file's
-       comment for the full reasoning. Explained is the current page
-       here; the three same-page anchors point back to their real home
-       on / rather than becoming local (there is nothing here for them
-       to point at). -->
-  <nav class="site-nav" aria-label="Primary">
-    <a class="site-nav__link" href="/">Try</a>
-    <a class="site-nav__link" href="/explained" aria-current="page">Explained</a>
-    <a class="site-nav__link site-nav__link--anchor" href="/#downloads">Downloads</a>
-    <a class="site-nav__link site-nav__link--anchor" href="/#projects">Projects</a>
-    <a class="site-nav__link site-nav__link--anchor" href="/#about">About</a>
-  </nav>
+  <!-- Six real pages now - see index.html's identical comment and
+       web/_gen/pages.py, the single source for this nav, the footer and
+       the consent block shared by all six. -->
+  <!-- BEGIN generated: nav (web/_gen/pages.py - do not hand-edit) -->
+<nav class="site-nav" aria-label="Primary">
+  <a class="site-nav__link" href="/">Try</a>
+  <a class="site-nav__link" href="/explained" aria-current="page">Explained</a>
+  <a class="site-nav__link" href="/prior-art">Prior art</a>
+  <a class="site-nav__link" href="/downloads">Downloads</a>
+  <a class="site-nav__link" href="/projects">Projects</a>
+  <a class="site-nav__link" href="/about">About</a>
+</nav>
+<!-- END generated: nav -->
 
   <header class="hero">
     <!-- See index.html's identical comment on why this is a <picture>
@@ -170,21 +173,20 @@
   <main id="main">
 
     <section class="intro">
-      <p>modem performs a piece of telecoms history, then runs a real connection underneath it. Below: what you are hearing, phase by phase, the standards actually implemented once CONNECT appears, the prior art worth trying if speed rather than ceremony is the point, and the history that makes the ceremony worth performing.</p>
+      <p>modem performs a piece of telecoms history, then runs a real connection underneath it. Below: what you are hearing, phase by phase, and the standards actually implemented once CONNECT appears.</p>
       <p><a class="dial-button" href="/">Try the demo</a></p>
     </section>
 
-    <!-- A short contents list, per the design spec - this page absorbs
-         everything links.html used to hold plus the nine phases
-         themselves, so it is long enough to want one. -->
+    <!-- A short contents list, per the design spec. Three items now, not
+         six: standards, prior art and the history split back out to
+         their own page, /prior-art, on 9 Sep 2026 (task 3n) - this page
+         kept the nine phases, the strongest ranking asset on the site,
+         and the overture playback that plays them. -->
     <nav class="contents" aria-label="On this page">
       <ul class="contents__list">
         <li><a href="#hearing">What you're hearing</a></li>
         <li><a href="#phases">The nine phases</a></li>
         <li><a href="#bell103-fsk">Bell 103 and FSK after CONNECT</a></li>
-        <li><a href="#standards">Standards and sources</a></li>
-        <li><a href="#prior-art">Prior art and related projects</a></li>
-        <li><a href="#history">The history</a></li>
       </ul>
     </nav>
 
@@ -305,121 +307,51 @@
       <p>Once CONNECT appears, the overture is over and a genuine 300 baud Bell 103 connection takes over - AT&amp;T's 1963 300 baud modem standard, with the same originate and answer tone pairs, 1270/1070 Hz and 2225/2025 Hz. The modulation underneath it is FSK: frequency-shift keying, a bit is a shift between two frequencies, nothing more exotic than that.</p>
     </section>
 
-    <section class="resources section-anchor" id="standards" aria-labelledby="standards-heading">
-      <h2 id="standards-heading">Standards and sources</h2>
-      <p>What each part of the handshake actually was. The README and <code>docs/</code> already carry the accurate detail on how this project uses them; these are the standards and references themselves.</p>
-      <ul class="resource-list">
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://en.wikipedia.org/wiki/Bell_103_modem" target="_blank" rel="noopener">Bell 103 modem (Wikipedia)</a>
-          <p class="resource-row__description">The standard this project's connection actually implements once CONNECT appears - AT&amp;T's 1963 300 baud modem, with the same originate and answer tone pairs.</p>
-        </li>
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://en.wikipedia.org/wiki/Frequency-shift_keying" target="_blank" rel="noopener">Frequency-shift keying (Wikipedia)</a>
-          <p class="resource-row__description">The modulation underneath everything past the overture: a bit is a shift between two frequencies, nothing more exotic than that.</p>
-        </li>
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://www.itu.int/rec/T-REC-V.21/en" target="_blank" rel="noopener">ITU-T V.21</a>
-          <p class="resource-row__description">The international 300 baud duplex standard that gave Bell 103's originate/answer split its ITU form outside North America.</p>
-        </li>
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://www.itu.int/rec/T-REC-V.22/en" target="_blank" rel="noopener">ITU-T V.22</a>
-          <p class="resource-row__description">1200 bit/s duplex, one step up the same lineage - a rung this project doesn't attempt to reach.</p>
-        </li>
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://www.itu.int/rec/T-REC-V.34/en" target="_blank" rel="noopener">ITU-T V.34</a>
-          <p class="resource-row__description">Up to 33,600 bit/s - the standard behind the screech everyone actually remembers, and the one the README is explicit about not implementing for real.</p>
-        </li>
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://en.wikipedia.org/wiki/Dual-tone_multi-frequency_signaling" target="_blank" rel="noopener">Dual-tone multi-frequency signalling (Wikipedia)</a>
-          <p class="resource-row__description">What a dialled digit actually is: two simultaneous tones, chosen so no harmonic of one gets mistaken for the other.</p>
-        </li>
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://en.wikipedia.org/wiki/Echo_suppressor" target="_blank" rel="noopener">Echo suppressor (Wikipedia)</a>
-          <p class="resource-row__description">Why a call had to announce itself before data could flow - left switched on, these devices would have muted the very signal a modem needed to hear.</p>
-        </li>
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://www.itu.int/rec/T-REC-V.25/en" target="_blank" rel="noopener">ITU-T V.25</a>
-          <p class="resource-row__description">The recommendation that specifies the answer tone itself and the procedure for disabling echo control devices on the line - the reason the 2100 Hz ANSam tone exists at all.</p>
-        </li>
-      </ul>
-    </section>
-
-    <section class="resources section-anchor" id="prior-art" aria-labelledby="prior-art-heading">
-      <h2 id="prior-art-heading">Prior art and related projects</h2>
-      <p>Tools that move data over sound for real, faster than this ever will. That's not a criticism - the README says as much - it's a reason to reach for one of these instead when speed, not ceremony, is the point.</p>
-      <ul class="resource-list">
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://github.com/kamalmostafa/minimodem" target="_blank" rel="noopener">minimodem</a>
-          <p class="resource-row__description">The reference Bell 103 implementation modem-audio's own test suite cross-validates against in both directions (see <code>docs/ber-calibration.md</code>) - and the tool to reach for if the ceremony isn't what you're after.</p>
-        </li>
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://github.com/ggerganov/ggwave" target="_blank" rel="noopener">ggwave</a>
-          <p class="resource-row__description">A tiny data-over-sound library built for speed and range, with none of the dial tone, DTMF or answer-tone ceremony this project performs on purpose.</p>
-        </li>
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://github.com/quiet/quiet-js" target="_blank" rel="noopener">quiet</a>
-          <p class="resource-row__description">A JavaScript binding for libquiet that sends and receives data through a browser's own sound card - the same audio-as-a-wire idea, aimed squarely at throughput.</p>
-        </li>
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://github.com/kulp/tynsel" target="_blank" rel="noopener">tynsel</a>
-          <p class="resource-row__description">A space- and time-efficient 300 baud Bell 103 software modem built to run on microcontrollers - the same standard, a very different constraint.</p>
-        </li>
-      </ul>
-    </section>
-
-    <section class="resources section-anchor" id="history" aria-labelledby="history-heading">
-      <h2 id="history-heading">The history</h2>
-      <p>Why any of this was worth building.</p>
-      <ul class="resource-list">
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://hackaday.com/2013/01/31/how-a-dial-up-modem-handshake-works/" target="_blank" rel="noopener">How a dial-up modem handshake works (Hackaday, annotating Oona Raisanen's spectrogram)</a>
-          <p class="resource-row__description">The annotated dial-up handshake spectrogram that is the actual reason this project exists - every stage of the sound named against what's making it.</p>
-        </li>
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://en.wikipedia.org/wiki/Bulletin_board_system" target="_blank" rel="noopener">Bulletin board system (Wikipedia)</a>
-          <p class="resource-row__description">What all this ceremony was actually for: the dial-up bulletin boards people called into for the better part of two decades before the web replaced them.</p>
-        </li>
-        <li class="resource-row">
-          <a class="resource-row__link" href="https://en.wikipedia.org/wiki/Hayes_Smartmodem" target="_blank" rel="noopener">Hayes Smartmodem (Wikipedia)</a>
-          <p class="resource-row__description">The modem that introduced the AT command set - modem's own <code>ATDT</code> and <code>ATA</code> are still the same two commands, unchanged.</p>
-        </li>
-      </ul>
+    <!-- Standards, prior art and the history moved to /prior-art on 9
+         Sep 2026 (task 3n) - this page was carrying six h2s and doing
+         two jobs (the design spec's own diagnosis). This section is
+         deliberately just a pointer, the same shape as index.html's own
+         explainer-teaser: a reason to go there, not a second copy. -->
+    <section class="explainer-teaser" aria-labelledby="prior-art-teaser-heading">
+      <h2 id="prior-art-teaser-heading">Standards, prior art and the history</h2>
+      <p>The Bell 103/FSK standards named above, the prior art worth trying if speed rather than ceremony is the point, and the history that made this worth building all live on their own page.</p>
+      <p><a class="dial-button" href="/prior-art">Standards, prior art and history</a></p>
     </section>
 
     <p><a class="dial-button" href="/">Try the demo</a></p>
 
   </main>
 
-  <footer class="endorsement">
-    <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a></p>
+  <!-- BEGIN generated: footer (web/_gen/pages.py - do not hand-edit) -->
+<footer class="endorsement">
+  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. The full workspace - modem-core, modem-audio, modem-tui, modem-wasm and this page - lives on <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>, MIT licensed.</p>
 
-    <!-- Same grouped treatment as index.html's own footer - see that
-         page's comment. -->
-    <div class="endorsement__groups">
-      <div class="endorsement__group">
-        <p class="endorsement__group-label">This project</p>
-        <p class="endorsement__links">
-          <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
-          <a href="/">Try</a>
-        </p>
-      </div>
-
-      <div class="endorsement__group">
-        <p class="endorsement__group-label">Also from DBHQ</p>
-        <ul class="endorsement__siblings">
-          <li><a href="https://dbhq.uk">DBHQ</a> - the practice behind these experiments.</li>
-          <li><a href="https://bbs.dbhq.uk">BBS</a> - explore a bulletin board system.</li>
-          <li><a href="https://heliograph.dbhq.uk">heliograph</a> - debug a remote machine through an operator, using Git.</li>
-        </ul>
-      </div>
+  <div class="endorsement__groups">
+    <div class="endorsement__group">
+      <p class="endorsement__group-label">This project</p>
+      <p class="endorsement__links">
+        <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
+      </p>
     </div>
-  </footer>
+
+    <div class="endorsement__group">
+      <p class="endorsement__group-label">Also from DBHQ</p>
+      <ul class="endorsement__siblings">
+        <li><a href="https://dbhq.uk">DBHQ</a> - the practice behind these experiments.</li>
+        <li><a href="https://bbs.dbhq.uk">BBS</a> - explore a bulletin board system.</li>
+        <li><a href="https://heliograph.dbhq.uk">heliograph</a> - debug a remote machine through an operator, using Git.</li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<!-- END generated: footer -->
 
 </div>
 
 <script type="module" src="explained.js"></script>
 <!-- GA4, in a file rather than Google's inline snippet - see index.html's
-     identical comment. -->
+     identical comment. Every page carries this - see web/_gen/pages.py. -->
+<!-- BEGIN generated: consent (web/_gen/pages.py - do not hand-edit) -->
 <script type="module" src="analytics.js"></script>
 <script type="module" src="consent.js"></script>
 <dialog class="consent" data-consent aria-labelledby="consent-title">
@@ -434,5 +366,6 @@
     <button type="button" class="dial-button" data-consent-accept autofocus>Accept</button>
   </div>
 </dialog>
+<!-- END generated: consent -->
 </body>
 </html>

@@ -4,14 +4,30 @@ The same `modem-core` the desktop binary runs, inside a Web Audio
 AudioWorklet - not a demo of the idea, a real Bell 103 endpoint that can
 hold a call with `modem --single --acoustic` on someone's desk.
 
-This directory also holds `modem.dbhq.uk`'s product page. What is here:
+This directory also holds `modem.dbhq.uk`'s product pages - six of them
+as of task 3n (9 Sep 2026), not one long page. What is here:
 
-- `index.html` / `style.css` - the product page: the browser demo, the
-  "Two ways to try this" split-screen/single-pane section, the
-  phase-by-phase explainer and downloads.
+- `index.html` (served at `/`) - the browser demo and the "Two ways to
+  try this" split-screen/single-pane section. `style.css` is shared by
+  all six pages plus `404.html`.
+- `explained.html` (`/explained`) - what you are hearing, phase by
+  phase, and Bell 103/FSK after CONNECT.
+- `prior-art.html` (`/prior-art`) - the standards this project actually
+  implements, the prior art worth trying if speed rather than ceremony
+  is the point, and the history behind it - split out of
+  `explained.html`, which used to carry all of this too.
+- `downloads.html` (`/downloads`), `projects.html` (`/projects`),
+  `about.html` (`/about`) - the platform table; the sibling DBHQ
+  experiments; and what this is, the performed-versus-real seam, and who
+  built it and why.
 - `_gen/frames.py` - regenerates the two rendered terminal frames inside
-  the "Two ways to try this" section - see that script's own doc and
-  "The generated frames" below.
+  `index.html`'s "Two ways to try this" section - see that script's own
+  doc and "The generated frames" below.
+- `_gen/pages.py` - regenerates the primary nav, the footer and the
+  consent/analytics block shared by all six pages plus `404.html` - see
+  that script's own doc and "The generated frames" below (same
+  BEGIN/END-marker mechanism, applied to markup this project authors
+  itself rather than markup pulled from another crate).
 - `session.js` - a thin wrapper around modem-wasm's raw C-ABI worklet
   exports (`session_new`, `process_out`/`process_in`, `dial`/`answer`,
   `send`/`receive`, ...). Shared, unchanged, between the main thread and
@@ -57,6 +73,25 @@ python3 web/_gen/frames.py
 Needs `cargo` on PATH. CI's `generated_assets` job runs this alongside
 every generator under `brand/_gen/` and fails on any diff, so a stale
 region cannot land unnoticed.
+
+## The generated shared chrome
+
+Six pages sharing a nav, a footer and a consent dialog is six
+hand-maintained copies unless something splices them in from one source.
+There is no build step for HTML in this repo, so `web/_gen/pages.py`
+follows `frames.py`'s own pattern instead: the nav, the footer and the
+consent/analytics block are generated between the same kind of
+BEGIN/END marker comments, on all six pages plus `404.html` (nav and
+footer only there - a 404 carries no analytics of its own to gate).
+Never hand-edit inside those markers; edit `web/_gen/pages.py` and
+regenerate:
+
+```bash
+python3 web/_gen/pages.py
+```
+
+Needs nothing beyond the Python standard library. CI's `generated_assets`
+job runs this alongside every other generator and fails on any diff.
 
 ## Building the WASM module
 

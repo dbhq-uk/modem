@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>About modem: what it is, and why it exists | modem</title>
+<meta name="description" content="modem is a DBHQ experiment by Daniel Grimes: a performed dial-up overture in front of a genuine Bell 103 connection. What is real, what is a reconstruction, and why this was worth building.">
+<link rel="canonical" href="https://modem.dbhq.uk/about">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://modem.dbhq.uk/about">
+<meta property="og:title" content="About modem: what it is, and why it exists | modem">
+<meta property="og:description" content="modem is a DBHQ experiment by Daniel Grimes: a performed dial-up overture in front of a genuine Bell 103 connection. What is real, what is a reconstruction, and why this was worth building.">
+<meta property="og:image" content="https://modem.dbhq.uk/hero.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1536">
+<meta property="og:image:height" content="1024">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="About modem: what it is, and why it exists | modem">
+<meta name="twitter:description" content="modem is a DBHQ experiment by Daniel Grimes: a performed dial-up overture in front of a genuine Bell 103 connection. What is real, what is a reconstruction, and why this was worth building.">
+<meta name="twitter:image" content="https://modem.dbhq.uk/hero.png">
+<link rel="icon" href="../brand/icon.svg" type="image/svg+xml">
+<link rel="icon" href="../brand/icon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="../brand/icon-180.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0A0A0A">
+<!-- See index.html's identical comment: an explicit <link> fetches in
+     parallel with style.css; style.css's own @import made this a serial
+     fetch instead. -->
+<link rel="stylesheet" href="../brand/tokens.css">
+<link rel="stylesheet" href="style.css">
+<!-- Structured data: application/ld+json is data, not script - see
+     index.html's identical comment on why this is exempt from
+     script-src under this site's strict CSP. New page on 9 Sep 2026
+     (task 3n): About was a byline in the footer; it is a real page now,
+     composed of existing sentences moved here from elsewhere on the
+     site rather than freshly invented copy - see this page's own body
+     comments for where each piece came from. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://modem.dbhq.uk/#website",
+      "url": "https://modem.dbhq.uk/",
+      "name": "modem",
+      "publisher": { "@id": "https://dbhq.uk/#organization" },
+      "inLanguage": "en-GB"
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://modem.dbhq.uk/about#webpage",
+      "url": "https://modem.dbhq.uk/about",
+      "name": "About modem: what it is, and why it exists | modem",
+      "description": "modem is a DBHQ experiment by Daniel Grimes: a performed dial-up overture in front of a genuine Bell 103 connection. What is real, what is a reconstruction, and why this was worth building.",
+      "isPartOf": { "@id": "https://modem.dbhq.uk/#website" },
+      "inLanguage": "en-GB"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<!-- Same cosmetic CRT power-on overlay as index.html - see that file's
+     own comment. Purely decorative, never intercepts a click, hidden
+     outright under prefers-reduced-motion. -->
+<div class="crt-warmup" aria-hidden="true"></div>
+
+<div class="crt-frame">
+
+  <!-- Six real pages - see index.html's identical comment and
+       web/_gen/pages.py, the single source for this nav, the footer and
+       the consent block shared by all six. -->
+  <!-- BEGIN generated: nav (web/_gen/pages.py - do not hand-edit) -->
+<nav class="site-nav" aria-label="Primary">
+  <a class="site-nav__link" href="/">Try</a>
+  <a class="site-nav__link" href="/explained">Explained</a>
+  <a class="site-nav__link" href="/prior-art">Prior art</a>
+  <a class="site-nav__link" href="/downloads">Downloads</a>
+  <a class="site-nav__link" href="/projects">Projects</a>
+  <a class="site-nav__link" href="/about" aria-current="page">About</a>
+</nav>
+<!-- END generated: nav -->
+
+  <header class="hero">
+    <!-- See index.html's identical comment on why this is a <picture>
+         with pre-generated WebP/AVIF variants rather than the bare PNG. -->
+    <picture>
+      <source type="image/avif" srcset="hero-480.avif 480w, hero-768.avif 768w, hero-1080.avif 1080w, hero-1536.avif 1536w" sizes="100vw">
+      <source type="image/webp" srcset="hero-480.webp 480w, hero-768.webp 768w, hero-1080.webp 1080w, hero-1536.webp 1536w" sizes="100vw">
+      <img class="hero__image" src="hero.png" width="1536" height="1024" decoding="async" fetchpriority="low" alt="" aria-hidden="true">
+    </picture>
+    <div class="hero__overlay">
+      <div class="hero__content">
+        <p class="wordmark">modem</p>
+        <h1 class="hero__heading">About modem</h1>
+        <p class="hero__tagline">What's real, what's performed, and why</p>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- "What this is" - the same opening description index.html's own
+         intro uses, verbatim (see this repo's own rule against rewording
+         factual copy). Repeating it here is deliberate, not drift: it is
+         the one paragraph that actually answers "what is this", so both
+         the pitch on / and the explanation on /about state it the same
+         way. -->
+    <section class="explainer" aria-labelledby="what-heading">
+      <h2 id="what-heading">What this is</h2>
+      <p>modem runs a real Bell 103 connection between two machines over their sound cards. Getting there takes a moment: a faithfully performed dial-up overture goes first - off-hook, dial tone, DTMF, ringback, the ANSam answer tone and its phase reversals - then a real 300 baud connection underneath.</p>
+    </section>
+
+    <!-- The performed-versus-real seam - the same honesty statement
+         index.html's own intro carries as a terminal-line, verbatim, plus
+         a pointer to the phase-by-phase detail rather than repeating it. -->
+    <section class="explainer" aria-labelledby="seam-heading">
+      <h2 id="seam-heading">What's performed, and what's real</h2>
+      <p class="terminal-line">The overture is a reconstruction. The FSK connection underneath it is real.</p>
+      <p>Every phase of that overture, including the one stage that only performs an impression of a real signal rather than reconstructing one, is explained phase by phase on its own page.</p>
+      <p><a class="dial-button" href="/explained">Read the phase-by-phase explainer</a></p>
+    </section>
+
+    <!-- Who made it, and why - the footer's own byline fact, stated here
+         as prose rather than small print, plus the actual reason this
+         project exists (the same fact /prior-art's own History section
+         cites for Oona Raisanen's Hackaday-annotated spectrogram). -->
+    <section class="explainer" aria-labelledby="who-heading">
+      <h2 id="who-heading">Who made it, and why</h2>
+      <p>modem is a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. The full workspace - modem-core, modem-audio, modem-tui, modem-wasm and this page - lives on <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>, MIT licensed.</p>
+      <p>The actual reason it exists is Oona Raisanen's annotated dial-up handshake spectrogram, published on Hackaday - every stage of the sound named against what was actually making it. The full citation, alongside the rest of the prior art and the wider history, is on its own page.</p>
+      <p><a class="dial-button" href="/prior-art">Standards, prior art and history</a></p>
+    </section>
+
+  </main>
+
+  <!-- BEGIN generated: footer (web/_gen/pages.py - do not hand-edit) -->
+<footer class="endorsement">
+  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. The full workspace - modem-core, modem-audio, modem-tui, modem-wasm and this page - lives on <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>, MIT licensed.</p>
+
+  <div class="endorsement__groups">
+    <div class="endorsement__group">
+      <p class="endorsement__group-label">This project</p>
+      <p class="endorsement__links">
+        <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
+      </p>
+    </div>
+
+    <div class="endorsement__group">
+      <p class="endorsement__group-label">Also from DBHQ</p>
+      <ul class="endorsement__siblings">
+        <li><a href="https://dbhq.uk">DBHQ</a> - the practice behind these experiments.</li>
+        <li><a href="https://bbs.dbhq.uk">BBS</a> - explore a bulletin board system.</li>
+        <li><a href="https://heliograph.dbhq.uk">heliograph</a> - debug a remote machine through an operator, using Git.</li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<!-- END generated: footer -->
+
+</div>
+
+<!-- GA4, in a file rather than Google's inline snippet - see index.html's
+     identical comment. Every page carries this - see web/_gen/pages.py. -->
+<!-- BEGIN generated: consent (web/_gen/pages.py - do not hand-edit) -->
+<script type="module" src="analytics.js"></script>
+<script type="module" src="consent.js"></script>
+<dialog class="consent" data-consent aria-labelledby="consent-title">
+  <h2 id="consent-title">CARRIER DETECT</h2>
+  <p>
+    We would like to count how many people come here to listen, using Google
+    Analytics. Cookies are only set if you accept, and the modem answers
+    exactly the same either way.
+  </p>
+  <div class="consent-actions">
+    <button type="button" class="dial-button" data-consent-decline>Decline</button>
+    <button type="button" class="dial-button" data-consent-accept autofocus>Accept</button>
+  </div>
+</dialog>
+<!-- END generated: consent -->
+</body>
+</html>
