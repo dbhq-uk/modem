@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>modem - a real Bell 103 modem, behind a performed dial-up handshake</title>
-<meta name="description" content="A real Bell 103 acoustic modem in your browser, preceded by a faithfully performed dial-up overture. Dial to hear it, then open your microphone to hold a call with a copy of modem running somewhere else.">
+<meta name="description" content="A real Bell 103 acoustic modem in your browser. Press Dial for a live one-device demo, both ends cross-wired right here, or open a second device's microphone for the real thing.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="modem - a real Bell 103 modem, behind a performed dial-up handshake">
-<meta property="og:description" content="The overture is a reconstruction. The connection underneath is real Bell 103 FSK at 300 baud.">
+<meta property="og:description" content="Press Dial and two real sessions connect right here, cross-wired in software. The connection underneath is real Bell 103 FSK at 300 baud.">
 <meta property="og:image" content="hero.png">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="../brand/icon.svg" type="image/svg+xml">
@@ -63,39 +63,18 @@
 
     <section class="demo" aria-labelledby="demo-heading">
       <h2 id="demo-heading">Dial</h2>
-      <p>Press dial and the full overture plays through your speakers, rendered live by the same code that runs the real connection - not a recording. The waterfall draws as it goes and each phase is named as it fires. Nothing is asked of you yet: this button only plays sound.</p>
+      <p>Press Dial and two real sessions connect right here, cross-wired in software: dial tone, DTMF, ringback and the answer tone, then a real 300 baud connection, both transcripts filling in as it goes - all through your speakers. No microphone, no second machine.</p>
 
       <div class="demo__controls">
         <button class="dial-button" id="dial-btn" type="button">Dial</button>
-      </div>
-
-      <div class="terminal">
-        <div class="terminal__output" id="terminal-output" role="log" aria-label="Call transcript"></div>
-        <div class="waterfall-wrap">
-          <div class="waterfall-axis" aria-hidden="true">
-            <span>3400</span>
-            <span>2225</span>
-            <span>1270</span>
-            <span>300</span>
-          </div>
-          <canvas class="waterfall" id="waterfall" width="960" height="200" aria-hidden="true"></canvas>
-        </div>
-        <p class="now-playing" id="now-playing" aria-live="polite">Idle</p>
+        <button class="dial-button dial-button--secondary" id="two-device-btn" type="button">Two devices instead</button>
       </div>
 
       <noscript><p>The demo needs JavaScript. Everything else on this page reads fine without it.</p></noscript>
 
-      <div class="mode-select" id="mode-select" hidden>
-        <p>Now hold a real connection. One device or two?</p>
-        <div class="mode-select__controls">
-          <button class="dial-button" id="mode-one-btn" type="button">One device</button>
-          <button class="dial-button" id="mode-two-btn" type="button">Two devices</button>
-        </div>
-      </div>
-
       <div class="endpoint wired" id="wired-panel" hidden aria-labelledby="wired-heading">
         <h3 class="scenario__label" id="wired-heading">One device - both ends live, right here</h3>
-        <p>Two real sessions, cross-wired in software exactly as the binary's own split-screen demo wires them - the link never crosses the air, so this is genuinely <span class="mode-badge">DEMO MODE</span>, the same honesty the terminal app's own status bar carries. Dial from originate; answer picks up by itself, nothing to type there - the same auto-answer a real <code>--answer</code> end runs at startup.</p>
+        <p>Two real sessions, cross-wired in software exactly as the binary's own split-screen demo wires them - the link never crosses the air, so this is genuinely <span class="mode-badge">DEMO MODE</span>, the same honesty the terminal app's own status bar carries. Answer picked up and originate dialled automatically the moment you pressed Dial; redial with different digits below, or hang up and stop whenever you like.</p>
 
         <p class="wired__phase" id="wired-phase" role="status">IDLE - press ATDT to dial</p>
 
@@ -314,7 +293,26 @@
 
     <section class="explainer" aria-labelledby="explainer-heading">
       <h2 id="explainer-heading">What each part of the handshake was for</h2>
-      <p>The same audio the dial button plays above, broken into its individual stages. Each one can be replayed on its own. Dialling itself is decorative throughout this page - there is no real telephone network behind it, so the far end always answers regardless of what is dialled.</p>
+      <p>Play the whole overture at once, rendered live by the same code that runs the connection above - not a recording - or preview any stage on its own below. Dialling itself is decorative throughout this section: there is no real telephone network behind it, so the far end always answers regardless of what is dialled.</p>
+
+      <div class="demo__controls">
+        <button class="dial-button" id="overture-btn" type="button">Play the whole overture</button>
+      </div>
+
+      <div class="terminal">
+        <div class="terminal__output" id="terminal-output" role="log" aria-label="Call transcript"></div>
+        <div class="waterfall-wrap">
+          <div class="waterfall-axis" aria-hidden="true">
+            <span>3400</span>
+            <span>2225</span>
+            <span>1270</span>
+            <span>300</span>
+          </div>
+          <canvas class="waterfall" id="waterfall" width="960" height="200" aria-hidden="true"></canvas>
+        </div>
+        <p class="now-playing" id="now-playing" aria-live="polite">Idle</p>
+      </div>
+
       <ol class="phase-list" id="phase-list"></ol>
     </section>
 

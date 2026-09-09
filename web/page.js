@@ -29,10 +29,9 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
 
 const terminalOutput = document.getElementById('terminal-output');
 const nowPlaying = document.getElementById('now-playing');
+const overtureBtn = document.getElementById('overture-btn');
 const dialBtn = document.getElementById('dial-btn');
-const modeSelect = document.getElementById('mode-select');
-const modeOneBtn = document.getElementById('mode-one-btn');
-const modeTwoBtn = document.getElementById('mode-two-btn');
+const twoDeviceBtn = document.getElementById('two-device-btn');
 const micDiagnostic = document.getElementById('mic-diagnostic');
 const micIntro = document.getElementById('mic-intro');
 const micEnableBtn = document.getElementById('mic-enable-btn');
@@ -196,15 +195,60 @@ function stopWiredWaterfall() {
 let audioCtx = null;
 let prerenderPromise = null;
 
+// Safari (desktop and every iOS browser - Apple requires all of them to
+// run WebKit) still ships this prefixed on some versions.
+const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+
 function ensureAudioContext() {
   if (!audioCtx) {
-    audioCtx = new AudioContext();
+    if (!AudioContextCtor) {
+      throw new Error('this browser exposes no AudioContext (or webkitAudioContext) at all');
+    }
+    audioCtx = new AudioContextCtor();
   }
   if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
+    // Fired synchronously here, on first use - see this function's own
+    // callers, every one of which is the first statement evaluated in a
+    // click handler, before any await. WebKit only unlocks a context
+    // when resume() is called inside that synchronous window; call it
+    // one tick later (after even a single `await`) and it stays
+    // suspended forever with no error. Not awaited here on purpose - see
+    // reportIfAudioSuspended, which checks back once a caller's own
+    // async setup has finished.
+    audioCtx.resume().catch(() => {});
   }
   return audioCtx;
 }
+
+/**
+ * Tells a visitor when audio did not actually start, rather than leaving
+ * them looking at a demo that is visibly running but silent. Call once a
+ * demo's own async setup has settled, so `ctx.state` reflects the real
+ * outcome of the resume() call above rather than its still-pending
+ * promise.
+ */
+function reportIfAudioSuspended(ctx) {
+  if (ctx && ctx.state === 'suspended') {
+    micDiagnostic.textContent = 'Audio has not started for this tab yet - if this stays silent, check the device is not muted (the iOS silent switch mutes web audio too) and try the button again.';
+    micDiagnostic.className = 'diagnostic diagnostic--warning';
+    return true;
+  }
+  return false;
+}
+
+// iOS suspends every AudioContext when the page is backgrounded, and
+// does not resume it automatically when the visitor comes back - left
+// alone, that is a demo that looks like it is still running but has
+// gone silent. Re-resume whatever is currently live the moment the page
+// is visible again, from inside the same visibilitychange handler that
+// fires the moment a person switches back to the tab (itself a strong
+// enough activation signal for WebKit's own resume rules).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  if (wired) wired.resumeIfSuspended();
+  if (endpoint) endpoint.resumeIfSuspended();
+});
 
 async function prerenderOverture(ctx) {
   const sampleRate = 8000; // modem-core's own internal rate - no resampling
@@ -360,13 +404,14 @@ function playSlice({ audioBuffer, sampleRate }, startSample, endSample) {
 }
 
 async function playFullOverture() {
-  dialBtn.disabled = true;
+  overtureBtn.disabled = true;
   resetAllPhaseButtons();
   nowPlaying.textContent = 'Loading...';
   terminalOutput.innerHTML = '';
   waterfall.reset();
 
   const rendered = await ensurePrerendered();
+  reportIfAudioSuspended(audioCtx);
   appendTerminalLine(terminalOutput, 'ATDT01234567890', { command: true });
 
   clearScheduledAnnotations();
@@ -388,15 +433,14 @@ async function playFullOverture() {
   clearScheduledAnnotations();
   nowPlaying.textContent = 'Idle';
   setActivePhaseRow(null);
-  dialBtn.disabled = false;
-  modeSelect.hidden = false;
+  overtureBtn.disabled = false;
 }
 
-dialBtn.addEventListener('click', () => {
+overtureBtn.addEventListener('click', () => {
   playFullOverture().catch((err) => {
     console.error(err);
-    nowPlaying.textContent = 'Playback failed - press Dial to try again';
-    dialBtn.disabled = false;
+    nowPlaying.textContent = 'Playback failed - press play to try again';
+    overtureBtn.disabled = false;
   });
 });
 
@@ -479,15 +523,11 @@ PHASES.forEach((phase, index) => {
 });
 
 // -----------------------------------------------------------------------
-// The live demos - offered only once the passive overture has played,
-// per the staged design: front-loading a mode choice (let alone a
-// microphone prompt) loses a visitor who has no idea yet what this site
-// is. Two modes, matching the binary's own two ways to run it (see the
-// "Two ways to try this" section below): "One device" cross-wires two
-// real Sessions in software, right here in the page, exactly as
-// modem-audio's WiredTransport does; "Two devices" turns this tab into
-// one real endpoint, listening on a raw microphone, that a copy of the
-// binary on a second machine can dial or answer.
+// The live demos. "One device" (below) is the primary action - pressing
+// Dial gives the full split-screen call directly, no mode choice first.
+// "Two devices" is the clearly secondary alternative offered alongside
+// it: this tab becomes one real endpoint, listening on a raw microphone,
+// that a copy of the binary on a second machine can dial or answer.
 // -----------------------------------------------------------------------
 let endpoint = null;
 
@@ -506,9 +546,10 @@ function endpointStateName(state) {
 // for its own explicit "Enable microphone" click. Asking for a
 // microphone as the very first thing that happens, with the reason
 // following only after the browser's own permission dialog, had the
-// explanation arriving too late to be useful.
-modeTwoBtn.addEventListener('click', () => {
-  modeSelect.hidden = true;
+// explanation arriving too late to be useful. Nothing here touches
+// audio or permissions yet, so there is no gesture to preserve.
+twoDeviceBtn.addEventListener('click', () => {
+  twoDeviceBtn.disabled = true;
   micIntro.hidden = false;
 });
 
@@ -543,6 +584,7 @@ micEnableBtn.addEventListener('click', async () => {
     const summary = summariseMicDiagnostics(diagnostics);
     micDiagnostic.textContent = summary;
     micDiagnostic.className = diagnostics.warnings.length > 0 ? 'diagnostic diagnostic--warning' : 'diagnostic';
+    reportIfAudioSuspended(endpoint.ctx);
 
     micIntro.hidden = true;
     endpointPanel.hidden = false;
@@ -587,9 +629,7 @@ endpointStopBtn.addEventListener('click', async () => {
   endpointStatus.textContent = 'IDLE';
   micDiagnostic.textContent = 'Microphone disconnected';
   micDiagnostic.className = 'diagnostic';
-  modeSelect.hidden = false;
-  modeOneBtn.disabled = false;
-  modeTwoBtn.disabled = false;
+  twoDeviceBtn.disabled = false;
 });
 
 chatSendBtn.addEventListener('click', () => {
@@ -657,12 +697,29 @@ function updateWiredComposerEnablement() {
   wiredSendBtn.disabled = !bothConnected;
 }
 
-modeOneBtn.addEventListener('click', async () => {
-  modeOneBtn.disabled = true;
-  modeTwoBtn.disabled = true;
+/** Dials from originate with whatever is in the digits field - shared by
+ * the automatic first dial (below) and the panel's own "ATDT (dial)"
+ * redial button, so the two never drift into logging the command
+ * differently. */
+function dialWired() {
+  const digits = wiredDigits.value || '0';
+  wired.dial(digits);
+  appendTerminalLine(wiredLogA, `ATDT${digits}`, { command: true });
+}
+
+// Dial is the primary action and gives the whole live call directly - no
+// mode choice first (Dan, 8 Sep 2026: "single device should be the
+// default demo not a second step"). One click sets up both ends,
+// answers, and dials, so a visitor hears the handshake and watches both
+// transcripts fill in without a second decision to make. "Two devices"
+// (twoDeviceBtn, above) is the clearly secondary alternative sitting
+// beside it.
+dialBtn.addEventListener('click', async () => {
+  dialBtn.disabled = true;
   try {
     wired = new WiredEndpoint();
     await wired.init({ duplex: Duplex.HALF_PING_PONG });
+    reportIfAudioSuspended(wired.ctx);
 
     wired.addEventListener('status', (e) => {
       const { a, b } = e.detail;
@@ -689,21 +746,21 @@ modeOneBtn.addEventListener('click', async () => {
 
     startWiredWaterfall(wired);
     wiredPanel.hidden = false;
-    modeSelect.hidden = true;
+    // Auto-dial too - the whole point of making this the primary action
+    // is that pressing it once is the entire demo, not the first of
+    // several steps.
+    dialWired();
   } catch (err) {
     console.error(err);
-    micDiagnostic.textContent = `Could not start the one-device demo: ${err.message || err}`;
+    micDiagnostic.textContent = `Could not start the demo: ${err.message || err}`;
     micDiagnostic.className = 'diagnostic diagnostic--warning';
-    modeOneBtn.disabled = false;
-    modeTwoBtn.disabled = false;
+    dialBtn.disabled = false;
   }
 });
 
 wiredDialBtn.addEventListener('click', () => {
   if (!wired) return;
-  const digits = wiredDigits.value || '0';
-  wired.dial(digits);
-  appendTerminalLine(wiredLogA, `ATDT${digits}`, { command: true });
+  dialWired();
 });
 
 wiredHangupBtn.addEventListener('click', () => {
@@ -714,7 +771,7 @@ wiredHangupBtn.addEventListener('click', () => {
 // Fully releases the audio graph rather than relying on hangup() alone -
 // see wired.js's own stop() doc: an idle Session outputs silence, but
 // the node itself keeps rendering it until the context closes. Restores
-// the page to its pre-connect state so a mode can be chosen again.
+// the page to its pre-connect state so Dial can be pressed again.
 wiredStopBtn.addEventListener('click', async () => {
   if (!wired) return;
   await wired.stop();
@@ -729,9 +786,7 @@ wiredStopBtn.addEventListener('click', async () => {
   wiredStatusB.textContent = 'IDLE';
   wiredPhase.textContent = 'IDLE - press ATDT to dial';
   updateWiredComposerEnablement();
-  modeSelect.hidden = false;
-  modeOneBtn.disabled = false;
-  modeTwoBtn.disabled = false;
+  dialBtn.disabled = false;
 });
 
 wiredSendBtn.addEventListener('click', () => {

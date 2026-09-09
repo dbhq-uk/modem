@@ -486,6 +486,22 @@ section {
   text-shadow: none;
 }
 
+/* The secondary action beside the primary one - "Two devices" sits next
+ * to Dial rather than behind a mode choice (see page.js's own doc on
+ * why), so it needs to read as clearly lower-emphasis without a whole
+ * second button style: same shape and touch target as .dial-button,
+ * dimmer colour. */
+.dial-button--secondary {
+  color: var(--modem-white-dim);
+  border-color: var(--modem-white-dim);
+}
+
+.dial-button--secondary:hover:not(:disabled),
+.dial-button--secondary:focus-visible {
+  background: var(--modem-white-dim);
+  color: var(--modem-ground);
+}
+
 .diagnostic {
   font-size: var(--modem-type-scale-small);
   color: var(--modem-white-bright);
@@ -557,18 +573,6 @@ section {
 .endpoint select:focus-visible {
   border-color: var(--modem-green-bright);
   color: var(--modem-green-bright);
-}
-
-/* ---------------------------------------------------------------------
- * mode-select - the live "one device" / "two devices" choice, offered
- * once the overture has played (the same staged design the microphone
- * prompt already followed - see page.js's own doc on it).
- * ------------------------------------------------------------------- */
-.mode-select__controls {
-  display: flex;
-  gap: var(--modem-space-sm);
-  flex-wrap: wrap;
-  margin: var(--modem-space-sm) 0;
 }
 
 /* ---------------------------------------------------------------------
