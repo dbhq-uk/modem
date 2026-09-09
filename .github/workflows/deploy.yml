@@ -61,10 +61,12 @@ jobs:
           set -euo pipefail
           mkdir -p dist/web dist/brand
           cp web/*.html web/*.js web/*.css web/*.png web/*.wasm web/*.webp web/*.avif dist/web/ 2>/dev/null || true
-          # _headers has no extension, so it needs naming explicitly. It
-          # carries the CSP that permits WASM instantiation; without it the
-          # demo is blocked at the edge.
-          cp web/_headers dist/web/
+          # _headers and manifest.json need naming explicitly: _headers
+          # has no extension, and manifest.json is the only *.json file
+          # here so a wildcard would be one file wide open to typos.
+          # _headers carries the CSP that permits WASM instantiation;
+          # without it the demo is blocked at the edge.
+          cp web/_headers web/manifest.json dist/web/
           cp brand/tokens.css brand/icon.svg brand/icon-*.png brand/favicon.ico dist/brand/
           cp brand/wordmark.svg dist/brand/ 2>/dev/null || true
           # The page is served at the root, not at /web/.

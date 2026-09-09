@@ -94,10 +94,11 @@ def main() -> None:
     icon.write_text(svg())
     print(f"wrote {icon}")
 
-    # 16 and 32 for the browser tab, 180 for iOS, 512 for manifests,
-    # social cards and anything that wants a big one.
+    # 16 and 32 for the browser tab, 180 for iOS, 192 and 512 for the
+    # web app manifest (192 is the small/maskable Android/Chrome size;
+    # 512 doubles as the big one for social cards too).
     pngs = []
-    for px in (16, 32, 180, 512):
+    for px in (16, 32, 180, 192, 512):
         png = BRAND / f"icon-{px}.png"
         subprocess.run(
             ["rsvg-convert", "-w", str(px), "-h", str(px), str(icon), "-o", str(png)],

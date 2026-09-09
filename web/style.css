@@ -732,6 +732,167 @@ section {
   flex-shrink: 0;
 }
 
+/* ---------------------------------------------------------------------
+ * app-mode - the full-viewport phone view of the wired demo (Dan, 8 Sep
+ * 2026: "make the demo fill the phone screen on mobile nicely, almost
+ * become an app"). Toggled by page.js: #app-mode-btn, or a shared link
+ * landing on #demo while the viewport is phone-width. The panel itself
+ * (`.wired`, `#wired-panel`) is what goes fixed/full-viewport - nothing
+ * else on the page needs hiding, it is simply covered.
+ *
+ * `min-height: 0` on every flex child below matters more than it looks:
+ * without it a flex item's default `min-height: auto` refuses to shrink
+ * below its content's natural height, so the transcripts would push the
+ * controls off the bottom of the screen instead of scrolling internally
+ * within the space actually available.
+ * ------------------------------------------------------------------- */
+@media (min-width: 48.0625rem) {
+  /* The affordance only exists on phones - a desktop viewport already
+     shows both panels comfortably in the page's own flow. */
+  #app-mode-btn {
+    display: none;
+  }
+}
+
+.app-mode-back {
+  display: none;
+}
+
+body.app-mode {
+  overflow: hidden;
+}
+
+.wired.app-mode {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--modem-ground);
+  /* auto, not hidden: on a short device (iPhone SE at 667px tall is
+     still sold) the panels can shrink only so far before the transcript
+     logs hit their own min-height floor below - past that point this
+     scrolls the whole view rather than silently clipping the composer
+     or the hang-up/stop row off the bottom of the screen. Ordinary
+     current phones fit everything with nothing to scroll. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* dvh accounts for the address bar iOS shows and hides; vh is the
+     fallback for browsers with neither dvh nor the visualViewport
+     handling page.js layers on top for the keyboard case. */
+  height: 100vh;
+  height: 100dvh;
+  padding: var(--modem-space-sm);
+  padding-top: calc(var(--modem-space-sm) + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(var(--modem-space-sm) + env(safe-area-inset-bottom, 0px));
+  padding-left: calc(var(--modem-space-sm) + env(safe-area-inset-left, 0px));
+  padding-right: calc(var(--modem-space-sm) + env(safe-area-inset-right, 0px));
+}
+
+.wired.app-mode .app-mode-back {
+  display: inline-block;
+  align-self: flex-start;
+  flex-shrink: 0;
+  margin-bottom: var(--modem-space-xs);
+}
+
+/* The long explanation is worth reading once, in the page's own flow -
+   in app mode every line of vertical space instead goes to the two
+   transcripts, which are the entire reason to be in this view. */
+.wired.app-mode .wired__intro {
+  display: none;
+}
+
+.wired.app-mode .scenario__label {
+  flex-shrink: 0;
+  font-size: var(--modem-type-scale-base);
+  margin: 0;
+}
+
+.wired.app-mode .wired__phase {
+  flex-shrink: 0;
+  margin: 0 0 var(--modem-space-xs) 0;
+}
+
+.wired.app-mode .wired__panels {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 0 var(--modem-space-xs) 0;
+}
+
+.wired.app-mode .wired__panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* .endpoint__status is a <p>, and nothing elsewhere in this file resets
+   the UA default paragraph margin - harmless in normal flow, but inside
+   a flex column that margin does not collapse and was quietly claiming
+   most of the space meant for the transcript below it. */
+.wired.app-mode .wired__panel-bar,
+.wired.app-mode .endpoint__status--short {
+  margin: 0;
+}
+
+/* Both transcripts stay on screen at once - the entire point of this
+   view (Dan: "watching both ends at once is the entire point") - by
+   flexing to fill whatever height the panels row has rather than the
+   compact fixed max-height the same element uses in normal page flow.
+   Each keeps its own internal scroll for anything older than fits. */
+.wired.app-mode .terminal__output--compact {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+}
+
+/* Short phones (iPhone SE class, 667px tall, still sold new) - the two
+   transcripts are the one thing this view exists for (Dan: "watching
+   both ends at once is the entire point"). Giving the log itself a
+   min-height floor here fought .wired__panel's own min-height: 0 (that
+   one has to stay 0, or the panel could never shrink to fit at all)
+   and the result was the floor winning for the log's own box while the
+   panel around it did not grow to match - the log overflowing its own
+   panel's border rather than being reliably visible. Freeing space by
+   dropping the least essential rows first avoids that fight entirely:
+   the spectrogram and the redial row are not what a short screen needs
+   more than a visible transcript. */
+@media (max-height: 700px) {
+  .wired.app-mode .wired__waterfall-wrap {
+    display: none;
+  }
+
+  /* The redial digits field, not the whole row - #wired-dial (the ATDT
+     button) is the only way to start the call while already in app
+     mode on a short screen (the page's own outer Dial button is
+     covered by this fixed view, by design), so it must never be the
+     thing a space-saving rule hides. */
+  .wired.app-mode .wired__controls .endpoint__row:first-child label,
+  .wired.app-mode .wired__controls .endpoint__row:first-child input {
+    display: none;
+  }
+}
+
+.wired.app-mode .wired__waterfall-wrap {
+  flex-shrink: 0;
+  margin: var(--modem-space-xs) 0;
+}
+
+.wired.app-mode .wired__waterfall {
+  max-height: 15vh;
+}
+
+.wired.app-mode .wired__controls {
+  flex-shrink: 0;
+}
+
+.wired.app-mode .wired__controls .endpoint__row {
+  margin-bottom: var(--modem-space-xs);
+}
+
 .mode-badge {
   color: var(--modem-ground);
   background: var(--modem-green-bright);
@@ -1064,6 +1225,17 @@ section {
      than 320px, rather than each getting the full width in turn. */
   .wired__panels {
     flex-direction: column;
+    /* flex-wrap: wrap (base rule, above) is for the row-direction desktop
+       layout - a genuine safety net if a panel could not shrink to fit
+       beside the other. In column direction, wrapping instead opens a
+       second *column* (side by side, not stacked) the moment the two
+       panels' combined natural height exceeds whatever height is
+       available - invisible in normal page flow (nothing caps the
+       height there) but very visible in app mode's fixed-height view,
+       where it silently overlapped the two panels instead of shrinking
+       them. Stacking, never a second column, is the only layout that
+       ever made sense here below this breakpoint. */
+    flex-wrap: nowrap;
   }
 
   .wired__panel {

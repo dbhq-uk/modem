@@ -13,6 +13,8 @@
 <link rel="icon" href="../brand/icon.svg" type="image/svg+xml">
 <link rel="icon" href="../brand/icon-32.png" sizes="32x32">
 <link rel="apple-touch-icon" href="../brand/icon-180.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0A0A0A">
 <!-- brand/tokens.css linked directly rather than pulled in via style.css's
      own @import: an @import is a serial fetch (the browser must fetch and
      parse style.css before it even discovers the import), where two
@@ -80,13 +82,23 @@
       <p>Fast data-over-sound tools such as minimodem already move bytes across a room quicker than this ever will, and that is not what this is for. They have no interest in the dial tone, the DTMF, the answer tone or the negotiation, because none of it makes them faster. This performs exactly the parts a fast tool has no reason to want.</p>
     </section>
 
-    <section class="demo" aria-labelledby="demo-heading">
+    <!-- id="demo" is the shared-link landing point for the full-viewport
+         phone view (see page.js and style.css's own "app-mode" doc): a
+         desktop browser just scrolls here as a normal anchor, a phone
+         gets the fixed full-viewport view instead. -->
+    <section class="demo" id="demo" aria-labelledby="demo-heading">
       <h2 id="demo-heading">Dial</h2>
       <p>Press Dial and two real sessions connect right here, cross-wired in software: dial tone, DTMF, ringback and the answer tone, then a real 300 baud connection, both transcripts filling in as it goes - all through your speakers. No microphone, no second machine.</p>
 
       <div class="demo__controls">
         <button class="dial-button" id="dial-btn" type="button">Dial</button>
         <button class="dial-button dial-button--secondary" id="two-device-btn" type="button">Two devices instead</button>
+        <!-- Phones only (see style.css) - a dedicated full-viewport view
+             of the panel below, reachable straight from a shared link at
+             #demo (see page.js). "Full screen" rather than duplicating
+             Dial's own label: this does not start anything by itself,
+             it only changes how the same panel is shown. -->
+        <button class="dial-button dial-button--secondary" id="app-mode-btn" type="button">Full screen</button>
       </div>
 
       <noscript><p>The demo needs JavaScript. Everything else on this page reads fine without it.</p></noscript>
@@ -111,9 +123,20 @@
         </div>
       </details>
 
-      <div class="endpoint wired" id="wired-panel" hidden aria-labelledby="wired-heading">
+      <!-- No longer `hidden` by default: the idle two-terminal interface
+           and a working way to start it (the "ATDT (dial)" button below)
+           are on screen before any click, so a shared link shows what
+           there is to try immediately rather than an empty page - the
+           highest-value single change Codex's review called out. Every
+           control inside still no-ops safely until `wired` exists (see
+           page.js's own guards). -->
+      <div class="endpoint wired" id="wired-panel" aria-labelledby="wired-heading">
+        <!-- Only shown in full-viewport phone app mode (see style.css) -
+             the panel is reachable in normal page flow the rest of the
+             time, so "back" has nothing to mean there. -->
+        <button type="button" class="dial-button dial-button--secondary app-mode-back" id="app-mode-back-btn">Back</button>
         <h3 class="scenario__label" id="wired-heading">One device - both ends live, right here</h3>
-        <p>Two real sessions, cross-wired in software exactly as the binary's own split-screen demo wires them - the link never crosses the air, so this is genuinely <span class="mode-badge">DEMO MODE</span>, the same honesty the terminal app's own status bar carries. Answer picked up and originate dialled automatically the moment you pressed Dial; redial with different digits below, or hang up and stop whenever you like.</p>
+        <p class="wired__intro">Two real sessions, cross-wired in software exactly as the binary's own split-screen demo wires them - the link never crosses the air, so this is genuinely <span class="mode-badge">DEMO MODE</span>, the same honesty the terminal app's own status bar carries. Answer picked up and originate dialled automatically the moment you press Dial; redial with different digits below, or hang up and stop whenever you like.</p>
 
         <p class="wired__phase" id="wired-phase" role="status">IDLE - press ATDT to dial</p>
 

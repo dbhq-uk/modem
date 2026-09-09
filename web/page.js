@@ -69,6 +69,8 @@ const resumeSoundBtn = document.getElementById('resume-sound-btn');
 const copyDiagnosticsBtn = document.getElementById('copy-diagnostics-btn');
 const copyDiagnosticsStatus = document.getElementById('copy-diagnostics-status');
 
+const appModeBtn = document.getElementById('app-mode-btn');
+const appModeBackBtn = document.getElementById('app-mode-back-btn');
 const wiredPanel = document.getElementById('wired-panel');
 const wiredPhase = document.getElementById('wired-phase');
 const wiredStatusA = document.getElementById('wired-status-a');
@@ -920,7 +922,20 @@ function dialWired() {
 // transcripts fill in without a second decision to make. "Two devices"
 // (twoDeviceBtn, above) is the clearly secondary alternative sitting
 // beside it.
-dialBtn.addEventListener('click', async () => {
+//
+// A named function rather than an inline listener because two controls
+// now start the same call: the page's own Dial button, and the "ATDT
+// (dial)" button that lives inside the panel itself - the panel is
+// visible (see index.html, no longer `hidden` by default) before wired
+// exists so a shared link shows the idle two-terminal interface and a
+// working way to start it on the very first screen, including inside
+// the full-viewport phone app mode below, where the outer Dial button
+// is covered by the panel itself.
+let dialStarting = false;
+
+async function handleDialClick() {
+  if (dialStarting || wired) return;
+  dialStarting = true;
   dialBtn.disabled = true;
   try {
     wired = new WiredEndpoint();
@@ -967,11 +982,18 @@ dialBtn.addEventListener('click', async () => {
     micDiagnostic.textContent = `Could not start the demo: ${err.message || err}`;
     micDiagnostic.className = 'diagnostic diagnostic--warning';
     dialBtn.disabled = false;
+  } finally {
+    dialStarting = false;
   }
-});
+}
 
-wiredDialBtn.addEventListener('click', () => {
-  if (!wired) return;
+dialBtn.addEventListener('click', handleDialClick);
+
+wiredDialBtn.addEventListener('click', async () => {
+  if (!wired) {
+    await handleDialClick();
+    return;
+  }
   dialWired();
 });
 
@@ -1031,3 +1053,75 @@ window.addEventListener('beforeunload', () => {
 // empty until the first click - a visitor who opens Sound help before
 // pressing anything should see that reflected accurately, not a blank list.
 renderSoundHelp();
+
+// -----------------------------------------------------------------------
+// App mode - the full-viewport phone view of the wired panel (Dan, 8 Sep
+// 2026: "make the demo fill the phone screen on mobile nicely, almost
+// become an app"). The panel itself carries the fixed-position styling
+// (see style.css's own "app-mode" doc); this only toggles the class and
+// keeps the URL hash in sync so a shared link to #demo lands somewhere
+// that already works: a phone gets this view directly, a desktop
+// browser just scrolls to the ordinary #demo section instead (a native
+// anchor - #demo is a real id on that section - so nothing extra is
+// needed for that case).
+// -----------------------------------------------------------------------
+const phoneViewport = window.matchMedia('(max-width: 48rem)');
+
+function setAppMode(on) {
+  document.body.classList.toggle('app-mode', on);
+  wiredPanel.classList.toggle('app-mode', on);
+  if (on) {
+    updateAppModeViewportHeight();
+    appModeBackBtn.focus();
+  } else {
+    // Cleared rather than left stale - see updateAppModeViewportHeight,
+    // which only ever sets this while app mode is active.
+    wiredPanel.style.removeProperty('height');
+  }
+}
+
+function enterAppMode() {
+  if (location.hash !== '#demo') history.pushState(null, '', '#demo');
+  setAppMode(true);
+}
+
+function exitAppMode() {
+  setAppMode(false);
+  if (location.hash === '#demo') history.pushState(null, '', location.pathname + location.search);
+}
+
+/**
+ * `100dvh` already tracks the browser's own address bar; it does not
+ * reliably track the on-screen keyboard on every WebKit version. While
+ * app mode is active, the visualViewport API (where present) is the
+ * more honest source for "how much space is actually left above the
+ * keyboard" - setting the panel's own height directly to it keeps the
+ * composer visible above the keyboard rather than covered by it,
+ * instead of a fixed-height box the keyboard simply overlaps.
+ */
+function updateAppModeViewportHeight() {
+  if (!document.body.classList.contains('app-mode')) return;
+  if (window.visualViewport) {
+    wiredPanel.style.height = `${window.visualViewport.height}px`;
+  }
+}
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', updateAppModeViewportHeight);
+}
+
+appModeBtn.addEventListener('click', enterAppMode);
+appModeBackBtn.addEventListener('click', exitAppMode);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.body.classList.contains('app-mode')) exitAppMode();
+});
+
+window.addEventListener('hashchange', () => {
+  setAppMode(location.hash === '#demo' && phoneViewport.matches);
+});
+
+// A shared link landing directly on #demo, on a phone, should show the
+// full-viewport view immediately - not the ordinary page with the
+// visitor left to scroll down and discover it themselves.
+if (location.hash === '#demo' && phoneViewport.matches) setAppMode(true);
