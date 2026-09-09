@@ -147,6 +147,22 @@ jobs:
           echo "$RESP"
           echo "$RESP" | grep -q '"success":true'
 
+      # A freshly purged edge does not serve the new bytes everywhere the
+      # instant the purge returns, so a single immediate request fails at
+      # random on a deploy that actually worked - which is what happened on
+      # 9 Sep 2026, twice. Every check below polls instead.
+      - name: Wait for the edge to serve the new deploy
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            CODE=$(curl -sL -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/?cb=${GITHUB_SHA}-$i")
+            [ "$CODE" = "200" ] && { echo "edge serving after $i attempts"; exit 0; }
+            echo "attempt $i: $CODE"
+            sleep 6
+          done
+          echo "edge never served a 200 after 20 attempts"
+          exit 1
+
       # Cache-busted: a plain request can still be served a stale edge copy
       # right after a purge.
       - name: Verify the deploy is live
@@ -162,7 +178,11 @@ jobs:
       - name: /explained must serve and /links must redirect to it
         run: |
           set -euo pipefail
-          CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/explained?cb=${GITHUB_SHA}")
+          for i in $(seq 1 10); do
+            CODE=$(curl -sL -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/explained?cb=${GITHUB_SHA}-$i")
+            [ "$CODE" = "200" ] && break
+            sleep 6
+          done
           echo "/explained -> $CODE"
           [ "$CODE" = "200" ]
           REDIRECT_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/links?cb=${GITHUB_SHA}")
