@@ -17,6 +17,25 @@ import {
 import { Waterfall } from './waterfall.js';
 import { appendTerminalLine } from './terminal-line.js';
 
+// Registered before anything else here can throw, so a failure while
+// this module is still evaluating is *visible* rather than silent.
+//
+// A `type="module"` script that throws at top level stops dead: no
+// handlers are attached, so every button on the page does nothing at
+// all, with no console entry a visitor would ever see and no network
+// request to notice. That happened live on 9 Sep 2026 - clicking Demo
+// did nothing, and the cause (a null canvas passed to `new Waterfall`)
+// was three hundred lines away from the symptom. The listener below
+// cannot prevent that, but it turns "nothing happens" into a line of
+// text naming the file and the line, which is the difference between a
+// five-minute diagnosis and an afternoon of one.
+window.addEventListener('error', (e) => {
+  const el = document.getElementById('demo-diagnostic') || document.getElementById('mic-diagnostic');
+  if (!el || el.textContent) return;
+  el.textContent = `The demo could not start: ${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`;
+  el.hidden = false;
+});
+
 // The single fix most likely to matter on iOS - see audio-diagnostics.js's
 // own doc - set as early as the module can run, well before any click.
 // Harmless and idempotent to call this early: it only configures a
@@ -94,14 +113,45 @@ const chatLog = document.getElementById('chat-log');
 // Waterfall instance on its own page; the class itself is shared (see
 // waterfall.js) so the two can never disagree on how a spectrogram
 // reads, but the instances themselves are never shared across pages.
-const wiredWaterfall = new Waterfall(wiredCanvas);
+// Built on first use, not at module load, and skipped entirely when the
+// canvas is not on this page.
+//
+// This used to be `const wiredWaterfall = new Waterfall(wiredCanvas)` at
+// module scope, and that one line could take the whole page down:
+// `Waterfall`'s constructor calls `canvasEl.getContext('2d')`
+// immediately, so a null canvas throws `TypeError: Cannot read
+// properties of null` **while page.js is still evaluating**. Nothing
+// after it runs - which means no click handlers get attached at all, and
+// every button on the page silently does nothing. That is the worst
+// possible failure shape: no error visible to the visitor, no network
+// request, nothing to click that responds. Observed live on 9 Sep 2026,
+// where clicking Demo produced no console entry and no request.
+//
+// A spectrogram is decoration. It must not be able to disable the demo
+// it decorates, so it is created lazily and every call site tolerates
+// its absence.
+let wiredWaterfall = null;
 let wiredWaterfallRaf = null;
+
+function ensureWiredWaterfall() {
+  if (wiredWaterfall === null && wiredCanvas) {
+    try {
+      wiredWaterfall = new Waterfall(wiredCanvas);
+    } catch (err) {
+      console.error('waterfall unavailable, continuing without it', err);
+      wiredWaterfall = false;
+    }
+  }
+  return wiredWaterfall || null;
+}
 
 function startWiredWaterfall(endpoint) {
   stopWiredWaterfall();
+  const waterfall = ensureWiredWaterfall();
+  if (!waterfall) return;
   const draw = () => {
     try {
-      wiredWaterfall.frame(endpoint.analyser, endpoint.ctx.sampleRate);
+      waterfall.frame(endpoint.analyser, endpoint.ctx.sampleRate);
     } catch (err) {
       console.error('wired waterfall draw failed', err);
       return;
@@ -116,7 +166,7 @@ function stopWiredWaterfall() {
     cancelAnimationFrame(wiredWaterfallRaf);
     wiredWaterfallRaf = null;
   }
-  wiredWaterfall.reset();
+  if (wiredWaterfall) wiredWaterfall.reset();
 }
 
 /**

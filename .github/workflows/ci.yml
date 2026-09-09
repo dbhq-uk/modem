@@ -15,7 +15,17 @@ jobs:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
       - name: Install minimodem for cross-validation
-        run: sudo apt-get update && sudo apt-get install -y minimodem libasound2-dev
+        # The runner image ships a Google Chrome apt source this project
+        # has no use for, and `apt-get update` fails the whole step when
+        # that third-party index is briefly inconsistent - which is
+        # exactly what happened on 9 Sep 2026, twice in a row, on a
+        # commit that touched one CSS file. Dropping the list first
+        # means an outage at dl.google.com cannot fail our build.
+        run: |
+          set -euo pipefail
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y minimodem libasound2-dev
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
       # The default feature set never touches the --no-default-features
@@ -173,7 +183,13 @@ jobs:
       # installs for the same reason.
       - uses: dtolnay/rust-toolchain@1.98.1
       - name: Install the tools the generators need
-        run: sudo apt-get update && sudo apt-get install -y librsvg2-bin imagemagick libasound2-dev
+        # See the `test` job's own note on why the Google Chrome apt
+        # source is removed before updating.
+        run: |
+          set -euo pipefail
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin imagemagick libasound2-dev
       # Every generator, discovered rather than listed - a new one added
       # to brand/_gen/ or web/_gen/ is covered the moment it lands,
       # instead of silently sitting outside this check until somebody
