@@ -44,7 +44,13 @@ WEB = HERE.parent
 # One nav item per real page - id, label, href. Order is the order the
 # brief's own table gives, and the order every page's nav renders in.
 NAV_ITEMS = (
-    ("try", "Try", "/"),
+    # "Hear it", not "Try" (Dan, 9 Sep 2026). Try names an effort the
+    # visitor has to make; this names what they get, and it says the same
+    # thing the page's own h1 does - "Hear the dial-up sound, live". The
+    # id stays `try` because it is the internal key, not the label, and
+    # renaming it would move every aria-current mapping below for
+    # nothing.
+    ("try", "Hear it", "/"),
     ("explained", "Explained", "/explained"),
     ("prior-art", "Prior art", "/prior-art"),
     ("downloads", "Downloads", "/downloads"),
