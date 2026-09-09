@@ -156,6 +156,23 @@ jobs:
           echo "modem.dbhq.uk -> $CODE"
           [ "$CODE" = "200" ]
 
+      # explained.html absorbed links.html entirely on 9 Sep 2026 - the old
+      # file is gone from the repo, so the only thing standing between an
+      # old /links link and a 404 is this _redirects rule actually shipping.
+      - name: /explained must serve and /links must redirect to it
+        run: |
+          set -euo pipefail
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/explained?cb=${GITHUB_SHA}")
+          echo "/explained -> $CODE"
+          [ "$CODE" = "200" ]
+          REDIRECT_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/links?cb=${GITHUB_SHA}")
+          FINAL=$(curl -sL -o /dev/null -w "%{url_effective}" "https://modem.dbhq.uk/links?cb=${GITHUB_SHA}")
+          echo "/links -> $REDIRECT_CODE, final $FINAL"
+          case "$FINAL" in
+            *"/explained"*) ;;
+            *) echo "landed at $FINAL, not /explained"; exit 1 ;;
+          esac
+
       # The demo is the entire point of the page, and it cannot run without
       # the WASM. A 200 on the HTML with a 404 on the payload is a page that
       # looks fine and does nothing.

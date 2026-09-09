@@ -12,3 +12,9 @@
 
 # Old links to the file itself.
 /index.html   /   301
+
+# links.html was absorbed into explained.html entirely on 9 Sep 2026 (see
+# the design spec) - the standards/prior-art/history content plus the
+# nine phases, now with a URL of their own. The file itself is gone;
+# anyone with the old URL still lands somewhere real.
+/links   /explained   301
