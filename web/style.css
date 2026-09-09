@@ -17,13 +17,22 @@
  * parallel instead. See index.html/links.html's own comment beside
  * their tokens.css <link>. */
 
-/* The page container width. Not a brand/tokens.json value: that file is
+/* Two page-only constants - not brand/tokens.json values: that file is
    for colour, type and CRT-effect values the TUI and the page must
    agree on, and a browser container width has no terminal equivalent.
-   One local constant so the hero and main line up at every viewport
-   instead of two hand-matched numbers drifting apart. */
+   --page-max-width is the outer shell (hero and main line up at every
+   viewport instead of two hand-matched numbers drifting apart).
+   --content-max-width is the page's own reading column: rem, not ch -
+   ch is relative to each element's own font-size (h2 is twice the body
+   size), so a shared ch value would give every element sharing this
+   column a different pixel width, where rem stays anchored to the root
+   size regardless of which element carries it. Wide artefacts (the
+   terminal transcript and its waterfall, the generated terminal-window
+   frames, the live wired/endpoint panels) keep --page-max-width's full
+   main instead - see the "Content column" rule below. */
 :root {
   --page-max-width: 1320px;
+  --content-max-width: 42rem;
 }
 
 * {
@@ -356,6 +365,49 @@ section {
   margin-bottom: var(--modem-space-lg);
 }
 
+/* The last section's own margin-bottom would otherwise double up with
+   main's own bottom padding immediately below it - the same redundancy
+   .scenario's own :last-child rule (further down this file) already
+   guards against between scenarios, just missing here, and the reason
+   the gap above the footer was roughly twice any other gap on the
+   page. */
+main > section:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Content column - the page's actual column structure. main is wide
+ * enough for wide artefacts (the terminal transcript and its waterfall,
+ * the live wired/endpoint panels, the generated terminal-window frames)
+ * to read at something near their real width; everything else -
+ * headings, prose, lists, button rows - sits in a centred column
+ * matching the same measure `p` already enforces on its own, rather
+ * than hugging main's left edge with the rest of a wide viewport left
+ * empty beside it. Scoped per section rather than via a wrapper
+ * element, so no markup moves: only each section's own direct-child
+ * narrative pieces are included, never a wide artefact nested a level
+ * deeper inside it (the terminal, the wired/endpoint panels, the
+ * generated frames all stay untouched by this rule).
+ * ------------------------------------------------------------------- */
+.intro > p,
+.demo > h2,
+.demo > p,
+.demo > noscript > p,
+.scenarios > h2,
+.scenarios > p,
+.scenario__label,
+.scenario > p,
+.explainer > h2,
+.explainer > p,
+.downloads > h2,
+.downloads > p,
+.resources > h2,
+.resources > p {
+  max-width: var(--content-max-width);
+  margin-left: auto;
+  margin-right: auto;
+}
+
 /* ---------------------------------------------------------------------
  * terminal-line - a line of output. The typewriter reveal (added via
  * the `.terminal-line--typing` class while a line is being animated in)
@@ -472,7 +524,8 @@ section {
   display: flex;
   gap: var(--modem-space-sm);
   flex-wrap: wrap;
-  margin: var(--modem-space-sm) 0;
+  max-width: var(--content-max-width);
+  margin: var(--modem-space-sm) auto;
 }
 
 .dial-button {
@@ -533,8 +586,9 @@ section {
  * exactly the situation it exists to help with.
  * ------------------------------------------------------------------- */
 .sound-help {
+  max-width: var(--content-max-width);
   border: 1px solid var(--modem-white-dim);
-  margin-top: var(--modem-space-sm);
+  margin: var(--modem-space-sm) auto 0 auto;
   padding: var(--modem-space-xs) var(--modem-space-sm);
 }
 
@@ -1073,7 +1127,7 @@ body.app-mode {
   background: var(--modem-ground);
   width: max-content;
   max-width: 100%;
-  margin: var(--modem-space-sm) 0 0 0;
+  margin: var(--modem-space-sm) auto 0 auto;
 }
 
 /* The narrower "one device" pair (two 72-column single panes) shown in
@@ -1142,7 +1196,8 @@ body.app-mode {
  * ------------------------------------------------------------------- */
 .phase-list {
   list-style: none;
-  margin: 0;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
   padding: 0;
 }
 
@@ -1214,7 +1269,8 @@ body.app-mode {
  * ------------------------------------------------------------------- */
 .download-list {
   list-style: none;
-  margin: 0;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
   padding: 0;
 }
 
@@ -1254,33 +1310,50 @@ body.app-mode {
 }
 
 /* ---------------------------------------------------------------------
- * endorsement - the DBHQ footer line, plus the small GitHub/Links row
- * every page in web/ carries beneath it. endorsement__links is its own
- * paragraph rather than more inline links crowded into the first one,
- * so the two kinds of link (who made this / where else to go) stay
- * visually distinct without needing two different colours to say so.
+ * endorsement - the page footer: the required "a DBHQ experiment by..."
+ * byline, then two labelled groups (this project's own links, and the
+ * sibling DBHQ experiments) rather than three undifferentiated rows a
+ * visitor has to guess the shape of. Sized to the same content column
+ * as the rest of the page's prose - a footer is still text, not a wide
+ * artefact - and separated from the content above by its own rule
+ * rather than a bare gap.
  * ------------------------------------------------------------------- */
 .endorsement {
+  max-width: var(--content-max-width);
+  margin: 0 auto;
   text-align: center;
   padding: var(--modem-space-md) 0 var(--modem-space-lg) 0;
+  border-top: 1px solid var(--modem-white-dim);
   font-size: var(--modem-type-scale-small);
   color: var(--modem-white-dim);
+}
+
+.endorsement__byline {
+  margin: 0;
+}
+
+/* Two labelled groups side by side where there is room, stacking on a
+   narrow viewport via the same wrap every other flex row on this page
+   already uses. */
+.endorsement__groups {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--modem-space-lg);
+  margin-top: var(--modem-space-md);
+}
+
+.endorsement__group-label {
+  margin: 0 0 var(--modem-space-xs) 0;
+  letter-spacing: 0.05em;
 }
 
 .endorsement__links {
   display: flex;
   justify-content: center;
+  align-items: center;
   gap: var(--modem-space-sm);
-  margin-top: var(--modem-space-xs);
-}
-
-/* The sibling DBHQ experiments row - a second, visually quieter line
- * under the project's own links, not merged into them: "GitHub / Links"
- * is about this project, "DBHQ / BBS / heliograph" is cross-promotion,
- * and keeping them apart is what keeps the second one from reading as
- * more of this project's own material than it is. */
-.endorsement__siblings {
-  opacity: 0.8;
+  margin: 0;
 }
 
 /* ---------------------------------------------------------------------
@@ -1291,7 +1364,8 @@ body.app-mode {
  * ------------------------------------------------------------------- */
 .resource-list {
   list-style: none;
-  margin: 0;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
   padding: 0;
 }
 
@@ -1368,7 +1442,8 @@ body.app-mode {
   .endpoint button,
   .endpoint select,
   .phase-row__play,
-  .download-row__link {
+  .download-row__link,
+  .endorsement__links a {
     min-height: 44px;
   }
 

@@ -444,20 +444,32 @@
   </main>
 
   <footer class="endorsement">
-    <p>a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a></p>
-    <p class="endorsement__links">
-      <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
-      <a href="https://github.com/dbhq-uk/modem/releases" rel="noopener">Releases</a>
-      <a href="links.html">Links</a>
-    </p>
-    <!-- The sibling DBHQ experiments - "what other sites do for
-         cross-promotion" (Dan, 8 Sep 2026). All plain links, no
-         interstitial, no banner. -->
-    <p class="endorsement__links endorsement__siblings">
-      <a href="https://dbhq.uk">DBHQ</a>
-      <a href="https://bbs.dbhq.uk">BBS</a>
-      <a href="https://heliograph.dbhq.uk">heliograph</a>
-    </p>
+    <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a></p>
+
+    <!-- Two labelled groups, not three undifferentiated rows: this
+         project's own links, then the sibling DBHQ experiments -
+         "what other sites do for cross-promotion" (Dan, 8 Sep 2026).
+         dbhq.uk and the releases page are already linked above (the
+         byline, and the three platform rows just above this footer),
+         so neither is repeated here. All plain links, no interstitial,
+         no banner. -->
+    <div class="endorsement__groups">
+      <div class="endorsement__group">
+        <p class="endorsement__group-label">This project</p>
+        <p class="endorsement__links">
+          <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
+          <a href="links.html">Links</a>
+        </p>
+      </div>
+
+      <div class="endorsement__group">
+        <p class="endorsement__group-label">Also from DBHQ</p>
+        <p class="endorsement__links">
+          <a href="https://bbs.dbhq.uk">BBS</a>
+          <a href="https://heliograph.dbhq.uk">heliograph</a>
+        </p>
+      </div>
+    </div>
   </footer>
 
 </div>
