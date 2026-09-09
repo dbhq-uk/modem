@@ -73,6 +73,28 @@ jobs:
           # The page is served at the root, not at /web/.
           mv dist/web/* dist/
           rmdir dist/web
+
+          # The three routes are real directories, not _redirects rewrites.
+          # Cloudflare Pages would not honour a 200 rewrite for them:
+          # rewriting /demo to /index.html canonicalised straight to /, and
+          # rewriting to /app.html went to /app - both times discarding the
+          # path that page.js reads to decide which route it is, which
+          # silently broke sharing a /receive link. Each directory gets a
+          # copy of the one index.html with <base href="/"> injected, so its
+          # relative assets still resolve from the root while
+          # location.pathname stays /demo/, /originate/ or /receive/.
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path('dist/index.html').read_text()
+          assert '<base' not in src, 'index.html already has a <base>; rework this step'
+          out = src.replace('<head>', '<head>\n<base href="/">', 1)
+          for route in ('demo', 'originate', 'receive'):
+              d = Path('dist') / route
+              d.mkdir(parents=True, exist_ok=True)
+              (d / 'index.html').write_text(out)
+              print('wrote', d / 'index.html')
+          PY
+
           ls -la dist
 
       - name: Deploy to Cloudflare Pages

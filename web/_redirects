@@ -1,10 +1,14 @@
-# Rewrites, not redirects (status 200): the URL stays exactly where a
-# visitor put it, only the served bytes change. One application behind
-# all three routes - see page.js's own routing doc - so each of these
-# just serves the same index.html, which then reads location.pathname
-# itself to decide which of the three it is. spike/serve.py's own
-# RewritingHandler does the same thing for local preview, since this
-# file only has an effect on Cloudflare Pages.
-/demo       /index.html   200
-/originate  /index.html   200
-/receive    /index.html   200
+# The three routes (/demo, /originate, /receive) are NOT here, and that is
+# deliberate. Cloudflare Pages would not honour a 200 rewrite for them:
+# rewriting to /index.html canonicalised straight to /, and rewriting to
+# /app.html went to /app - both times throwing away the path that page.js
+# reads to decide which route it is, which silently broke sharing a
+# /receive link while looking fine locally.
+#
+# They are real directories instead, built from the one index.html at
+# deploy time - see the "Assemble the upload" step in
+# .github/workflows/deploy.yml, and spike/serve.py's RewritingHandler for
+# the local equivalent.
+
+# Old links to the file itself.
+/index.html   /   301
