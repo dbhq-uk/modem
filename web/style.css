@@ -217,6 +217,14 @@ p {
   z-index: 999;
   pointer-events: none;
   background: var(--modem-ground);
+  /* Transparent unless the animation is actually running. This overlay
+     covers the entire viewport opaquely, and the animation was the only
+     thing clearing it - so anything that stopped the animation starting
+     left a black page over the whole site with no error anywhere. A
+     backgrounded or restored tab throttles animations, which is exactly
+     when somebody opening a shared link would hit it. Decoration must
+     fail invisible, never opaque. */
+  opacity: 0;
   animation: modem-crt-power-on 900ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
 }
 
