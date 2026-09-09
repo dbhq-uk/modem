@@ -86,12 +86,15 @@
 //! carrier well before - or entirely without - the loop ever seeing one.
 //! Do not read `carrier_detected()` as a proxy for acquisition.
 //!
-//! # A click is loud, but it is not at the right frequencies
+//! # A click is loud, but it is not at the right frequency
 //!
 //! `CarrierDetector` alone watches total in-band energy, and total energy
 //! cannot tell a genuine Bell 103 tone from broadband noise or a click of
-//! the same loudness - see `carrier.rs`'s own module doc, which is the
-//! full account of why and what `ToneDominance` does about it.
+//! the same loudness - nor, on its own, from a narrowband tone a few tens
+//! of hertz away, which is what every stage of this crate's own overture
+//! is. See `carrier.rs`'s own module doc, which is the full account of
+//! why, what `ToneDominance` does about it, and why it watches the mark
+//! tone alone.
 //! `push_sample` feeds every raw sample to `dominance` and uses the
 //! *previous* completed block's verdict to gate the *current* block's
 //! energy before `carrier.update` ever sees it - zero when the block was
@@ -180,11 +183,12 @@ pub struct Rx {
     /// and clears the moment energy goes down. One detector with a latch
     /// on top, rather than two detectors that would evolve their floors
     /// independently and drift apart.
-    /// Tells a genuine Bell 103 tone in this end's listening band from
-    /// broadband energy of the same or greater loudness - see
-    /// `carrier.rs`'s own module doc. Built from the same `(mark, space)`
-    /// pair as this `Rx`'s own correlator, below, so the two can never
-    /// tune to different bands.
+    /// Tells a genuine Bell 103 carrier in this end's listening band from
+    /// broadband energy of the same or greater loudness, and from
+    /// narrowband energy at a nearby but different frequency - see
+    /// `carrier.rs`'s own module doc. Built from the same `mark` this
+    /// `Rx`'s own correlator uses, below, so the two can never tune to
+    /// different bands.
     dominance: ToneDominance,
     /// The most recently completed [`ToneDominance`] block's verdict,
     /// applied to every sample of the *next* block - see `push_sample`'s
@@ -237,7 +241,9 @@ impl Rx {
             qualified: false,
             qualified_ever: false,
 
-            dominance: ToneDominance::new(mark, space, DSP_RATE),
+            // Mark only, not the pair: see `carrier.rs`'s module doc,
+            // "Why the mark tone alone, and not mark plus space".
+            dominance: ToneDominance::new(mark, DSP_RATE),
             // Closed until the first block completes - see push_sample's
             // own doc. A default of `true` would let this end's very
             // first ~32 ms of audio straight through ungated, which is

@@ -1529,6 +1529,37 @@ mod tests {
             }
         }
         assert!(connected, "never reached Connected under half duplex");
+
+        // Then keep ticking until local's carrier has genuinely risen and
+        // `poll_carrier` has announced it. Both ends reach `Connected`
+        // within a block or two of each other - local when its own
+        // overture finishes, far when it hears the carrier that starts
+        // there - and local's own rise lands a little after both, because
+        // far only begins transmitting idle mark once *it* is connected
+        // and the dominance gate needs a couple of blocks of it. So the
+        // loop above exits with local's `CONNECT 300` still pending, and
+        // the first `advance_time` after the hangup below would report
+        // that stale rise instead of the fall this test is about.
+        //
+        // This is not a latent flake that happened to start firing. Until
+        // `ToneDominance` watched the mark tone alone, far connected 4.7 s
+        // early on V.21 leakage (see `carrier.rs`'s module doc), which
+        // left thousands of iterations between local's rise and this
+        // loop's exit condition and consumed the `CONNECT 300` by
+        // accident. The ordering is explicit now instead of being a side
+        // effect of a defect.
+        let mut rose = false;
+        for _ in 0..MAX_ITERS {
+            pump(&mut local, &mut far);
+            if at.advance_time(block_duration(), &mut local) == Some(Response::one("CONNECT 300")) {
+                rose = true;
+                break;
+            }
+        }
+        assert!(
+            rose,
+            "local never reported CONNECT 300, so there is no rise for the hangup to undo"
+        );
         settle(&mut local, &mut far);
 
         far.hangup();

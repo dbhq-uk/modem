@@ -49,19 +49,19 @@
 //! start and across idle durations, entirely independent of the gate
 //! below - both layers are load-bearing, not alternatives to each other.
 //!
-//! # `ToneDominance`: energy is not enough, it has to be at the right frequencies
+//! # `ToneDominance`: energy is not enough, it has to be at the right frequency
 //!
-//! [`ToneDominance`] is the fix: a Goertzel pair tuned to this end's
-//! *listening* mark and space frequencies (see [`crate::Role::listen`] -
-//! getting transmit and listen backwards here is exactly the bug Task 12
-//! had to fix once already), run over fixed-length blocks alongside a
-//! plain sum-of-squares of the same block's raw samples. A block is
-//! judged tone-dominant only when the two Goertzel bins' combined power
-//! exceeds the block's own total power by [`DOMINANCE_RATIO`] - i.e. when
-//! very nearly all of the block's energy sits at exactly the two
-//! frequencies a real Bell 103 signal would occupy, not merely somewhere
-//! in-band. `Rx` (see its own doc) feeds the *previous* block's verdict
-//! forward to gate the *current* block's energy before it ever reaches
+//! [`ToneDominance`] is the fix: a Goertzel bank tuned to this end's
+//! *listening* **mark** frequency (see [`crate::Role::listen`] - getting
+//! transmit and listen backwards here is exactly the bug Task 12 had to
+//! fix once already), run over fixed-length blocks alongside a plain
+//! sum-of-squares of the same block's raw samples. A block is judged
+//! tone-dominant only when the mark bin's power exceeds the block's own
+//! total power by [`DOMINANCE_RATIO`] - i.e. when very nearly all of the
+//! block's energy sits at exactly the frequency a Bell 103 end that has
+//! just come up would be holding, not merely somewhere in-band. `Rx` (see
+//! its own doc) feeds the *previous* block's verdict forward to gate the
+//! *current* block's energy before it ever reaches
 //! [`CarrierDetector::update`]: zero when not dominant, the correlator's
 //! real measured energy unchanged when it is. `CarrierDetector` itself -
 //! every constant and every test above and below this section - is
@@ -85,16 +85,53 @@
 //!
 //! | Signal | Dominance ratio |
 //! |---|---|
-//! | Real Bell 103 tone (either band, any amplitude - ratio is scale-invariant) | ~127.9 |
-//! | This crate's off-hook click, worst phase alignment over its whole 50 ms | ~5.2 |
-//! | White noise, any RMS, worst of 2,000,000 independent blocks | ~17.7 (P(>20) not observed in 2M trials) |
+//! | Real Bell 103 mark tone (either band, any amplitude - ratio is scale-invariant) | ~127.8 |
+//! | The same tone at the worst point of the +/-2% clock drift this crate models | ~111.5 originate, ~82.9 answer |
+//! | This crate's off-hook click, worst of all 256 block phases over its whole 50 ms | ~3.7 |
+//! | White noise, any RMS, worst of 200,000 independent blocks | ~14.5 |
+//! | The loudest block of **any** overture stage, originate band | ~13.0 |
+//! | The same, answer band | ~4.5 |
+//! | A full-amplitude tone at this band's own *space* frequency | ~0.4 |
 //! | A full-amplitude tone in the *other* Bell 103 band | ~0.06 |
-//! | ANSam (2100 Hz) against the originate-listening band it sits nearest | ~2.0 |
 //!
 //! [`DOMINANCE_RATIO`] = 40 sits with real margin on both sides: about
-//! 3.2x below a genuine tone, about 2x above the worst broadband case
-//! measured. See that constant's own doc for the reasoning and the
-//! exploration this table was measured with.
+//! 2.1x below the weakest genuine carrier measured, about 2.8x above the
+//! loudest thing that is not one. See that constant's own doc for the
+//! reasoning and the exploration this table was measured with.
+//!
+//! # Why the mark tone alone, and not mark plus space
+//!
+//! The first version of this gate summed the best mark bin and the best
+//! space bin, on the reasoning that a Bell 103 signal occupies both. That
+//! is true of a signal *carrying data* and false of the only moment this
+//! gate is ever asked about: an end coming up. A Bell 103 end that has
+//! just come up holds **mark**, continuously, and does not touch space
+//! until it has something to say - which is the same fact `rx.rs`'s own
+//! doc states from the other direction ("idle mark alone raises carrier").
+//! Summing the two asks a question - "is there energy at either of my
+//! tones" - that is strictly weaker than the one worth asking.
+//!
+//! It is also the question that shipped a real defect. This crate's own
+//! overture performs V.21's low channel (980/1180 Hz) for `Stage::Ci`,
+//! `Stage::CmJm`, `Stage::Cj` and `Stage::Training`, and a 300-baud FSK
+//! signal alternating between those two tones puts its **strongest**
+//! spectral component at the pair's centre, 1080 Hz. Bell 103 originate's
+//! space tone is 1070 Hz. Ten hertz apart - a third of a bin at
+//! [`DOMINANCE_BLOCK`] - so no amount of frequency resolution, probe
+//! density or block length can tell them apart, and none of them should
+//! try. Measured on the worst Training block: 1080 Hz carried 88.9x the
+//! block's own total power, 1070 Hz carried 63.3x, and the summed gate
+//! read 98.8 against a threshold of 40. The answering end therefore
+//! reported carrier partway through the *dialling* - measured at 6.560 s
+//! of an 11.19 s overture, during `Stage::Ci` - so the receiving modem
+//! announced CONNECT while the originating one was still handshaking.
+//!
+//! Dropping the space bin removes the collision outright rather than
+//! tuning around it: the same Training block reads 12.4 on mark alone,
+//! and the loudest block of the entire overture reads 13.0. Nothing in
+//! the performance comes within 3x of the threshold any more, because
+//! nothing in it is a 1270 Hz tone - which is the honest reason to reject
+//! it, and the reason a sharper detector could never have found.
 //!
 //! Gating on the *previous* block, not the current one, costs up to
 //! about two block lengths (64 ms) of extra latency before a genuine
@@ -324,15 +361,24 @@ impl CarrierDetector {
 /// already budget hundreds of ms for.
 const DOMINANCE_BLOCK: usize = 256;
 
-/// A block is tone-dominant when its two Goertzel bins' combined power
-/// exceeds its own total (broadband) power by at least this factor.
+/// A block is tone-dominant when its mark Goertzel bin's power exceeds
+/// its own total (broadband) power by at least this factor.
 ///
-/// Measured at [`DOMINANCE_BLOCK`] = 256 samples: a genuine Bell 103
-/// tone reads about 127.9, scale-invariant. Against that, the worst
-/// measured broadband cases: this crate's off-hook click peaks at about
-/// 5.2 over its full 50 ms at any block-phase alignment, and white
-/// noise's worst draw over 2,000,000 independent blocks reached about
-/// 17.7. 40 sits with real margin on both sides.
+/// Measured at [`DOMINANCE_BLOCK`] = 256 samples (see the module doc for
+/// the full table). Above: a genuine Bell 103 mark tone reads about
+/// 127.8, scale-invariant, falling to 82.9 at the worst point of the
+/// +/-2% clock drift this crate models - 2.1x above this threshold.
+/// Below: white noise's worst draw over 200,000 independent blocks
+/// reached 14.5, this crate's off-hook click 3.7 across all 256 block
+/// phases, and the loudest block of the entire overture 13.0 - 2.8x
+/// below it.
+///
+/// Unchanged from the summed version of this gate, deliberately: the
+/// value was never the problem. The summed gate read 98.8 on the
+/// overture's own Training stage and no threshold between that and a
+/// genuine carrier's 127.9 would have held. Measuring mark alone moved
+/// the loudest false reading from 98.8 to 13.0 and left this constant
+/// with margin on both sides for the first time.
 const DOMINANCE_RATIO: f64 = 40.0;
 
 /// Fractional frequency offsets probed either side of each nominal tone.
@@ -345,9 +391,9 @@ const DOMINANCE_RATIO: f64 = 40.0;
 /// plus or minus 2%, so an exact-frequency test rejects exactly the
 /// signals it exists to accept.
 ///
-/// Probing the same span instead and keeping the best bin per tone
-/// (see `feed`) holds dominance flat across the whole range: 127.9 at
-/// no offset, 128.4 at plus 2%, 128.1 at minus 2%, 111.8 even at 2.5%.
+/// Probing the same span instead and keeping the best bin (see `feed`)
+/// holds dominance flat across the whole range: 127.8 at no offset,
+/// 128.1 at plus 2%, 128.0 at minus 2%, 111.8 even at 2.5%.
 const PROBE_OFFSETS: [f64; 5] = [-0.02, -0.01, 0.0, 0.01, 0.02];
 
 /// The strongest probe in a set. Never empty, so the fold's identity is
@@ -356,34 +402,38 @@ fn best(probes: &[crate::nco::Goertzel]) -> f64 {
     probes.iter().map(|g| g.power()).fold(0.0, f64::max)
 }
 
-/// Tells a genuine Bell 103 tone in this end's listening band from
+/// Tells a genuine Bell 103 carrier in this end's listening band from
 /// broadband energy of the same or greater loudness - a click, ambient
-/// noise, a burst of static - which is exactly what raw energy against
-/// an adaptive floor cannot do on its own (see this module's own doc).
+/// noise, a burst of static - and from narrowband energy at a nearby but
+/// different frequency, which is what the whole overture is. Raw energy
+/// against an adaptive floor can do neither on its own (see this
+/// module's own doc).
 ///
-/// Built from this end's *listening* mark and space frequencies -
-/// `tones(cfg.role.listen())`, the same pair `Rx`'s own demodulating
+/// Built from this end's *listening* **mark** frequency -
+/// `tones(cfg.role.listen()).0`, the same tone `Rx`'s own demodulating
 /// correlator uses, never `tones(cfg.role)` (this end's own *transmit*
 /// band - see [`crate::Role::listen`]'s own doc for the bug that shape
 /// of mistake has already shipped once in this crate). [`Rx::new`]
 /// constructs both from the identical call, so there is exactly one
 /// place either could drift from the other.
 ///
+/// The space frequency is deliberately absent rather than merely unused.
+/// See the module doc's "Why the mark tone alone" for the 10 Hz collision
+/// between V.21's low-channel centre and Bell 103 originate's space tone
+/// that made summing the two unfixable.
+///
 /// [`Rx::new`]: crate::rx::Rx::new
 pub struct ToneDominance {
     mark: [crate::nco::Goertzel; PROBE_OFFSETS.len()],
-    space: [crate::nco::Goertzel; PROBE_OFFSETS.len()],
     wideband: f64,
     count: usize,
 }
 
 impl ToneDominance {
-    pub fn new(mark_hz: f64, space_hz: f64, sample_rate: f64) -> Self {
-        let probe =
-            |hz: f64| PROBE_OFFSETS.map(|o| crate::nco::Goertzel::new(hz * (1.0 + o), sample_rate));
+    pub fn new(mark_hz: f64, sample_rate: f64) -> Self {
         Self {
-            mark: probe(mark_hz),
-            space: probe(space_hz),
+            mark: PROBE_OFFSETS
+                .map(|o| crate::nco::Goertzel::new(mark_hz * (1.0 + o), sample_rate)),
             wideband: 0.0,
             count: 0,
         }
@@ -395,7 +445,7 @@ impl ToneDominance {
     /// thing, which is how a fragment of real tone could qualify a
     /// following burst of noise.
     pub fn reset(&mut self) {
-        for g in self.mark.iter_mut().chain(self.space.iter_mut()) {
+        for g in self.mark.iter_mut() {
             g.reset();
         }
         self.wideband = 0.0;
@@ -403,7 +453,7 @@ impl ToneDominance {
     }
 
     pub fn feed(&mut self, x: f64) -> Option<bool> {
-        for g in self.mark.iter_mut().chain(self.space.iter_mut()) {
+        for g in self.mark.iter_mut() {
             g.feed(x);
         }
         self.wideband += x * x;
@@ -413,14 +463,14 @@ impl ToneDominance {
             return None;
         }
 
-        // Best probe per tone, not the sum of all of them: a real tone
-        // lands in one probe and the rest contribute nothing but noise,
-        // so summing would raise the floor for every draw while adding
+        // Best probe, not the sum of all of them: a real tone lands in
+        // one probe and the rest contribute nothing but noise, so
+        // summing would raise the floor for every draw while adding
         // nothing to the signal. Max keeps the tone's full power and
         // leaves broadband energy roughly where it was - measured worst
         // white-noise draw over 50,000 blocks is 16.7 against the single
         // probe's 17.7.
-        let narrow = best(&self.mark) + best(&self.space);
+        let narrow = best(&self.mark);
         // No epsilon needed: on true silence every sample is exactly
         // zero, so `narrow` is exactly zero too and this correctly reads
         // as not dominant (0 > 40*0 is false) rather than needing a
@@ -683,7 +733,7 @@ mod tests {
     /// transient - see `Goertzel::feed`'s own doc).
     #[test]
     fn a_real_tone_in_the_listened_for_band_is_dominant() {
-        let mut td = ToneDominance::new(MARK, SPACE, FS);
+        let mut td = ToneDominance::new(MARK, FS);
         let block = sine_block(MARK, 1.0, 2 * DOMINANCE_BLOCK, FS);
 
         // No verdict until exactly one full block has been fed.
@@ -720,7 +770,7 @@ mod tests {
     #[test]
     fn dominance_is_scale_invariant_for_a_real_tone() {
         let block = sine_block(MARK, 0.0075, 2 * DOMINANCE_BLOCK, FS);
-        let mut td = ToneDominance::new(MARK, SPACE, FS);
+        let mut td = ToneDominance::new(MARK, FS);
         let mut verdict = None;
         for &x in &block {
             verdict = td.feed(x);
@@ -737,7 +787,7 @@ mod tests {
     /// whole split exists to prove (see `lib.rs`'s `Role` doc).
     #[test]
     fn a_tone_in_the_other_band_is_not_dominant() {
-        let mut td = ToneDominance::new(MARK, SPACE, FS);
+        let mut td = ToneDominance::new(MARK, FS);
         let block = sine_block(2225.0, 1.0, 2 * DOMINANCE_BLOCK, FS);
         let mut verdict = None;
         for &x in &block {
@@ -779,7 +829,7 @@ mod tests {
             })
             .collect();
 
-        let mut td = ToneDominance::new(MARK, SPACE, FS);
+        let mut td = ToneDominance::new(MARK, FS);
         for chunk in click.chunks(DOMINANCE_BLOCK) {
             if chunk.len() < DOMINANCE_BLOCK {
                 break;
@@ -802,7 +852,7 @@ mod tests {
     /// stands in for any louder noise.
     #[test]
     fn broadband_noise_as_loud_as_a_real_carrier_is_not_dominant() {
-        let mut td = ToneDominance::new(MARK, SPACE, FS);
+        let mut td = ToneDominance::new(MARK, FS);
         let noise = noise_block(1.0, 20 * DOMINANCE_BLOCK, 0xF00D_F00D_F00D_F00D);
         for x in noise {
             if let Some(dominant) = td.feed(x) {
@@ -814,23 +864,106 @@ mod tests {
         }
     }
 
-    /// Mutation-proven: swapping `ToneDominance::new`'s two arguments at a
-    /// call site is exactly the transmit/listen mix-up `lib.rs`'s `Role`
-    /// doc already warns about, at a different call site. Built here from
-    /// `tones(Role::Originate)` (1270/1070) while fed a real Answer-band
-    /// (2225/2025) tone - the shape a receiver listening on its own
-    /// transmit band instead of the far end's would actually see - and
-    /// the verdict must still correctly read "not dominant", proving the
-    /// two arguments are not merely interchangeable labels for the same
-    /// pair.
+    /// Mutation-proven: passing `tones(..).1` where `tones(..).0` belongs
+    /// is exactly the transmit/listen mix-up `lib.rs`'s `Role` doc
+    /// already warns about, one field over. Built here from this band's
+    /// *space* frequency by mistake and fed the real mark tone a live
+    /// Bell 103 end would be holding - the verdict must read "not
+    /// dominant", proving the argument names a specific tone rather than
+    /// standing in for the band as a whole.
     #[test]
-    fn mark_and_space_are_not_interchangeable() {
-        let mut td = ToneDominance::new(1270.0, 1070.0, FS);
-        let block = sine_block(2225.0, 1.0, 2 * DOMINANCE_BLOCK, FS);
+    fn the_probe_frequency_is_the_mark_tone_not_the_space_tone() {
+        let mut td = ToneDominance::new(SPACE, FS);
+        let block = sine_block(MARK, 1.0, 2 * DOMINANCE_BLOCK, FS);
         let mut verdict = None;
         for &x in &block {
             verdict = td.feed(x);
         }
-        assert_eq!(verdict, Some(false));
+        assert_eq!(
+            verdict,
+            Some(false),
+            "a bank built from the space frequency judged the mark tone dominant, \
+             so the two are interchangeable and the Role mix-up is invisible here"
+        );
+    }
+
+    /// Mutation 1 for the mark-only fix, and the direct half of the
+    /// defect: a full-amplitude tone at this band's own **space**
+    /// frequency is not a carrier coming up and must not be judged
+    /// dominant. Restore `feed`'s `narrow` to `best(&self.mark) +
+    /// best(&self.space)` (the shipped summed gate) and this reads
+    /// dominant immediately, because the space bin alone carries the
+    /// whole tone.
+    #[test]
+    fn a_tone_at_this_bands_own_space_frequency_is_not_dominant() {
+        let mut td = ToneDominance::new(MARK, FS);
+        let block = sine_block(SPACE, 1.0, 2 * DOMINANCE_BLOCK, FS);
+        let mut verdict = None;
+        for &x in &block {
+            verdict = td.feed(x);
+        }
+        assert_eq!(
+            verdict,
+            Some(false),
+            "a full-amplitude tone at the space frequency was judged dominant - \
+             an end that has just come up holds mark, not space"
+        );
+    }
+
+    /// Mutation 2, and the defect as it actually reached the wire: V.21's
+    /// low channel alternating at 300 baud between 980 and 1180 Hz puts
+    /// its strongest component at the pair's centre, 1080 Hz, which is
+    /// 10 Hz - a third of a bin - from Bell 103 originate's space tone.
+    /// See the module doc for the measurement. Synthesised here as the
+    /// bare 1080 Hz tone rather than by importing `overture` (a `no_std`
+    /// layering concern - `carrier` sits beneath `overture`, see
+    /// `noise_block`'s own doc), which is the harder case: the real
+    /// stage's energy is spread across the FSK pair and its sidebands,
+    /// so a pure tone at the centre puts *more* power on the collision
+    /// than the overture ever does. `session.rs`'s
+    /// `an_answering_end_does_not_report_carrier_before_the_far_end_
+    /// transmits_one` is the same claim through the real overture and
+    /// the real receiver.
+    #[test]
+    fn the_v21_low_channel_centre_tone_is_not_dominant() {
+        let mut td = ToneDominance::new(MARK, FS);
+        let block = sine_block(1080.0, 1.0, 2 * DOMINANCE_BLOCK, FS);
+        let mut verdict = None;
+        for &x in &block {
+            verdict = td.feed(x);
+        }
+        assert_eq!(
+            verdict,
+            Some(false),
+            "V.21's low-channel centre tone was judged a Bell 103 carrier"
+        );
+    }
+
+    /// The other side of the trade [`PROBE_OFFSETS`] exists for, pinned
+    /// on both bands rather than one: a genuine mark tone anywhere inside
+    /// the +/-2% sample-clock offset this crate's impairment suite models
+    /// must still be judged dominant. A single exact-frequency bin reads
+    /// 6.2 at 2% - below white noise - so this is the test that fails if
+    /// the probe span is ever narrowed back to nothing.
+    #[test]
+    fn dominance_holds_across_the_modelled_clock_drift() {
+        for band_mark in [1270.0f64, 2225.0] {
+            for drift in [
+                -0.02f64, -0.015, -0.01, -0.005, 0.0, 0.005, 0.01, 0.015, 0.02,
+            ] {
+                let mut td = ToneDominance::new(band_mark, FS);
+                let block = sine_block(band_mark * (1.0 + drift), 1.0, 4 * DOMINANCE_BLOCK, FS);
+                let mut verdict = None;
+                for &x in &block {
+                    verdict = td.feed(x);
+                }
+                assert_eq!(
+                    verdict,
+                    Some(true),
+                    "mark {band_mark} Hz at {:+.1}% clock offset was not judged dominant",
+                    drift * 100.0
+                );
+            }
+        }
     }
 }

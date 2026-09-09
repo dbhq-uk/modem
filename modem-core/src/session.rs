@@ -632,21 +632,44 @@ mod tests {
         }
     }
 
-    /// The bug this whole tone-dominance mechanism exists to fix: an
-    /// answering end used to report carrier at t=0.000s, on the
-    /// originating end's **off-hook transient** - a broadband click, RMS
-    /// 0.085, before the dial tone has even started. So a page showed the
-    /// answering modem "connected" before the call had begun, which makes
-    /// the entire ring-and-answer sequence meaningless.
+    /// The claim the whole tone-dominance mechanism exists to make: the
+    /// answering end must not report carrier until the originating end
+    /// is actually transmitting one.
     ///
-    /// Asserted as a measured time, not as "eventually connects": the
-    /// whole failure was connecting *too early*, and a test that only
-    /// checks it connects at all passes just as happily on the bug.
-    /// Off-hook is 50 ms and dial tone a further second, so anything
-    /// inside the first second is the click or the dial tone, neither of
-    /// which is a Bell 103 carrier in the band this end listens to.
+    /// Asserted against the far end's own state rather than a stopwatch
+    /// reading, because the number would be a restatement of whatever
+    /// the overture's timings happen to be today and would go stale
+    /// silently the moment one changed. `SessionState::Connected` on the
+    /// originating end is precisely "the overture has finished and
+    /// `process_out` is reading from `Tx`" - see `process_out` - so it is
+    /// the exact moment a Bell 103 carrier first exists on the wire.
+    /// Anything earlier is the answering end hearing something that is
+    /// not one.
+    ///
+    /// # Two defects, both of which this catches
+    ///
+    /// **The off-hook click.** Before `ToneDominance` existed the
+    /// answering end reported carrier at t=0.000s, on the originating
+    /// end's off-hook transient - a broadband click, RMS 0.085, before
+    /// the dial tone had even started.
+    ///
+    /// **V.21's low-channel centre.** The first `ToneDominance` summed
+    /// the mark and space bins, and the overture's V.21 stages put their
+    /// strongest component at 1080 Hz, 10 Hz from Bell 103 originate's
+    /// space tone. The answering end reported carrier at 6.560s of an
+    /// 11.19s overture, during `Stage::Ci` - so the receiving modem
+    /// announced CONNECT while the originating one was still
+    /// handshaking. See `carrier.rs`'s module doc for the measurement and
+    /// the fix.
+    ///
+    /// The upper bound matters as much as the lower one: a gate that
+    /// never qualified at all would satisfy "not before the far end
+    /// transmits" perfectly, and the answering end would simply hang for
+    /// ever. One second after the carrier starts is ample - measured at
+    /// 96 ms, being the two-character acquisition preamble plus the two
+    /// `DOMINANCE_BLOCK`s the gate needs to see idle mark.
     #[test]
-    fn an_answering_end_does_not_report_carrier_on_the_off_hook_click() {
+    fn an_answering_end_does_not_report_carrier_before_the_far_end_transmits_one() {
         const BLOCK: usize = 256;
         let mut originate = Session::new(cfg(Role::Originate));
         let mut answer = Session::new(cfg(Role::Answer));
@@ -655,23 +678,35 @@ mod tests {
 
         let mut from_originate = [0.0f32; BLOCK];
         let mut from_answer = [0.0f32; BLOCK];
-        let mut connected_at = None;
+        let mut carrier_began = None;
+        let mut answered_at = None;
         for i in 0..MAX_ITERS {
             originate.process_out(&mut from_originate);
             answer.process_out(&mut from_answer);
             originate.process_in(&from_answer);
             answer.process_in(&from_originate);
-            if connected_at.is_none() && answer.state() == SessionState::Connected {
-                connected_at = Some(i as f64 * BLOCK as f64 / 8000.0);
+            let t = i as f64 * BLOCK as f64 / 8000.0;
+            if carrier_began.is_none() && originate.state() == SessionState::Connected {
+                carrier_began = Some(t);
+            }
+            if answer.state() == SessionState::Connected {
+                answered_at = Some(t);
                 break;
             }
         }
 
-        let t = connected_at.expect("the answering end never connected at all");
+        let answered = answered_at.expect("the answering end never connected at all");
+        let began = carrier_began.unwrap_or(f64::INFINITY);
         assert!(
-            t >= 1.0,
-            "the answering end reported carrier at {t:.3}s - inside the off-hook \
-             click and dial tone, neither of which is a carrier in its listening band"
+            answered >= began,
+            "the answering end reported carrier at {answered:.3}s, but the \
+             originating end did not start transmitting one until {began:.3}s - \
+             it is hearing the overture, not a carrier"
+        );
+        assert!(
+            answered - began <= 1.0,
+            "the carrier started at {began:.3}s and the answering end did not \
+             report it until {answered:.3}s"
         );
     }
 
