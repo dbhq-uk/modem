@@ -632,6 +632,49 @@ mod tests {
         }
     }
 
+    /// The bug this whole tone-dominance mechanism exists to fix: an
+    /// answering end used to report carrier at t=0.000s, on the
+    /// originating end's **off-hook transient** - a broadband click, RMS
+    /// 0.085, before the dial tone has even started. So a page showed the
+    /// answering modem "connected" before the call had begun, which makes
+    /// the entire ring-and-answer sequence meaningless.
+    ///
+    /// Asserted as a measured time, not as "eventually connects": the
+    /// whole failure was connecting *too early*, and a test that only
+    /// checks it connects at all passes just as happily on the bug.
+    /// Off-hook is 50 ms and dial tone a further second, so anything
+    /// inside the first second is the click or the dial tone, neither of
+    /// which is a Bell 103 carrier in the band this end listens to.
+    #[test]
+    fn an_answering_end_does_not_report_carrier_on_the_off_hook_click() {
+        const BLOCK: usize = 256;
+        let mut originate = Session::new(cfg(Role::Originate));
+        let mut answer = Session::new(cfg(Role::Answer));
+        originate.dial("5551234");
+        answer.answer();
+
+        let mut from_originate = [0.0f32; BLOCK];
+        let mut from_answer = [0.0f32; BLOCK];
+        let mut connected_at = None;
+        for i in 0..MAX_ITERS {
+            originate.process_out(&mut from_originate);
+            answer.process_out(&mut from_answer);
+            originate.process_in(&from_answer);
+            answer.process_in(&from_originate);
+            if connected_at.is_none() && answer.state() == SessionState::Connected {
+                connected_at = Some(i as f64 * BLOCK as f64 / 8000.0);
+                break;
+            }
+        }
+
+        let t = connected_at.expect("the answering end never connected at all");
+        assert!(
+            t >= 1.0,
+            "the answering end reported carrier at {t:.3}s - inside the off-hook \
+             click and dial tone, neither of which is a carrier in its listening band"
+        );
+    }
+
     #[test]
     fn session_starts_idle() {
         let s = Session::new(cfg(Role::Originate));

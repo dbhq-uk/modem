@@ -86,6 +86,19 @@
 //! carrier well before - or entirely without - the loop ever seeing one.
 //! Do not read `carrier_detected()` as a proxy for acquisition.
 //!
+//! # A click is loud, but it is not at the right frequencies
+//!
+//! `CarrierDetector` alone watches total in-band energy, and total energy
+//! cannot tell a genuine Bell 103 tone from broadband noise or a click of
+//! the same loudness - see `carrier.rs`'s own module doc, which is the
+//! full account of why and what `ToneDominance` does about it.
+//! `push_sample` feeds every raw sample to `dominance` and uses the
+//! *previous* completed block's verdict to gate the *current* block's
+//! energy before `carrier.update` ever sees it - zero when the block was
+//! not judged tone-dominant, the correlator's real measured energy
+//! unchanged when it was. See `push_sample`'s own doc for why the gate is
+//! one block behind rather than judging and gating the same block.
+//!
 //! Nothing here allocates per block. The ring buffers and the scratch are
 //! sized at construction, and the event queue is preallocated to its cap.
 
@@ -95,7 +108,7 @@ use alloc::vec::Vec;
 
 use libm::{cos, hypot, round, sin};
 
-use crate::carrier::{CarrierDetector, Event};
+use crate::carrier::{CarrierDetector, Event, ToneDominance};
 use crate::frame::Deframer;
 use crate::resample::Resampler;
 use crate::{samples_per_symbol, tones, Config, DSP_RATE};
@@ -149,7 +162,41 @@ pub struct Rx {
     /// Resampler output at DSP_RATE. Reused, resized only on growth.
     scratch: Vec<f64>,
 
-    carrier: CarrierDetector,
+    /// Raw in-band energy against an adaptive floor, exactly as before.
+    /// This is what the slicer gates on, and it must not lag: the
+    /// deframer has to see the idle mark preceding the first start bit,
+    /// and a gate arriving a block late starts it mid-character - a
+    /// decode that never finds byte alignment and returns roughly half
+    /// the payload as garbage, which is what the minimodem
+    /// cross-validation caught.
+    energy_carrier: CarrierDetector,
+    /// What gets reported outward as [`Rx::carrier_detected`], and so
+    /// what makes a `Session` announce a connection.
+    ///
+    /// Energy alone cannot tell a Bell 103 tone from a click of the same
+    /// loudness, which is why an answering end used to reach `Connected`
+    /// at t=0.000s on the originator's off-hook transient. This latches
+    /// true only once tone dominance has been seen while energy is up,
+    /// and clears the moment energy goes down. One detector with a latch
+    /// on top, rather than two detectors that would evolve their floors
+    /// independently and drift apart.
+    /// Tells a genuine Bell 103 tone in this end's listening band from
+    /// broadband energy of the same or greater loudness - see
+    /// `carrier.rs`'s own module doc. Built from the same `(mark, space)`
+    /// pair as this `Rx`'s own correlator, below, so the two can never
+    /// tune to different bands.
+    dominance: ToneDominance,
+    /// The most recently completed [`ToneDominance`] block's verdict,
+    /// applied to every sample of the *next* block - see `push_sample`'s
+    /// own doc for why this is a deliberate one-block lag rather than
+    /// judging and gating the same block.
+    gate_open: bool,
+    /// See `energy_carrier`'s sibling doc above.
+    qualified: bool,
+    /// Whether a genuinely tone-dominant block has *ever* been seen on
+    /// this call - see `push_sample` for why this latches rather than
+    /// tracking moment to moment.
+    qualified_ever: bool,
     events: VecDeque<Event>,
 }
 
@@ -186,7 +233,17 @@ impl Rx {
             in64: Vec::new(),
             scratch: Vec::new(),
 
-            carrier: CarrierDetector::new(),
+            energy_carrier: CarrierDetector::new(),
+            qualified: false,
+            qualified_ever: false,
+
+            dominance: ToneDominance::new(mark, space, DSP_RATE),
+            // Closed until the first block completes - see push_sample's
+            // own doc. A default of `true` would let this end's very
+            // first ~32 ms of audio straight through ungated, which is
+            // exactly the off-hook-transient window this gate exists to
+            // close.
+            gate_open: false,
             // Capacity matches the cap enforced in push_sample, so the
             // bounded queue never reallocates once running: the only
             // allocation is this one, at construction.
@@ -244,12 +301,57 @@ impl Rx {
             self.pos = 0;
             self.filled = true;
         }
+
+        // Tone-dominance gate: runs on every raw sample from the very
+        // first one, independent of the demod correlator's own window-fill
+        // state above - it judges fixed-length blocks, not a sliding
+        // window, and has no reason to wait. A completed block's verdict
+        // is applied to the *next* block, never the one that produced it:
+        // judging and gating the same block would need buffering and
+        // replaying its samples after the fact, which delays the deframer's
+        // own carrier gate (see `symbol_boundary`, below) by a full block
+        // on *every* rise. Lagging by one block instead only costs that
+        // extra block at acquisition - once a real signal is already up,
+        // every subsequent block is judged dominant same as the last, so
+        // the lag never costs anything on an already-established carrier.
+        if let Some(dominant) = self.dominance.feed(s) {
+            self.gate_open = dominant;
+        }
+
         if !self.filled {
             return;
         }
 
         let (soft, energy) = self.correlate();
-        if let Some(ev) = self.carrier.update(energy) {
+        let _ = self.energy_carrier.update(energy);
+
+        // Seeing one genuinely tone-dominant block is a fact about this
+        // call, and it does not stop being true when the line goes quiet
+        // for a moment. It must not, because **modulated data is never
+        // tone-dominant** - measured median 12.7 against white noise's
+        // 17.7 - so a qualification dropped mid-call could never be
+        // regained while the call was actually carrying anything. An end
+        // that yielded the turn, or any dip outstaying the hold-off,
+        // would take the call down for good.
+        //
+        // So this latches once and stays latched for the life of this
+        // `Rx`, which is exactly the life of one call: `Session::dial`
+        // and `Session::answer` each build a fresh one.
+        self.qualified_ever |= self.gate_open;
+
+        // Reported carrier is then the ordinary energy detector, with all
+        // its existing hysteresis and hold-off, qualified by that latch.
+        // A click cannot set the latch, which is the whole point: an
+        // answering end used to reach `Connected` at t=0.000s on the
+        // originator's off-hook transient.
+        let next_qualified = self.energy_carrier.detected() && self.qualified_ever;
+        if next_qualified != self.qualified {
+            self.qualified = next_qualified;
+            let ev = if next_qualified {
+                Event::CarrierUp
+            } else {
+                Event::CarrierDown
+            };
             if self.events.len() >= EVENT_QUEUE_CAP {
                 self.events.pop_front();
             }
@@ -331,7 +433,7 @@ impl Rx {
         // slicer has nothing to slice, and pushing its tie-break into the
         // deframer regardless is exactly what turns line noise into
         // fabricated bytes and framing errors.
-        if self.carrier.detected() {
+        if self.energy_carrier.detected() {
             if let Some(b) = self.deframer.push_bit(soft >= 0.0) {
                 self.out.push(b);
             }
@@ -351,7 +453,7 @@ impl Rx {
     /// locked - a Gardner detector cannot acquire on a constant tone, so
     /// idle mark alone raises this while the loop stays free-running.
     pub fn carrier_detected(&self) -> bool {
-        self.carrier.detected()
+        self.qualified
     }
 
     /// Drains one carrier transition event. Returns None when the queue is
@@ -1410,6 +1512,13 @@ mod tests {
     /// wants a false lock, not a marginal one.
     #[test]
     fn a_false_lock_clears_once_the_noise_actually_stops() {
+        // Asserts on `energy_carrier`, the raw-energy detector, not on the
+        // public `carrier_detected()`. The public one now also requires
+        // tone dominance, and noise cannot supply that - which is the
+        // whole point of the change and means a false lock is no longer
+        // reachable through the public API at all. The energy detector
+        // still can lock on noise, its hold-off behaviour still matters,
+        // and this is the test that pins it.
         let c = cfg(Role::Originate, 8000);
         let mut rx = Rx::new(c);
         // Loud enough to falsely lock on immediately from a cold start.
@@ -1418,8 +1527,8 @@ mod tests {
             rx.write(chunk);
         }
         assert!(
-            rx.carrier_detected(),
-            "amplitude 0.03 should falsely lock on for this test to mean anything"
+            rx.energy_carrier.detected(),
+            "amplitude 0.03 should falsely lock the raw energy detector on, or this test means nothing"
         );
 
         // Real silence, not noise: the false lock must clear within a
@@ -1429,7 +1538,7 @@ mod tests {
         for _ in 0..20 {
             // ~1.8 s, well over one 0.5 s hold-off.
             rx.write(&quiet);
-            if !rx.carrier_detected() {
+            if !rx.energy_carrier.detected() {
                 cleared = true;
                 break;
             }

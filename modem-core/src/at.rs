@@ -680,9 +680,20 @@ mod tests {
         connect(&mut at, &mut local, &mut far);
         settle(&mut local, &mut far);
 
-        // Fresh into data mode, `idle` is zero - the very definition of no
-        // leading guard. Fed back to back with no advance_time between
-        // them, exactly as continuous typing would arrive.
+        // One ordinary byte first, which is what actually establishes "no
+        // leading guard".
+        //
+        // This used to rely on `idle` still being zero from `go_online`,
+        // and that was never true: `connect` calls `advance_time` on every
+        // handshake iteration, which accumulates `idle` in data mode, and
+        // a rising carrier does not reset it. The test only passed
+        // because the answering end used to connect instantly on the
+        // originator's off-hook click, so the handshake finished inside
+        // the guard time. With that bug fixed the handshake legitimately
+        // takes longer, the guard elapses, and `+++` escapes correctly -
+        // the test was asserting the absence of a precondition it had
+        // stopped establishing.
+        assert_eq!(at.feed(b'x', &mut local), None);
         for &b in b"+++" {
             assert_eq!(at.feed(b, &mut local), None);
         }
@@ -700,7 +711,7 @@ mod tests {
         for _ in 0..500 {
             pump(&mut local, &mut far);
         }
-        assert_eq!(far.receive(), b"+++");
+        assert_eq!(far.receive(), b"x+++");
     }
 
     /// Required test: `+++` appearing inside ordinary data at speed is
