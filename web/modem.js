@@ -77,7 +77,22 @@ export class ModemEndpoint extends EventTarget {
       throw new Error('AudioWorklet needs a secure context (HTTPS or localhost) - this page is not one');
     }
 
-    const ctx = new AudioContext();
+    // Safari (desktop and every iOS browser - Apple requires all of them
+    // to run WebKit, so "Chrome on iOS" is this too) still ships it
+    // prefixed on some versions.
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) {
+      throw new Error('this browser exposes no AudioContext (or webkitAudioContext) at all');
+    }
+    const ctx = new AudioContextCtor();
+    // Must happen here - the very first statement after construction,
+    // still synchronous, before this function's first `await` - or the
+    // user gesture that led to this call is spent. See wired.js's
+    // identical doc on this same call for the full reasoning: this is
+    // the call that was missing altogether before, on both live
+    // endpoints, which is why they stayed silently dead on WebKit while
+    // passing every test run against desktop Chrome.
+    const resumePromise = ctx.resume().catch(() => {});
     if (!ctx.audioWorklet) {
       throw new Error('this browser exposes no audioWorklet API even in a secure context');
     }
@@ -117,6 +132,24 @@ export class ModemEndpoint extends EventTarget {
     // or the performed overture, never anything unexpected, so nothing
     // is gained by deferring this until later.
     node.connect(ctx.destination);
+
+    // See wired.js's identical await on its own resumePromise: this is
+    // where a caller can find out whether the resume() above actually
+    // took hold, via `this.ctx.state`, rather than staying silent about
+    // a context that never started.
+    await resumePromise;
+  }
+
+  /**
+   * Re-resumes the context if the page backgrounding suspended it - see
+   * spike/README.md finding 5's own point about not leaving a live call
+   * running unattended, and iOS's habit of suspending on backgrounding.
+   * A no-op if the context is already running or never got this far.
+   */
+  resumeIfSuspended() {
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
   }
 
   _handleWorkletMessage(msg) {

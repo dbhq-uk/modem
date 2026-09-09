@@ -61,7 +61,26 @@ export class WiredEndpoint extends EventTarget {
       throw new Error('AudioWorklet needs a secure context (HTTPS or localhost) - this page is not one');
     }
 
-    const ctx = new AudioContext();
+    // Safari (desktop and every iOS browser - Apple requires all of them
+    // to run WebKit, so "Chrome on iOS" is this too) still ships it
+    // prefixed on some versions.
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) {
+      throw new Error('this browser exposes no AudioContext (or webkitAudioContext) at all');
+    }
+    const ctx = new AudioContextCtor();
+    // Must happen here - the very first statement after construction,
+    // still synchronous, before this function's first `await` - or the
+    // user gesture that led to this call is spent. Desktop Chrome
+    // auto-runs a context created inside a gesture even without this
+    // call, which is exactly why the one-device demo passed testing on
+    // it while staying silently dead on WebKit: no resume() call was
+    // ever made at all. The promise is not awaited here on purpose -
+    // only the call itself needs to land inside the gesture. `init`
+    // awaits it near the end instead, once the rest of setup is done, so
+    // a caller can read back whether it actually took hold (see the
+    // `await resumePromise` below and page.js's own use of `ctx.state`).
+    const resumePromise = ctx.resume().catch(() => {});
     if (!ctx.audioWorklet) {
       throw new Error('this browser exposes no audioWorklet API even in a secure context');
     }
@@ -108,6 +127,25 @@ export class WiredEndpoint extends EventTarget {
     this.analyser.fftSize = 2048;
     node.connect(this.analyser);
     this.analyser.connect(ctx.destination);
+
+    // Now that the rest of setup is done, find out whether the resume()
+    // fired above actually took hold - `ctx.state` is the only honest
+    // answer; a resolved promise does not by itself mean 'running' (it
+    // also resolves if the context was already there). A caller (page.js)
+    // reads this back to tell a visitor rather than stay silent about it.
+    await resumePromise;
+  }
+
+  /**
+   * Re-resumes the context if the page backgrounding suspended it - see
+   * spike/README.md finding 5's own point about not leaving a live call
+   * running unattended, and iOS's habit of suspending on backgrounding.
+   * A no-op if the context is already running or never got this far.
+   */
+  resumeIfSuspended() {
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
   }
 
   _handleWorkletMessage(msg) {
