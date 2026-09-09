@@ -61,7 +61,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/web dist/brand
-          cp web/*.html web/*.js web/*.css web/*.png web/*.wasm web/*.webp web/*.avif dist/web/ 2>/dev/null || true
+          cp web/*.html web/*.js web/*.css web/*.png web/*.webp web/*.avif dist/web/ 2>/dev/null || true
+          # The worklet artifact comes from the build above, not from the
+          # tree: web/modem.wasm is gitignored, so on a fresh checkout it
+          # does not exist at all. It used to be swept up by the glob
+          # above, where `|| true` swallowed its absence and shipped a
+          # page whose demo 404ed on its own payload. No `|| true` here -
+          # if this file is missing the deploy must stop.
+          cp target/wasm32-unknown-unknown/release/modem_wasm.wasm dist/web/modem.wasm
           # _headers, _redirects and manifest.json need naming
           # explicitly: none has a glob-friendly extension. _headers
           # carries the CSP that permits WASM instantiation - without it
