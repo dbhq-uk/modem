@@ -21,16 +21,19 @@
    colour, type and CRT-effect values the TUI and the page must agree on,
    and a browser container width (or a UI-chrome font stack the terminal
    has no equivalent for) has no terminal side to agree with.
-   --page-max-width is the outer shell (hero and main line up at every
-   viewport instead of two hand-matched numbers drifting apart).
-   --content-max-width is the page's own reading column: rem, not ch -
-   ch is relative to each element's own font-size (h2 is twice the body
-   size), so a shared ch value would give every element sharing this
-   column a different pixel width, where rem stays anchored to the root
-   size regardless of which element carries it. Wide artefacts (the
-   terminal transcript and its waterfall, the generated terminal-window
-   frames, the live wired/endpoint panels) keep --page-max-width's full
-   main instead - see the "Content column" rule below.
+
+   --col-content is the page's own reading column: rem, not ch - ch is
+   relative to each element's own font-size (h2 is twice the body size),
+   so a shared ch value would give every element sharing this column a
+   different pixel width, where rem stays anchored to the root size
+   regardless of which element carries it. --col-feature is the wider
+   track the page's artefacts break out into (the generated
+   terminal-window frames, the live wired/endpoint panels, the
+   transcript and its waterfall); it is sized to hold the widest of
+   them, the 100-column split frame, without clipping. Both are consumed
+   by the column grid below, which is the only place either is read -
+   see its own comment for why a grid replaced eight separate
+   max-widths.
 
    --modem-type-face-ui is the primary nav's own font (Dan, 9 Sep 2026:
    "a modern sans, not the monospace ... sets the chrome apart from the
@@ -51,9 +54,134 @@
    'self' already covers it, because nothing is fetched at all), and at
    nav size reads close enough to a geometric grotesque like Satoshi. */
 :root {
-  --page-max-width: 1320px;
-  --content-max-width: 42rem;
+  --col-content: 42rem;
+  --col-feature: 62rem;
+  /* rem, not the 4ch --modem-space-md this started as, and for exactly
+     the reason the paragraph above gives for the content column: `ch`
+     resolves against each element's own font-size, so a shared ch
+     gutter gives every band a different one. Measured: the footer sets
+     a smaller type scale, so its 4ch gutter came out at 30px against
+     the sections' 37.5px and its content sat 7px off the page's edge.
+     2.4rem is that same 4ch at the root size, pinned.
+
+     clamp, not a media query: this used to switch from 1.2rem to
+     2.4rem at 48rem, which made the feature track jump from about
+     730px to about 692px - an artefact getting narrower as the window
+     got wider. Interpolating removes the discontinuity and the
+     breakpoint with it. */
+  --col-gutter: clamp(1.2rem, 3vw, 2.4rem);
   --modem-type-face-ui: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* ---------------------------------------------------------------------
+ * The column grid - the page's one column system.
+ *
+ * Every band of the page (the hero, each section, the footer) declares
+ * these same five tracks, so a heading, the paragraph under it, and the
+ * artefact it introduces all resolve against one shared centre line and
+ * one shared left edge. A child picks a track by name - `content` for
+ * anything being read, `feature` for a wide artefact, `full` for a
+ * bleed - and a band's direct children default to `content`, so **new markup is
+ * correct without being listed anywhere**.
+ *
+ * That default is the whole point. What this replaces was a
+ * hand-maintained allowlist of selectors (`.intro > p, .demo > h2,
+ * .demo > p, .scenarios > h2, ...`) that opted individual elements into
+ * a centred reading column, plus eight separate `max-width: 42rem;
+ * margin: 0 auto` pairs on individual components, plus a 1320px outer
+ * shell on `main` and `.hero__content`, plus `p { max-width: 70ch }`.
+ * Five mechanisms expressing one intention, and anything not named in
+ * any of them fell back to the full 1320px shell.
+ *
+ * Measured at 1440px before this change, one page carried **six
+ * different left edges**: main at 55, each section box at 93, the
+ * rendered TUI frames at 227 and 358, all prose and headings at 379,
+ * and a details summary at 399. Inside `.scenarios` a heading sat at
+ * 379 while the frame it introduces started at 227 - the artefact
+ * protruding 152px to the *left* of its own label. The hero was worse
+ * still: `.hero__content` carried a comment promising the wordmark
+ * "sits on the same left edge as the body copy below it", which had
+ * been true when body copy also filled the 1320px shell and was 286px
+ * wrong by the time the reading column was added underneath it and the
+ * hero was not updated with it.
+ *
+ * `feature` is symmetric about `content`, so an artefact wider than the
+ * prose grows equally both ways instead of picking a new left edge.
+ * Artefacts with an intrinsic width (the frames are character grids -
+ * 100 and 72 monospace columns) are centred within the track rather
+ * than stretched, so two different-width frames still share the page's
+ * centre line.
+ * ------------------------------------------------------------------- */
+main,
+main > section,
+.hero__overlay,
+footer,
+.not-found {
+  display: grid;
+  grid-template-columns:
+    [full-start] minmax(var(--col-gutter), 1fr)
+    [feature-start] minmax(0, calc((var(--col-feature) - var(--col-content)) / 2))
+    [content-start] min(var(--col-content), 100% - var(--col-gutter) * 2) [content-end]
+    minmax(0, calc((var(--col-feature) - var(--col-content)) / 2)) [feature-end]
+    minmax(var(--col-gutter), 1fr) [full-end];
+}
+
+main > *,
+main > section > *,
+.hero__overlay > *,
+footer > *,
+.not-found > * {
+  grid-column: content;
+}
+
+/* `main` is a spine in its own right, not only its sections, because
+   two pages put content directly in `main` rather than in a section:
+   the contents nav and the closing call to action on /explained and
+   /prior-art. With the grid on sections alone those four elements had
+   no column at all and rendered edge to edge at the full 1440px - the
+   exact defect this whole change exists to remove, surviving in the two
+   places nobody thought to look. A section is then a band that spans
+   the whole spine and re-declares it for its own children. */
+main > section {
+  grid-column: full;
+}
+
+/* ---------------------------------------------------------------------
+ * Vertical rhythm - the gap owns it, not the children.
+ *
+ * Turning every band into a grid stopped adjacent margins collapsing,
+ * and the ad-hoc element margins underneath immediately showed:
+ * measured on the home page, sibling gaps came out at 13, 16, 32, 35,
+ * 38, 43 and 75px, with two paragraphs 16px apart in one section and
+ * 32px apart in another. That is the same complaint as the horizontal
+ * one, on the other axis, and the same cause - several mechanisms each
+ * setting spacing independently.
+ *
+ * So the band sets one gap and the children set none. Two intervals
+ * remain, deliberately: `--modem-space-sm` inside a band, and
+ * `--modem-space-lg` between bands (`section`'s own margin-bottom,
+ * below), a 1:4 contrast that makes a section boundary read as one
+ * without a rule or a box.
+ * ------------------------------------------------------------------- */
+main,
+main > section,
+footer,
+.not-found {
+  row-gap: var(--modem-space-sm);
+}
+
+main > *,
+main > section > *,
+footer > *,
+.not-found > *,
+.scenario > * {
+  margin-block: 0;
+}
+
+/* The one deliberate exception: two scenarios are separate things, not
+   two paragraphs, and the in-band gap is too tight to say so. */
+.scenario + .scenario {
+  margin-block-start: var(--modem-space-md);
 }
 
 * {
@@ -264,7 +392,18 @@ h3 {
   margin: 0;
 }
 
-p {
+/* Measure, which the grid deliberately does not own. A track is a width
+   in pixels; a comfortable line is a count of characters, and the two
+   only agree at one font size. Removing this rule (it was
+   `p { max-width: 70ch }`) on the theory the content track had replaced
+   it was wrong in both directions, measured: the footer sets 0.8rem
+   type, so its byline ran 88 characters inside the same 42rem track,
+   and `.endpoint` sits in the wider `feature` track, so its prose ran
+   to about 99 - and to the full viewport once the panel goes
+   fixed-position in app mode. `ch` is right here precisely because it
+   follows each element's own font size, which is what a measure means. */
+p,
+li {
   max-width: 70ch;
 }
 
@@ -420,12 +559,14 @@ p {
      colour, generated on purpose, so it is used as rendered. */
 }
 
+/* A column grid (see its own comment) rather than a centred flex
+   column, so the wordmark sits on the page's real content edge - the
+   same edge the first paragraph below the hero sits on. `align-content`
+   does the vertical centring the flex column used to do. */
 .hero__overlay {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-content: center;
   background: linear-gradient(
     to top,
     rgba(10, 10, 10, 0.95) 0%,
@@ -434,14 +575,13 @@ p {
   );
 }
 
-/* Mirrors main's own max-width and horizontal padding, so the wordmark
-   sits on the same left edge as the body copy below it however wide the
-   viewport gets, while .hero__image and this gradient stay full-bleed. */
+/* Sits in the overlay's `content` track (inherited from `.hero__overlay
+   > *`), so the wordmark shares the body copy's left edge at every
+   viewport, while .hero__image and the gradient above stay full-bleed.
+   The previous version of this rule set its own 1320px max-width and
+   padding to "mirror main" - true when body copy filled that same
+   shell, and 286px wrong once the reading column arrived beneath it. */
 .hero__content {
-  width: 100%;
-  max-width: var(--page-max-width);
-  margin: 0 auto;
-  padding: 0 var(--modem-space-md);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -483,17 +623,18 @@ h1.hero__heading {
 }
 
 /* ---------------------------------------------------------------------
- * Layout - main is wider than the 70ch reading measure `p` keeps for
- * itself (below), so wide, non-prose content (the terminal, the
- * generated frames) has room to breathe without dragging body copy out
- * to an uncomfortable line length. Top padding is deliberately tighter
- * than bottom: the hero already separates itself with its own border,
- * so main does not need to repeat that gap before the first heading.
+ * Layout - `main` no longer carries a width or a horizontal padding of
+ * its own. Each section is a column grid (see its own comment above)
+ * and owns the page's gutters through the grid's outer tracks, so a
+ * width here would be a second, competing constraint on top of it -
+ * which is exactly the shape of the defect the spine replaced.
+ *
+ * Top padding is deliberately tighter than bottom: the hero already
+ * separates itself with its own border, so main does not need to repeat
+ * that gap before the first heading.
  * ------------------------------------------------------------------- */
 main {
-  max-width: var(--page-max-width);
-  margin: 0 auto;
-  padding: var(--modem-space-md) var(--modem-space-md) var(--modem-space-lg);
+  padding: var(--modem-space-md) 0 var(--modem-space-lg);
 }
 
 section {
@@ -511,39 +652,67 @@ main > section:last-child {
 }
 
 /* ---------------------------------------------------------------------
- * Content column - the page's actual column structure. main is wide
- * enough for wide artefacts (the terminal transcript and its waterfall,
- * the live wired/endpoint panels, the generated terminal-window frames)
- * to read at something near their real width; everything else -
- * headings, prose, lists, button rows - sits in a centred column
- * matching the same measure `p` already enforces on its own, rather
- * than hugging main's left edge with the rest of a wide viewport left
- * empty beside it. Scoped per section rather than via a wrapper
- * element, so no markup moves: only each section's own direct-child
- * narrative pieces are included, never a wide artefact nested a level
- * deeper inside it (the terminal, the wired/endpoint panels, the
- * generated frames all stay untouched by this rule).
+ * The wide artefacts - the only elements on the page that are not
+ * ordinary reading content, and so the only ones that name a track.
+ * Everything else inherits `content` from the band default and needs no
+ * entry here, which is the inversion that matters: this list only grows
+ * when a genuinely wide thing is added, where the allowlist it replaced
+ * had to grow for every ordinary paragraph and heading and silently
+ * mis-laid anything nobody remembered to add.
  * ------------------------------------------------------------------- */
-.intro > p,
-.demo > h2,
-.demo > p,
-.demo > noscript > p,
-.scenarios > h2,
-.scenarios > p,
-.scenario__label,
-.scenario > p,
-.explainer-teaser > h2,
-.explainer-teaser > p,
-.explainer > h2,
-.explainer > p,
-.contents__list,
-.downloads > h2,
-.downloads > p,
-.resources > h2,
-.resources > p {
-  max-width: var(--content-max-width);
-  margin-left: auto;
-  margin-right: auto;
+main > section > .terminal,
+main > section > .endpoint,
+.scenario > .win,
+.scenario > .win-group {
+  grid-column: feature;
+  justify-self: center;
+  max-width: 100%;
+}
+
+/* A scenario is a transparent grouping - a label, a sentence, and the
+   frame they describe - with no box of its own, so it takes the page's
+   own tracks through subgrid and its label lands on the page's real
+   content edge rather than on one derived from the card's width. Before
+   this the label sat at 379 while the frame it introduces started at
+   227, the artefact protruding to the left of its own heading.
+
+   `.endpoint` deliberately does NOT do this. It has a visible border
+   (further down this file), and a bordered panel is its own container:
+   its contents align to the panel, and the panel aligns to the page.
+   Handing it the page's tracks stretched that border the full width of
+   the viewport - measured, not guessed. It takes the `feature` track
+   above instead, as one wide artefact. */
+.scenario {
+  display: grid;
+  grid-column: full;
+  grid-template-columns: subgrid;
+  row-gap: var(--modem-space-sm);
+}
+
+.scenario > * {
+  grid-column: content;
+}
+
+/* Where subgrid is not supported the declaration above is dropped, and
+   `.scenario` would be left a grid whose children ask for `content` and
+   `feature` lines that do not exist - the engine invents implicit
+   tracks and the alignment this rule exists for is lost silently. Fall
+   back to ordinary block flow plus the same two widths, which is not
+   pixel-identical but keeps the label and the frame on one edge. */
+@supports not (grid-template-columns: subgrid) {
+  .scenario {
+    display: block;
+  }
+
+  .scenario > * {
+    max-width: var(--col-content);
+    margin-inline: auto;
+  }
+
+  .scenario > .win,
+  .scenario > .win-group {
+    max-width: var(--col-feature);
+  }
 }
 
 /* ---------------------------------------------------------------------
@@ -620,6 +789,9 @@ main > section:last-child {
 .waterfall-wrap {
   display: flex;
   gap: var(--modem-space-xs);
+  /* Kept, unlike the band children's own margins: this sits inside
+     `.endpoint` and `.terminal`, which are ordinary block containers,
+     not bands whose row-gap owns the spacing. */
   margin: var(--modem-space-sm) 0;
 }
 
@@ -662,8 +834,6 @@ main > section:last-child {
   display: flex;
   gap: var(--modem-space-sm);
   flex-wrap: wrap;
-  max-width: var(--content-max-width);
-  margin: var(--modem-space-sm) auto;
 }
 
 .dial-button {
@@ -734,9 +904,7 @@ a.dial-button {
  * exactly the situation it exists to help with.
  * ------------------------------------------------------------------- */
 .sound-help {
-  max-width: var(--content-max-width);
   border: 1px solid var(--modem-white-dim);
-  margin: var(--modem-space-sm) auto 0 auto;
   padding: var(--modem-space-xs) var(--modem-space-sm);
 }
 
@@ -789,7 +957,6 @@ a.dial-button {
 .endpoint {
   border: 1px solid var(--modem-green-dim);
   padding: var(--modem-space-sm);
-  margin-top: var(--modem-space-sm);
 }
 
 .endpoint__row {
@@ -1251,14 +1418,6 @@ body.app-mode {
  * chrome around it is ordinary page furniture and uses tokens like
  * everything else.
  * ------------------------------------------------------------------- */
-.scenario {
-  margin-bottom: var(--modem-space-lg);
-}
-
-.scenario:last-child {
-  margin-bottom: 0;
-}
-
 .scenario__label {
   margin-bottom: var(--modem-space-xs);
 }
@@ -1344,8 +1503,7 @@ body.app-mode {
  * ------------------------------------------------------------------- */
 .phase-list {
   list-style: none;
-  max-width: var(--content-max-width);
-  margin: 0 auto;
+  margin: 0;
   padding: 0;
 }
 
@@ -1417,8 +1575,7 @@ body.app-mode {
  * ------------------------------------------------------------------- */
 .download-list {
   list-style: none;
-  max-width: var(--content-max-width);
-  margin: 0 auto;
+  margin: 0;
   padding: 0;
 }
 
@@ -1467,8 +1624,7 @@ body.app-mode {
  * rather than a bare gap.
  * ------------------------------------------------------------------- */
 .endorsement {
-  max-width: var(--content-max-width);
-  margin: 0 auto;
+  margin: 0;
   text-align: center;
   padding: var(--modem-space-md) 0 var(--modem-space-lg) 0;
   border-top: 1px solid var(--modem-white-dim);
@@ -1548,8 +1704,7 @@ body.app-mode {
  * ------------------------------------------------------------------- */
 .resource-list {
   list-style: none;
-  max-width: var(--content-max-width);
-  margin: 0 auto;
+  margin: 0;
   padding: 0;
 }
 
@@ -1589,9 +1744,8 @@ body.app-mode {
  * go through, which is exactly what a broken or mistyped link is here.
  * ------------------------------------------------------------------- */
 .not-found {
-  max-width: var(--content-max-width);
-  margin: 0 auto;
-  padding: var(--modem-space-lg) var(--modem-space-md);
+  margin: 0;
+  padding-block: var(--modem-space-lg);
   text-align: center;
 }
 
@@ -1620,19 +1774,6 @@ body.app-mode {
  * same frame shrunk past legibility.
  * ------------------------------------------------------------------- */
 @media (max-width: 48rem) {
-  /* Gutters: the page's own --modem-space-md (4ch, roughly 64px on a
-     16px root) is a comfortable desktop margin and a poor one on a
-     390px screen, where it alone eats a fifth of the width before any
-     content starts. --modem-space-sm is an existing token, not a new
-     hardcoded value - reusing it here rather than inventing a
-     "mobile gutter" token that would only ever apply to one media
-     query. */
-  main,
-  .hero__content {
-    padding-left: var(--modem-space-sm);
-    padding-right: var(--modem-space-sm);
-  }
-
   /* The one-device frame: real render swap, not a CSS shrink - see the
      banner comment above .win-group--narrow. */
   .win--wide {
