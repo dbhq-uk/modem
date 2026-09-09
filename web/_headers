@@ -18,32 +18,34 @@
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: DENY
   Permissions-Policy: camera=(), geolocation=(), payment=(), usb=(), microphone=(self)
-
-# Revalidate the code on every request.
-#
-# Cloudflare Pages' own default for .js and .css is `public,
-# max-age=14400, must-revalidate` - four hours in the *browser* cache -
-# while it serves HTML and .wasm at `max-age=0`. Nothing here carries a
-# content hash in its filename, so those four hours mean a returning
-# visitor gets today's HTML wired to yesterday's JavaScript, and the
-# deploy's edge-cache purge cannot help: it clears Cloudflare's copy,
-# not the one already on the visitor's disk.
-#
-# That is not hypothetical. The Demo button 404ed on `modem.wasm` for
-# hours after the fix for it went live, because the browser kept running
-# the cached `wired.js` that still resolved the URL the old way - and it
-# cost most of an afternoon of diagnosis, because the deployed bytes and
-# the running bytes were different things and every check of the former
-# said the site was fine.
-#
-# `no-cache` does not mean "do not store". It means "store it, but
-# always revalidate before reuse", so the normal case is a 304 with no
-# body - these files are tens of kilobytes and the ETags already exist.
-# The correct alternative is hashed filenames plus `immutable`, which is
-# what a build step would give us; this site has no build step for its
-# JS, so this is the honest version of the same guarantee.
-/*.js
-  Cache-Control: no-cache
-
-/*.css
+  # Everything revalidates before it is reused.
+  #
+  # Cloudflare Pages' own default for .js and .css is `public,
+  # max-age=14400, must-revalidate` - four hours in the *browser* cache -
+  # while it serves HTML and .wasm at `max-age=0`. Nothing on this site
+  # carries a content hash in its filename, so those four hours mean a
+  # returning visitor gets today's HTML wired to yesterday's JavaScript.
+  # The deploy's edge purge cannot help: it clears Cloudflare's copy, not
+  # the one already on the visitor's disk.
+  #
+  # That is not hypothetical. The Demo button went on 404ing for
+  # `modem.wasm` after the fix for it was live and verified correct at
+  # the origin, because the browser kept running a cached `wired.js` that
+  # still resolved the URL the old way. It cost most of an afternoon,
+  # because the deployed bytes and the running bytes were different
+  # things and every check of the former said the site was fine.
+  #
+  # `no-cache` does not mean "do not store". It means "store it, but
+  # always revalidate before reuse", so the ordinary case is a 304 with
+  # no body - and the ETags already exist. It is set here on `/*` rather
+  # than on `/*.js` and `/*.css`, which is where it was tried first:
+  # Pages' wildcard is a path splat, not a glob, so a suffix pattern
+  # silently matches nothing. Measured directly - the rule deployed and
+  # .js kept coming back max-age=14400.
+  #
+  # The better answer for the code is hashed filenames plus `immutable`,
+  # which needs a build step this site's plain JS does not have. This is
+  # the honest version of the same guarantee rather than a pretence of
+  # one, and the whole site is a few hundred kilobytes, so the round
+  # trips it costs are not the problem worth optimising.
   Cache-Control: no-cache
