@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use modem_audio::{Transport, WiredTransport};
+use modem_core::session::SessionState;
 use modem_core::{Config, Duplex, Role};
 use modem_tui::{App, Pane, Theme};
 use ratatui::buffer::Buffer;
@@ -134,13 +135,35 @@ fn call() -> (Pane, Pane, Vec<f32>) {
 
     a.type_line("ATDT01234567890");
     b.type_line("ATA");
+    // Answer keeps re-answering if it ever falls back to Idle - see
+    // `Pane::set_auto_answer`'s own doc: `modem-core`'s carrier detector
+    // has a disclosed, pre-existing gap (a broadband transient - here,
+    // originate's own off-hook click - can clear its rise threshold
+    // before the floor has calibrated), and Task 3i's ringback fix (a
+    // real, full 2.0 s inter-ring silence) gives that false-early
+    // "connected" state a genuine silent stretch long enough to then
+    // genuinely detect carrier loss and hang up, well before the real
+    // call has actually arrived. Without this, `b` could hang up for
+    // good mid-overture and never reach a real Connected at all.
+    b.set_auto_answer(true);
+    // `state()`, not `carrier()` alone - carrier can read true from
+    // exactly that same disclosed false-early transient, which would let
+    // this condition fire before the overture has actually finished (see
+    // this crate's own standing caution against trusting carrier
+    // detection alone, e.g. `session.rs`'s and `at.rs`'s test docs).
+    // `state()` cannot reach `Connected` on either end until its own
+    // overture/carrier genuinely completes.
     pump_until(
         &mut a,
         &mut b,
         3000,
         "both ends to connect",
         &mut audio,
-        |a, b| a.carrier() && b.carrier() && a.history().iter().any(|l| l.contains("CONNECT")),
+        |a, b| {
+            a.state() == SessionState::Connected
+                && b.state() == SessionState::Connected
+                && a.history().iter().any(|l| l.contains("CONNECT"))
+        },
     );
 
     // Originate starts with the turn (see `session.rs`'s own module

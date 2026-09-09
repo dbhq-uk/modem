@@ -227,6 +227,25 @@ impl AtProcessor {
         self.in_command_mode
     }
 
+    /// Enters data mode without a command line to execute one from -
+    /// exactly what an auto-answering end needs (see `modem-tui`'s own
+    /// `--answer` mode doc: "picking up without anybody typing ATA").
+    /// Calling `session.answer()` directly and never touching this
+    /// processor at all leaves `in_command_mode` stuck `true` forever,
+    /// since only `execute`'s own command arms (`"A"`, `"DT..."`, `"O"`)
+    /// ever call the private `go_online` this delegates to - a real,
+    /// found defect: an auto-answered end could receive data (`Session`
+    /// itself does not care what mode this processor is in) but any text
+    /// this end's own DTE typed would be parsed as an AT command line
+    /// instead of sent as data, silently failing with `ERROR` rather
+    /// than ever reaching the wire. Deliberately still produces no
+    /// `Response` and touches no history - unlike feeding literal `"ATA"`
+    /// through [`AtProcessor::feed`], which would show as though someone
+    /// had typed it, contradicting "nothing typed into it".
+    pub fn force_data_mode(&mut self) {
+        self.go_online();
+    }
+
     /// Feeds one byte typed at the DTE. In command mode, accumulates it
     /// into the command line in progress and executes on CR, returning
     /// that command's [`Response`]. In data mode, either extends a

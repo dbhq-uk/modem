@@ -200,7 +200,9 @@ fn run(
                 // this through its S0 register, picking up without
                 // anybody typing ATA. Choosing the mode and then still
                 // having to type the command would be picking it twice.
-                pane.session_mut().answer();
+                // `answer_silently`, not a bare `session_mut().answer()` -
+                // see its own doc for the defect that leaves otherwise.
+                pane.answer_silently();
                 // And keeps listening, not just starts out listening -
                 // see `Pane::set_auto_answer`'s own doc for why an
                 // unattended end has to survive a dropped call (real or
@@ -348,7 +350,7 @@ mod auto_answer_tests {
             duplex: Duplex::HalfPingPong,
         });
         if role == Role::Answer {
-            pane.session_mut().answer();
+            pane.answer_silently();
             pane.set_auto_answer(true);
         }
         pane

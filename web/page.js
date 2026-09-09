@@ -45,21 +45,7 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
 const terminalOutput = document.getElementById('terminal-output');
 const nowPlaying = document.getElementById('now-playing');
 const overtureBtn = document.getElementById('overture-btn');
-const dialBtn = document.getElementById('dial-btn');
-const twoDeviceBtn = document.getElementById('two-device-btn');
 const micDiagnostic = document.getElementById('mic-diagnostic');
-const micIntro = document.getElementById('mic-intro');
-const micEnableBtn = document.getElementById('mic-enable-btn');
-const endpointPanel = document.getElementById('endpoint-panel');
-const endpointStatus = document.getElementById('endpoint-status');
-const dialDigits = document.getElementById('dial-digits');
-const endpointDialBtn = document.getElementById('endpoint-dial');
-const endpointAnswerBtn = document.getElementById('endpoint-answer');
-const endpointHangupBtn = document.getElementById('endpoint-hangup');
-const endpointStopBtn = document.getElementById('endpoint-stop');
-const chatInput = document.getElementById('chat-input');
-const chatSendBtn = document.getElementById('chat-send');
-const chatLog = document.getElementById('chat-log');
 const canvas = document.getElementById('waterfall');
 const phaseListEl = document.getElementById('phase-list');
 
@@ -69,15 +55,29 @@ const resumeSoundBtn = document.getElementById('resume-sound-btn');
 const copyDiagnosticsBtn = document.getElementById('copy-diagnostics-btn');
 const copyDiagnosticsStatus = document.getElementById('copy-diagnostics-status');
 
-const appModeBtn = document.getElementById('app-mode-btn');
+// -----------------------------------------------------------------------
+// Routing: three routes behind one page, plus the plain landing. See the
+// "The live routes" section, further down, for the full doc.
+// -----------------------------------------------------------------------
+const launcher = document.getElementById('launcher');
+const launchDemoBtn = document.getElementById('launch-demo-btn');
+const launchOriginateBtn = document.getElementById('launch-originate-btn');
+const launchReceiveBtn = document.getElementById('launch-receive-btn');
+const routeStartBlock = document.getElementById('route-start-block');
+const routeStartCopy = document.getElementById('route-start-copy');
+const routeStartBtn = document.getElementById('route-start-btn');
+
 const appModeBackBtn = document.getElementById('app-mode-back-btn');
 const wiredPanel = document.getElementById('wired-panel');
 const wiredPhase = document.getElementById('wired-phase');
 const wiredStatusA = document.getElementById('wired-status-a');
 const wiredStatusB = document.getElementById('wired-status-b');
+const wiredCaptionA = document.getElementById('wired-caption-a');
+const wiredCaptionB = document.getElementById('wired-caption-b');
 const wiredLogA = document.getElementById('wired-log-a');
 const wiredLogB = document.getElementById('wired-log-b');
 const wiredCanvas = document.getElementById('wired-waterfall');
+const wiredDataCheck = document.getElementById('wired-databcheck');
 const wiredDigits = document.getElementById('wired-digits');
 const wiredDialBtn = document.getElementById('wired-dial');
 const wiredHangupBtn = document.getElementById('wired-hangup');
@@ -85,6 +85,28 @@ const wiredStopBtn = document.getElementById('wired-stop');
 const wiredSendSide = document.getElementById('wired-send-side');
 const wiredChat = document.getElementById('wired-chat');
 const wiredSendBtn = document.getElementById('wired-send');
+
+const endpointPanel = document.getElementById('endpoint-panel');
+const endpointBackBtn = document.getElementById('endpoint-back-btn');
+const endpointHeading = document.getElementById('endpoint-heading');
+const endpointIntro = document.getElementById('endpoint-intro');
+const shareBlock = document.getElementById('share-block');
+const qrCodeEl = document.getElementById('qr-code');
+const shareLinkInput = document.getElementById('share-link');
+const shareCopyBtn = document.getElementById('share-copy-btn');
+const shareCopyStatus = document.getElementById('share-copy-status');
+const endpointStatus = document.getElementById('endpoint-status');
+const endpointCaption = document.getElementById('endpoint-caption');
+const signalIndicators = document.getElementById('signal-indicators');
+const micActivityDot = document.getElementById('mic-activity-dot');
+const modemSignalDot = document.getElementById('modem-signal-dot');
+const endpointDeadline = document.getElementById('endpoint-deadline');
+const endpointDataCheck = document.getElementById('endpoint-databcheck');
+const endpointHangupBtn = document.getElementById('endpoint-hangup');
+const endpointStopBtn = document.getElementById('endpoint-stop');
+const chatInput = document.getElementById('chat-input');
+const chatSendBtn = document.getElementById('chat-send');
+const chatLog = document.getElementById('chat-log');
 
 function appendTerminalLine(container, text, { command = false } = {}) {
   const line = document.createElement('p');
@@ -726,13 +748,350 @@ PHASES.forEach((phase, index) => {
 });
 
 // -----------------------------------------------------------------------
-// The live demos. "One device" (below) is the primary action - pressing
-// Dial gives the full split-screen call directly, no mode choice first.
-// "Two devices" is the clearly secondary alternative offered alongside
-// it: this tab becomes one real endpoint, listening on a raw microphone,
-// that a copy of the binary on a second machine can dial or answer.
+// Routing: three routes behind one application - /demo, /originate,
+// /receive - plus the plain landing (three buttons) at the root path,
+// and #demo kept working as a legacy alias for /demo. Routes carry the
+// role; nothing about the call itself (digits, connection phase) ever
+// lives in the URL.
+//
+// The rule that shapes everything below: an internal tap on one of the
+// three landing buttons starts that route immediately - clicking the
+// button is itself the explicit gesture, so there is nothing left to
+// confirm - while a direct link or a reload landing straight on a route
+// must never play audio or ask for a microphone on its own. Both cases
+// run through the exact same `startRoute`; what differs is only whether
+// something else already supplied the gesture (a real click, handled
+// synchronously inside the launcher buttons' own listeners) or whether
+// this page has to ask for one first (`route-start-block`, populated by
+// `showRouteStart` and only ever wired to call `startRoute` from inside
+// its own click handler).
 // -----------------------------------------------------------------------
-let endpoint = null;
+function routeForLocation() {
+  let path = location.pathname.replace(/\/index\.html$/, '');
+  if (path.length > 1) path = path.replace(/\/+$/, '');
+  if (path.endsWith('/demo')) return 'demo';
+  if (path.endsWith('/originate')) return 'originate';
+  if (path.endsWith('/receive')) return 'receive';
+  // Legacy alias: a shared link to the old #demo hash on the plain root
+  // path still has to work.
+  if (location.hash === '#demo') return 'demo';
+  return null;
+}
+
+const ROUTE_START_COPY = {
+  demo: 'A direct link never plays audio on its own - press Start to hear both ends connect right here.',
+  originate: 'This device will dial out - it needs your microphone, asked for only once you press Start.',
+  receive: 'This device will listen for a call - it needs your microphone, asked for only once you press Start.',
+};
+const ROUTE_START_LABEL = {
+  demo: 'Start demo',
+  originate: 'Start originating modem',
+  receive: 'Start receiving modem',
+};
+
+let pendingRoute = null;
+
+function showLanding() {
+  pendingRoute = null;
+  launcher.hidden = false;
+  routeStartBlock.hidden = true;
+  wiredPanel.hidden = true;
+  endpointPanel.hidden = true;
+}
+
+function showRouteStart(route) {
+  pendingRoute = route;
+  launcher.hidden = true;
+  routeStartBlock.hidden = false;
+  routeStartCopy.textContent = ROUTE_START_COPY[route];
+  routeStartBtn.textContent = ROUTE_START_LABEL[route];
+  wiredPanel.hidden = true;
+  endpointPanel.hidden = true;
+}
+
+function initRouting() {
+  const route = routeForLocation();
+  if (route) {
+    showRouteStart(route);
+  } else {
+    showLanding();
+  }
+}
+
+async function startRoute(route) {
+  if (route === 'demo') await startDemo();
+  else if (route === 'originate') await startEndpointRoute(Role.ORIGINATE);
+  else if (route === 'receive') await startEndpointRoute(Role.ANSWER);
+}
+
+launchDemoBtn.addEventListener('click', () => {
+  history.pushState(null, '', '/demo');
+  launcher.hidden = true;
+  startRoute('demo');
+});
+launchOriginateBtn.addEventListener('click', () => {
+  history.pushState(null, '', '/originate');
+  launcher.hidden = true;
+  startRoute('originate');
+});
+launchReceiveBtn.addEventListener('click', () => {
+  history.pushState(null, '', '/receive');
+  launcher.hidden = true;
+  startRoute('receive');
+});
+
+routeStartBtn.addEventListener('click', () => {
+  if (!pendingRoute) return;
+  const route = pendingRoute;
+  routeStartBlock.hidden = true;
+  startRoute(route);
+});
+
+/** Back (either panel's own button) and Escape both fully exit to the
+ * landing - there is no intermediate "in-page but not full-viewport"
+ * state any more now that all three routes are dedicated full-viewport
+ * views, so there is nothing to shrink back into. */
+async function exitToLanding() {
+  exitAppMode();
+  if (wired) await teardownWired();
+  if (endpoint) await teardownEndpoint();
+  showLanding();
+  if (location.pathname !== '/' || location.hash) {
+    history.pushState(null, '', '/');
+  }
+}
+
+appModeBackBtn.addEventListener('click', exitToLanding);
+endpointBackBtn.addEventListener('click', exitToLanding);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.body.classList.contains('app-mode')) exitToLanding();
+});
+
+// Back/forward navigation must not auto-start anything either - the same
+// rule a fresh load follows. Tear down whatever was live and re-evaluate
+// the new location exactly as a fresh load would.
+window.addEventListener('popstate', async () => {
+  exitAppMode();
+  if (wired) await teardownWired();
+  if (endpoint) await teardownEndpoint();
+  initRouting();
+});
+
+// -----------------------------------------------------------------------
+// app-mode - the full-viewport view every one of the three routes gets
+// while live (Dan, 8 Sep 2026: "make the demo fill the phone screen on
+// mobile nicely, almost become an app" - now every viewport size, and
+// /originate and /receive's own view too, not the wired demo only). See
+// style.css's own doc on why the shell rules target `.endpoint.app-mode`
+// rather than `.wired.app-mode` specifically.
+// -----------------------------------------------------------------------
+let liveAppModePanel = null;
+
+function enterAppModeFor(panel) {
+  liveAppModePanel = panel;
+  document.body.classList.add('app-mode');
+  panel.classList.add('app-mode');
+  updateAppModeViewportHeight();
+  const backBtn = panel.querySelector('.app-mode-back');
+  if (backBtn) backBtn.focus();
+}
+
+function exitAppMode() {
+  if (liveAppModePanel) {
+    liveAppModePanel.classList.remove('app-mode');
+    liveAppModePanel.style.removeProperty('height');
+  }
+  document.body.classList.remove('app-mode');
+  liveAppModePanel = null;
+}
+
+/**
+ * `100dvh` already tracks the browser's own address bar; it does not
+ * reliably track the on-screen keyboard on every WebKit version. While
+ * app mode is active, the visualViewport API (where present) is the
+ * more honest source for "how much space is actually left above the
+ * keyboard" - setting the panel's own height directly to it keeps the
+ * composer visible above the keyboard rather than covered by it,
+ * instead of a fixed-height box the keyboard simply overlaps.
+ */
+function updateAppModeViewportHeight() {
+  if (!liveAppModePanel) return;
+  if (window.visualViewport) {
+    liveAppModePanel.style.height = `${window.visualViewport.height}px`;
+  }
+}
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', updateAppModeViewportHeight);
+}
+
+// -----------------------------------------------------------------------
+// The automatic bidirectional data check - the actual success criterion
+// for a real call in either mode (carrier detection alone is not
+// success). A fixed, non-secret marker rather than anything a visitor
+// could type - it is filtered out of both transcripts on arrival (see
+// the 'data' listeners below), never shown as though it were real chat,
+// and never printed as fabricated modem output either: it only ever
+// drives this diagnostic line, outside the transcript.
+// -----------------------------------------------------------------------
+const CANARY = 'MODEM-CHECK-OK';
+const DATA_CHECK_TIMEOUT_MS = 10000;
+
+/**
+ * Demo's own check: both real Sessions live in this one page, so the
+ * joint verdict can be computed and shown directly. Originate already
+ * holds the turn the instant both ends connect, so it sends first;
+ * answer only ever sends its own canary back once its own `status` event
+ * genuinely reports `hasTurn`, never on a fixed timer.
+ *
+ * `yieldTurn` is called a real ~800ms after `send`, not back to back.
+ * The queueing order alone (`process_out`'s "yielding" bypass keeps
+ * draining `tx` in order regardless of exactly when `hasTurn` itself
+ * flips - see modem-core/src/session.rs's own doc) looked sufficient on
+ * paper, but measured directly it was not: calling `yieldTurn`
+ * immediately after `send` left the far end's `hasTurn` never once
+ * observed true for the rest of the check window, even though the data
+ * itself had already decoded correctly moments before - a real,
+ * reproducible timing sensitivity around queueing a Turn packet with no
+ * gap after other data, not a one-off flake. `modem-core`'s own test
+ * suite never actually exercises this shape either: every hand-over test
+ * there settles between operations (see `session.rs`'s own `settle`
+ * helper), never queues a Turn packet immediately behind data with
+ * nothing between them. A real settle here matches that established
+ * convention rather than fighting it.
+ */
+function startWiredDataCheck() {
+  let aReceivedB = false;
+  let bReceivedA = false;
+  let bSent = false;
+  wiredDataCheck.textContent = 'Checking both directions carry real data...';
+  wiredDataCheck.className = 'diagnostic';
+
+  const onData = (e) => {
+    const { side, bytes } = e.detail;
+    const text = decodeWired(bytes);
+    if (side === 'b' && text.includes(CANARY)) bReceivedA = true;
+    if (side === 'a' && text.includes(CANARY)) aReceivedB = true;
+    maybeFinish();
+  };
+  const onStatus = (e) => {
+    const { b } = e.detail;
+    if (!bSent && b.hasTurn && b.state === SessionState.CONNECTED) {
+      bSent = true;
+      wired.send('b', CANARY);
+      // A real gap before yielding, not back-to-back - matching
+      // modem-core's own test convention (every hand-over test settles
+      // between operations, never queues a Turn packet immediately
+      // behind data with no gap). Measured directly: yielding
+      // immediately after send() here left the far end's `hasTurn`
+      // never once observed true for the rest of the check window, even
+      // though the data itself had already decoded correctly - a real,
+      // reproducible timing sensitivity, not a one-off flake.
+      setTimeout(() => wired.yieldTurn('b'), 800);
+    }
+  };
+
+  function cleanup() {
+    wired.removeEventListener('data', onData);
+    wired.removeEventListener('status', onStatus);
+    clearTimeout(timer);
+  }
+  function maybeFinish() {
+    if (aReceivedB && bReceivedA) {
+      wiredDataCheck.textContent = 'Bidirectional data check: passed - both ends received real bytes from the other.';
+      wiredDataCheck.className = 'diagnostic';
+      cleanup();
+    }
+  }
+  const timer = setTimeout(() => {
+    if (!(aReceivedB && bReceivedA)) {
+      const missing = [];
+      if (!bReceivedA) missing.push('originate to answer');
+      if (!aReceivedB) missing.push('answer to originate');
+      wiredDataCheck.textContent = `Bidirectional data check: failed - ${missing.join(' and ')} did not arrive within 10s.`;
+      wiredDataCheck.className = 'diagnostic diagnostic--warning';
+    }
+    cleanup();
+  }, DATA_CHECK_TIMEOUT_MS);
+
+  wired.addEventListener('data', onData);
+  wired.addEventListener('status', onStatus);
+  wired.send('a', CANARY);
+  setTimeout(() => wired.yieldTurn('a'), 800);
+}
+
+/**
+ * The two-device check: this page only ever has one real Session, so it
+ * can only honestly claim what it can measure - whether *this* end
+ * received the far end's canary. That is still the real, load-bearing
+ * proof for this end's own screen: with both pages open (the two-device
+ * routes' own standing instruction), a visitor sees "received" appear on
+ * both physical devices, together, which is what genuinely bidirectional
+ * data looks like across two independent endpoints - never inferred from
+ * one side alone. Same turn logic as the wired check, and it works
+ * unmodified on both /originate and /receive: originate already holds
+ * the turn at Connected and sends immediately; answer's own `status`
+ * event only reports `hasTurn` once the real acoustic Turn packet has
+ * actually arrived, and sends only then.
+ */
+function startEndpointDataCheck() {
+  let received = false;
+  let sentOwn = false;
+  endpointDataCheck.textContent = 'Checking this end can send and receive real data...';
+  endpointDataCheck.className = 'diagnostic';
+
+  const onStatus = (e) => {
+    if (!sentOwn && e.detail.hasTurn && e.detail.state === SessionState.CONNECTED) {
+      sentOwn = true;
+      endpoint.send(CANARY);
+      // A real gap, not back-to-back - see startWiredDataCheck's own
+      // doc for the measured reason this matters.
+      setTimeout(() => endpoint.yieldTurn(), 800);
+    }
+  };
+  const onData = (e) => {
+    const text = new TextDecoder().decode(e.detail);
+    if (text.includes(CANARY)) {
+      received = true;
+      endpointDataCheck.textContent = 'Bidirectional data check: this end received real bytes from the far end.';
+      endpointDataCheck.className = 'diagnostic';
+      cleanup();
+    }
+  };
+
+  function cleanup() {
+    endpoint.removeEventListener('status', onStatus);
+    endpoint.removeEventListener('data', onData);
+    clearTimeout(timer);
+  }
+  const timer = setTimeout(() => {
+    if (!received) {
+      endpointDataCheck.textContent = 'Bidirectional data check: nothing arrived from the far end within 10s - the acoustic link connected but data did not get through. A convincing-looking call is not the same as one that actually works.';
+      endpointDataCheck.className = 'diagnostic diagnostic--warning';
+    }
+    cleanup();
+  }, DATA_CHECK_TIMEOUT_MS);
+
+  endpoint.addEventListener('status', onStatus);
+  endpoint.addEventListener('data', onData);
+}
+
+// -----------------------------------------------------------------------
+// /demo - two real Sessions cross-wired in software, right here in the
+// page, the browser mirror of modem-audio/src/transport.rs's
+// WiredTransport. No microphone and no permission prompt: both ends live
+// in this page and the mixed signal plays through the visitor's own
+// speakers.
+//
+// Answer auto-answers, matching the binary: `modem --single --acoustic
+// --answer` answers at startup with nothing typed into it. There is no
+// separate "ATA (answer)" control - `wired.answer()` runs as soon as the
+// session pair exists.
+// -----------------------------------------------------------------------
+let wired = null;
+let lastWiredA = null;
+let lastWiredB = null;
 
 function endpointStateName(state) {
   switch (state) {
@@ -743,132 +1102,6 @@ function endpointStateName(state) {
     default: return String(state);
   }
 }
-
-// Two steps, not one: clicking "Two devices" only reveals what it is
-// about to ask for (mic-intro) - the actual getUserMedia prompt waits
-// for its own explicit "Enable microphone" click. Asking for a
-// microphone as the very first thing that happens, with the reason
-// following only after the browser's own permission dialog, had the
-// explanation arriving too late to be useful. Nothing here touches
-// audio or permissions yet, so there is no gesture to preserve.
-twoDeviceBtn.addEventListener('click', () => {
-  twoDeviceBtn.disabled = true;
-  micIntro.hidden = false;
-});
-
-micEnableBtn.addEventListener('click', async () => {
-  micEnableBtn.disabled = true;
-  micDiagnostic.textContent = 'Requesting the endpoint and microphone...';
-  micDiagnostic.className = 'diagnostic';
-  try {
-    endpoint = new ModemEndpoint();
-    await endpoint.init({ role: Role.ORIGINATE, duplex: Duplex.HALF_PING_PONG });
-
-    endpoint.addEventListener('status', (e) => {
-      const { state, stage, hasTurn, carrier } = e.detail;
-      const stageName = typeof stage === 'number' && stage >= 0 ? STAGE_NAMES[stage] : 'none';
-      endpointStatus.textContent = `${endpointStateName(state)} - stage: ${stageName} - turn: ${hasTurn ? 'yours' : 'not yours'} - carrier: ${carrier ? 'yes' : 'no'}`;
-      const connected = state === SessionState.CONNECTED;
-      chatInput.disabled = !connected;
-      chatSendBtn.disabled = !connected;
-      endpointHangupBtn.disabled = state === SessionState.IDLE;
-    });
-
-    endpoint.addEventListener('data', (e) => {
-      const text = new TextDecoder().decode(e.detail);
-      appendTerminalLine(chatLog, text);
-    });
-
-    endpoint.addEventListener('error', (e) => {
-      appendTerminalLine(chatLog, `error: ${e.detail}`);
-    });
-
-    const diagnostics = await endpoint.openMicrophone();
-    const summary = summariseMicDiagnostics(diagnostics);
-    micDiagnostic.textContent = summary;
-    micDiagnostic.className = diagnostics.warnings.length > 0 ? 'diagnostic diagnostic--warning' : 'diagnostic';
-    reportIfAudioSuspended(endpoint.ctx);
-    setActiveAudioSource('two-device endpoint', endpoint.ctx, endpoint.analyser, endpoint.diagnostics);
-
-    micIntro.hidden = true;
-    endpointPanel.hidden = false;
-  } catch (err) {
-    console.error(err);
-    micDiagnostic.textContent = `Could not open the endpoint: ${err.message || err} - check your browser's microphone permission and press Enable microphone to try again.`;
-    micDiagnostic.className = 'diagnostic diagnostic--warning';
-    micEnableBtn.disabled = false;
-  }
-});
-
-endpointDialBtn.addEventListener('click', () => {
-  if (!endpoint) return;
-  endpoint.dial(dialDigits.value || '0');
-  endpointHangupBtn.disabled = false;
-});
-
-endpointAnswerBtn.addEventListener('click', () => {
-  if (!endpoint) return;
-  endpoint.answer();
-  endpointHangupBtn.disabled = false;
-});
-
-endpointHangupBtn.addEventListener('click', () => {
-  if (!endpoint) return;
-  endpoint.hangup();
-});
-
-// The one control that fully releases the microphone rather than just
-// ending a call - spike/README.md finding 5's rule applies to more than
-// a forgotten carrier: a visitor should never have to close the tab to
-// know their microphone is off. Restores the page to its pre-connect
-// state so "Two devices" can be chosen again.
-endpointStopBtn.addEventListener('click', async () => {
-  if (!endpoint) return;
-  await endpoint.stop();
-  endpoint = null;
-  endpointPanel.hidden = true;
-  micIntro.hidden = true;
-  micEnableBtn.disabled = false;
-  chatLog.innerHTML = '';
-  endpointStatus.textContent = 'IDLE';
-  micDiagnostic.textContent = 'Microphone disconnected';
-  micDiagnostic.className = 'diagnostic';
-  twoDeviceBtn.disabled = false;
-  if (activeAudioSource && activeAudioSource.label === 'two-device endpoint') {
-    activeAudioSource = null;
-    renderSoundHelp();
-  }
-});
-
-chatSendBtn.addEventListener('click', () => {
-  if (!endpoint || !chatInput.value) return;
-  endpoint.send(chatInput.value);
-  appendTerminalLine(chatLog, `> ${chatInput.value}`);
-  chatInput.value = '';
-});
-
-chatInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') chatSendBtn.click();
-});
-
-// -----------------------------------------------------------------------
-// "One device" - two real Sessions cross-wired in software, right here
-// in the page, the browser mirror of modem-audio/src/transport.rs's
-// WiredTransport. No microphone and no permission prompt: both ends
-// live in this page and the mixed signal plays through the visitor's
-// own speakers.
-//
-// Answer auto-answers, matching the binary: `modem --single --acoustic
-// --answer` answers at startup with nothing typed into it (see
-// modem-tui/src/app.rs's own module doc, "--answer picks receive mode,
-// and that end answers by itself"). There is no separate "ATA (answer)"
-// control here any more - `wired.answer()` is called as soon as the
-// session pair exists, before the panel is even shown, the same "nothing
-// to type on it" shape as a real answer-mode end sitting ready.
-// -----------------------------------------------------------------------
-let wired = null;
-let lastWiredA = null;
-let lastWiredB = null;
 
 /** One word for a panel's own status line - the long combined string
  * (state/stage/turn/carrier) now lives only in the shared phase line
@@ -883,10 +1116,6 @@ function wiredPhaseLine(a, b) {
   if (a.state === SessionState.CONNECTED && b.state === SessionState.CONNECTED) {
     return 'CONNECTED';
   }
-  // Answer auto-answers as soon as the pair exists (see this section's
-  // own doc), so it can be ANSWERING well before anyone has dialled -
-  // the call itself has not started until originate has, regardless of
-  // what state answer is already sitting in.
   if (a.state === SessionState.IDLE) {
     return 'IDLE - press ATDT to dial';
   }
@@ -895,6 +1124,36 @@ function wiredPhaseLine(a, b) {
     : null;
   const stageName = stage !== null ? STAGE_NAMES[stage] : 'connecting';
   return `Handshake: ${stageName}`;
+}
+
+/**
+ * Each panel's own honest gloss on the call's real phase - outside the
+ * modem transcript on purpose (never the same element real modem output
+ * lands in - see the top-level doc on never inventing modem output).
+ * Sourced from the real overture/session state both ends already carry
+ * in their own `status` payload: legitimate "shared call events" for
+ * Demo specifically, because both ends are genuinely real and already in
+ * this one page (not a stand-in for the acoustic observation the
+ * two-device routes need instead - see their own captions below).
+ * Originate's own caption never claims the far end is ringing, only ever
+ * its own actual stage; answer's is driven by originate's real
+ * stage/ring number precisely because nothing here is a timer guessing
+ * at elapsed time.
+ */
+function wiredCaptionFor(side, a, b) {
+  if (side === 'a') {
+    if (a.state === SessionState.CONNECTED) return 'Connected';
+    if (typeof a.stage === 'number' && a.stage === 3) return 'Calling - ringback (answers after 2 rings)';
+    if (typeof a.stage === 'number' && a.stage >= 0) return 'Calling';
+    return '';
+  }
+  if (b.state === SessionState.CONNECTED) return 'Connected';
+  if (typeof a.stage !== 'number' || a.stage < 0) return 'Listening';
+  if (a.stage < 3) return 'Listening';
+  if (a.stage === 3) {
+    return a.ringNumber ? `Incoming call - ring ${a.ringNumber} of 2` : 'Incoming call';
+  }
+  return 'Auto-answering';
 }
 
 function updateWiredComposerEnablement() {
@@ -915,33 +1174,18 @@ function dialWired() {
   appendTerminalLine(wiredLogA, `ATDT${digits}`, { command: true });
 }
 
-// Dial is the primary action and gives the whole live call directly - no
-// mode choice first (Dan, 8 Sep 2026: "single device should be the
-// default demo not a second step"). One click sets up both ends,
-// answers, and dials, so a visitor hears the handshake and watches both
-// transcripts fill in without a second decision to make. "Two devices"
-// (twoDeviceBtn, above) is the clearly secondary alternative sitting
-// beside it.
-//
-// A named function rather than an inline listener because two controls
-// now start the same call: the page's own Dial button, and the "ATDT
-// (dial)" button that lives inside the panel itself - the panel is
-// visible (see index.html, no longer `hidden` by default) before wired
-// exists so a shared link shows the idle two-terminal interface and a
-// working way to start it on the very first screen, including inside
-// the full-viewport phone app mode below, where the outer Dial button
-// is covered by the panel itself.
 let dialStarting = false;
+let wiredDataCheckStarted = false;
 
-async function handleDialClick() {
+async function startDemo() {
   if (dialStarting || wired) return;
   dialStarting = true;
-  dialBtn.disabled = true;
   try {
     wired = new WiredEndpoint();
     await wired.init({ duplex: Duplex.HALF_PING_PONG });
     reportIfAudioSuspended(wired.ctx);
-    setActiveAudioSource('one-device demo', wired.ctx, wired.analyser, wired.diagnostics);
+    setActiveAudioSource('demo', wired.ctx, wired.analyser, wired.diagnostics);
+    wiredDataCheckStarted = false;
 
     wired.addEventListener('status', (e) => {
       const { a, b } = e.detail;
@@ -950,13 +1194,24 @@ async function handleDialClick() {
       wiredStatusA.textContent = wiredShortStatus(a);
       wiredStatusB.textContent = wiredShortStatus(b);
       wiredPhase.textContent = wiredPhaseLine(a, b);
+      wiredCaptionA.textContent = wiredCaptionFor('a', a, b);
+      wiredCaptionB.textContent = wiredCaptionFor('b', a, b);
       updateWiredComposerEnablement();
       wiredHangupBtn.disabled = a.state === SessionState.IDLE && b.state === SessionState.IDLE;
+      if (!wiredDataCheckStarted && a.state === SessionState.CONNECTED && b.state === SessionState.CONNECTED) {
+        wiredDataCheckStarted = true;
+        startWiredDataCheck();
+      }
+      if (a.state === SessionState.IDLE && b.state === SessionState.IDLE) {
+        wiredDataCheckStarted = false;
+      }
     });
 
     wired.addEventListener('data', (e) => {
       const { side, bytes } = e.detail;
-      appendTerminalLine(side === 'a' ? wiredLogA : wiredLogB, decodeWired(bytes));
+      const text = decodeWired(bytes);
+      if (text.includes(CANARY)) return;
+      appendTerminalLine(side === 'a' ? wiredLogA : wiredLogB, text);
     });
 
     wired.addEventListener('error', (e) => {
@@ -967,46 +1222,28 @@ async function handleDialClick() {
     wired.answer();
 
     startWiredWaterfall(wired);
+    enterAppModeFor(wiredPanel);
     wiredPanel.hidden = false;
-    // Auto-dial too - the whole point of making this the primary action
-    // is that pressing it once is the entire demo, not the first of
-    // several steps.
+    // Auto-dial too - pressing Demo once is the entire demo, not the
+    // first of several steps.
     dialWired();
-    // Not awaited - this is a background honesty check (see
-    // checkAudibleOrWarn's own doc), not something the dial flow itself
-    // should wait on. Dial tone starts within one render quantum of
-    // dialWired() above, so 1.5s is generous rather than tight.
+    // Not awaited - a background honesty check (see checkAudibleOrWarn's
+    // own doc), not something the dial flow itself should wait on.
     checkAudibleOrWarn(wired.ctx, wired.analyser, wired.diagnostics);
   } catch (err) {
     console.error(err);
     micDiagnostic.textContent = `Could not start the demo: ${err.message || err}`;
     micDiagnostic.className = 'diagnostic diagnostic--warning';
-    dialBtn.disabled = false;
+    await exitToLanding();
   } finally {
     dialStarting = false;
   }
 }
 
-dialBtn.addEventListener('click', handleDialClick);
-
-wiredDialBtn.addEventListener('click', async () => {
-  if (!wired) {
-    await handleDialClick();
-    return;
-  }
-  dialWired();
-});
-
-wiredHangupBtn.addEventListener('click', () => {
-  if (!wired) return;
-  wired.hangup();
-});
-
-// Fully releases the audio graph rather than relying on hangup() alone -
-// see wired.js's own stop() doc: an idle Session outputs silence, but
-// the node itself keeps rendering it until the context closes. Restores
-// the page to its pre-connect state so Dial can be pressed again.
-wiredStopBtn.addEventListener('click', async () => {
+/** Fully releases the audio graph rather than relying on hangup() alone -
+ * see wired.js's own stop() doc: an idle Session outputs silence, but
+ * the node itself keeps rendering it until the context closes. */
+async function teardownWired() {
   if (!wired) return;
   await wired.stop();
   wired = null;
@@ -1018,25 +1255,341 @@ wiredStopBtn.addEventListener('click', async () => {
   wiredLogB.innerHTML = '';
   wiredStatusA.textContent = 'IDLE';
   wiredStatusB.textContent = 'IDLE';
+  wiredCaptionA.textContent = '';
+  wiredCaptionB.textContent = '';
   wiredPhase.textContent = 'IDLE - press ATDT to dial';
+  wiredDataCheck.textContent = '';
   updateWiredComposerEnablement();
-  dialBtn.disabled = false;
-  if (activeAudioSource && activeAudioSource.label === 'one-device demo') {
+  if (activeAudioSource && activeAudioSource.label === 'demo') {
     activeAudioSource = null;
     renderSoundHelp();
   }
+}
+
+wiredDialBtn.addEventListener('click', () => {
+  if (wired) dialWired();
 });
+
+wiredHangupBtn.addEventListener('click', () => {
+  if (wired) wired.hangup();
+});
+
+wiredStopBtn.addEventListener('click', teardownWired);
 
 wiredSendBtn.addEventListener('click', () => {
   if (!wired || !wiredChat.value) return;
   const side = wiredSendSide.value === 'b' ? 'b' : 'a';
   wired.send(side, wiredChat.value);
+  // Hands the turn back once this end is done - a chat composer that
+  // never yielded left the far end with no way to ever reply (see
+  // startWiredDataCheck's own doc on why this export exists at all). A
+  // real gap before yielding, not back-to-back - see that same doc for
+  // the measured reason a Turn packet queued with no gap after other
+  // data left the far end's `hasTurn` never observed true.
+  setTimeout(() => wired.yieldTurn(side), 800);
   appendTerminalLine(side === 'a' ? wiredLogA : wiredLogB, `> ${wiredChat.value}`);
   wiredChat.value = '';
 });
 
 wiredChat.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') wiredSendBtn.click();
+});
+
+// -----------------------------------------------------------------------
+// /originate and /receive - one real endpoint, a raw microphone, role
+// fixed by the route rather than chosen on the page. Both share this one
+// implementation, parameterised only by `role`: the turn-based
+// bidirectional check above already works unmodified on either end (see
+// its own doc), and everything else that differs between the two - the
+// heading, the intro copy, the QR/share block, the caption wording - is
+// looked up from `role` below rather than forked into two copies.
+// -----------------------------------------------------------------------
+const FIXED_DIGITS = '0000';
+const ORIGINATE_NO_ANSWER_MS = 20000;
+const RECEIVE_NOTHING_MS = 10000;
+const RECEIVE_MOVE_CLOSER_MS = 30000;
+/** Below this, an analyser reading is treated as room noise, not
+ * microphone activity - not a calibrated voice-activity threshold, just
+ * "is anything audible reaching this input at all". */
+const MIC_ACTIVITY_RMS = 0.01;
+
+let endpoint = null;
+let endpointRole = null;
+let endpointClockStop = null;
+let lastEndpointState = null;
+let lastEndpointCarrier = false;
+let micActivityRaf = null;
+
+function startMicActivityIndicator() {
+  stopMicActivityIndicator();
+  const poll = () => {
+    if (!endpoint || !endpoint.analyser) return;
+    const rms = computeRms(endpoint.analyser);
+    micActivityDot.classList.toggle('signal-indicator__dot--active', rms !== null && rms > MIC_ACTIVITY_RMS);
+    micActivityRaf = requestAnimationFrame(poll);
+  };
+  micActivityRaf = requestAnimationFrame(poll);
+}
+
+function stopMicActivityIndicator() {
+  if (micActivityRaf !== null) {
+    cancelAnimationFrame(micActivityRaf);
+    micActivityRaf = null;
+  }
+  micActivityDot.classList.remove('signal-indicator__dot--active');
+}
+
+/**
+ * Runs `onTick(elapsedMs, running)` about twice a second for as long as
+ * this route is live, accumulating elapsed time only while `ctx` reports
+ * `running` - paused, not merely slowed, while suspended or interrupted,
+ * so a deadline never counts down time the audio was not actually able
+ * to use (Dan's brief: "Deadlines, counted only while audio is actually
+ * running"). Returns a stop function.
+ */
+function startRunningClock(ctx, onTick) {
+  let elapsedMs = 0;
+  let last = performance.now();
+  const id = setInterval(() => {
+    const now = performance.now();
+    const dt = now - last;
+    last = now;
+    const running = !!ctx && ctx.state === 'running';
+    if (running) elapsedMs += dt;
+    onTick(elapsedMs, running);
+  }, 500);
+  return () => clearInterval(id);
+}
+
+/** Never claims a detection that never happened - originate only ever
+ * reports its own actual stage ("Calling", never "ringing" - it cannot
+ * know that from its own ringback), answer only its own real state and
+ * the real carrier flag. */
+function endpointCaptionFor(role, state, stage, carrier) {
+  if (role === Role.ORIGINATE) {
+    if (state === SessionState.CONNECTED) return 'Connected';
+    if (state === SessionState.DIALLING && typeof stage === 'number' && stage === 3) {
+      return 'Calling - ringback (answers after 2 rings)';
+    }
+    if (state === SessionState.DIALLING && typeof stage === 'number' && stage >= 0) return 'Calling';
+    return '';
+  }
+  if (state === SessionState.CONNECTED) return 'Connected';
+  if (state === SessionState.ANSWERING) {
+    return carrier ? 'Modem signal detected - connecting' : 'Listening for a call';
+  }
+  return '';
+}
+
+function updateEndpointDeadline(role, elapsedMs) {
+  if (role === Role.ORIGINATE) {
+    if (lastEndpointState === SessionState.DIALLING && elapsedMs > ORIGINATE_NO_ANSWER_MS) {
+      endpointDeadline.textContent = 'No answer within 20s - ending this attempt.';
+      endpointDeadline.className = 'diagnostic diagnostic--warning';
+      if (endpoint) endpoint.hangup();
+    }
+    return;
+  }
+  if (lastEndpointState === SessionState.ANSWERING && !lastEndpointCarrier) {
+    if (elapsedMs > RECEIVE_MOVE_CLOSER_MS) {
+      endpointDeadline.textContent = 'Still nothing after 30s - try moving the devices closer (10-20cm), somewhere quieter, or use Demo instead.';
+      endpointDeadline.className = 'diagnostic diagnostic--warning';
+    } else if (elapsedMs > RECEIVE_NOTHING_MS) {
+      endpointDeadline.textContent = 'Nothing recognised yet - make sure the originating device has started calling too.';
+      endpointDeadline.className = 'diagnostic';
+    }
+  } else {
+    endpointDeadline.textContent = '';
+  }
+}
+
+function renderShareBlock(url) {
+  qrCodeEl.innerHTML = '';
+  if (window.qrcode) {
+    try {
+      const qr = window.qrcode(0, 'M');
+      qr.addData(url);
+      qr.make();
+      qrCodeEl.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
+    } catch (err) {
+      console.error('QR generation failed', err);
+    }
+  }
+  shareLinkInput.value = url;
+  shareCopyStatus.textContent = '';
+}
+
+shareCopyBtn.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(shareLinkInput.value);
+    shareCopyStatus.textContent = 'Copied to clipboard.';
+  } catch (err) {
+    console.error(err);
+    shareLinkInput.select();
+    shareCopyStatus.textContent = 'Could not copy automatically - select and copy the text above.';
+  }
+});
+
+async function startEndpointRoute(role) {
+  endpointRole = role;
+  lastEndpointState = null;
+  lastEndpointCarrier = false;
+  endpointHeading.textContent = role === Role.ORIGINATE ? 'Originate - dialling out' : 'Receive - listening for a call';
+  endpointIntro.textContent = role === Role.ORIGINATE
+    ? 'This device dials out. There is no real telephone network behind this, so the digits are fixed and decorative - only the modem handshake and the connection underneath it are real.'
+    : 'This device listens for a call and answers automatically - nothing to type.';
+  wiredPanel.hidden = true;
+  endpointPanel.hidden = false;
+  enterAppModeFor(endpointPanel);
+  endpointStatus.textContent = 'Waiting for microphone permission';
+  endpointCaption.textContent = '';
+  endpointCaption.className = 'endpoint__caption';
+  endpointDeadline.textContent = '';
+  endpointDataCheck.textContent = '';
+  signalIndicators.hidden = true;
+  chatLog.innerHTML = '';
+
+  if (role === Role.ORIGINATE) {
+    shareBlock.hidden = false;
+    renderShareBlock(`${location.origin}/receive`);
+  } else {
+    shareBlock.hidden = true;
+  }
+
+  let dataCheckStarted = false;
+  try {
+    endpoint = new ModemEndpoint();
+    await endpoint.init({ role, duplex: Duplex.HALF_PING_PONG });
+
+    endpoint.addEventListener('status', (e) => {
+      const { state, stage, carrier } = e.detail;
+      lastEndpointState = state;
+      lastEndpointCarrier = carrier;
+      endpointStatus.textContent = endpointStateName(state);
+      endpointCaption.textContent = endpointCaptionFor(role, state, stage, carrier);
+      modemSignalDot.classList.toggle('signal-indicator__dot--active', carrier);
+      const connected = state === SessionState.CONNECTED;
+      chatInput.disabled = !connected;
+      chatSendBtn.disabled = !connected;
+      endpointHangupBtn.disabled = state === SessionState.IDLE;
+      if (connected && !dataCheckStarted) {
+        dataCheckStarted = true;
+        startEndpointDataCheck();
+      }
+      if (state === SessionState.IDLE) {
+        dataCheckStarted = false;
+        endpointDataCheck.textContent = '';
+      }
+    });
+
+    endpoint.addEventListener('data', (e) => {
+      const text = new TextDecoder().decode(e.detail);
+      if (text.includes(CANARY)) return;
+      appendTerminalLine(chatLog, text);
+    });
+
+    endpoint.addEventListener('error', (e) => {
+      appendTerminalLine(chatLog, `error: ${e.detail}`);
+    });
+
+    const diagnostics = await endpoint.openMicrophone();
+    const summary = summariseMicDiagnostics(diagnostics);
+    micDiagnostic.textContent = summary;
+    micDiagnostic.className = diagnostics.warnings.length > 0 ? 'diagnostic diagnostic--warning' : 'diagnostic';
+    reportIfAudioSuspended(endpoint.ctx);
+    setActiveAudioSource('endpoint', endpoint.ctx, endpoint.analyser, endpoint.diagnostics);
+
+    signalIndicators.hidden = false;
+    startMicActivityIndicator();
+
+    // Only from here - the microphone is actually capturing - does the
+    // distance guidance belong on screen for /receive (Dan's brief: "once
+    // actually capturing", not before).
+    if (role === Role.ANSWER) {
+      endpointIntro.textContent = 'Listening for a call. Put the two devices roughly 10-20cm apart, speakers and microphones uncovered, both pages open - a starting point to validate on real hardware, not a promise.';
+    }
+
+    endpointClockStop = startRunningClock(endpoint.ctx, (elapsedMs, running) => {
+      if (!running) {
+        endpointDeadline.textContent = 'Audio is suspended - tap to resume (see Sound help below).';
+        endpointDeadline.className = 'diagnostic diagnostic--warning';
+        return;
+      }
+      updateEndpointDeadline(role, elapsedMs);
+    });
+
+    if (role === Role.ORIGINATE) {
+      endpoint.dial(FIXED_DIGITS);
+      appendTerminalLine(chatLog, `ATDT${FIXED_DIGITS}`, { command: true });
+    } else {
+      endpoint.answer();
+    }
+    endpointHangupBtn.disabled = false;
+
+    checkAudibleOrWarn(endpoint.ctx, endpoint.analyser, endpoint.diagnostics);
+  } catch (err) {
+    console.error(err);
+    endpointStatus.textContent = 'IDLE';
+    if (err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError')) {
+      endpointCaption.textContent = 'Microphone permission was denied - allow access and press Start again.';
+    } else {
+      endpointCaption.textContent = `Could not start: ${err.message || err}`;
+    }
+    endpointCaption.className = 'endpoint__caption diagnostic--warning';
+    await exitToLanding();
+  }
+}
+
+/** The one control that fully releases the microphone rather than just
+ * ending a call - spike/README.md finding 5's rule applies to more than
+ * a forgotten carrier: a visitor should never have to close the tab to
+ * know their microphone is off. */
+async function teardownEndpoint() {
+  stopMicActivityIndicator();
+  if (endpointClockStop) {
+    endpointClockStop();
+    endpointClockStop = null;
+  }
+  if (endpoint) {
+    await endpoint.stop();
+  }
+  endpoint = null;
+  endpointRole = null;
+  lastEndpointState = null;
+  lastEndpointCarrier = false;
+  endpointPanel.hidden = true;
+  chatLog.innerHTML = '';
+  endpointStatus.textContent = 'IDLE';
+  endpointCaption.textContent = '';
+  endpointDeadline.textContent = '';
+  endpointDataCheck.textContent = '';
+  signalIndicators.hidden = true;
+  shareBlock.hidden = true;
+  if (activeAudioSource && activeAudioSource.label === 'endpoint') {
+    activeAudioSource = null;
+    renderSoundHelp();
+  }
+}
+
+endpointHangupBtn.addEventListener('click', () => {
+  if (endpoint) endpoint.hangup();
+});
+
+endpointStopBtn.addEventListener('click', teardownEndpoint);
+
+chatSendBtn.addEventListener('click', () => {
+  if (!endpoint || !chatInput.value) return;
+  endpoint.send(chatInput.value);
+  // A real gap before yielding - see startWiredDataCheck's own doc for
+  // the measured reason a Turn packet queued with no gap after other
+  // data left the far end's `hasTurn` never observed true.
+  setTimeout(() => endpoint.yieldTurn(), 800);
+  appendTerminalLine(chatLog, `> ${chatInput.value}`);
+  chatInput.value = '';
+});
+
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') chatSendBtn.click();
 });
 
 // A page navigating away must not leave a live microphone, a live wired
@@ -1054,74 +1607,4 @@ window.addEventListener('beforeunload', () => {
 // pressing anything should see that reflected accurately, not a blank list.
 renderSoundHelp();
 
-// -----------------------------------------------------------------------
-// App mode - the full-viewport phone view of the wired panel (Dan, 8 Sep
-// 2026: "make the demo fill the phone screen on mobile nicely, almost
-// become an app"). The panel itself carries the fixed-position styling
-// (see style.css's own "app-mode" doc); this only toggles the class and
-// keeps the URL hash in sync so a shared link to #demo lands somewhere
-// that already works: a phone gets this view directly, a desktop
-// browser just scrolls to the ordinary #demo section instead (a native
-// anchor - #demo is a real id on that section - so nothing extra is
-// needed for that case).
-// -----------------------------------------------------------------------
-const phoneViewport = window.matchMedia('(max-width: 48rem)');
-
-function setAppMode(on) {
-  document.body.classList.toggle('app-mode', on);
-  wiredPanel.classList.toggle('app-mode', on);
-  if (on) {
-    updateAppModeViewportHeight();
-    appModeBackBtn.focus();
-  } else {
-    // Cleared rather than left stale - see updateAppModeViewportHeight,
-    // which only ever sets this while app mode is active.
-    wiredPanel.style.removeProperty('height');
-  }
-}
-
-function enterAppMode() {
-  if (location.hash !== '#demo') history.pushState(null, '', '#demo');
-  setAppMode(true);
-}
-
-function exitAppMode() {
-  setAppMode(false);
-  if (location.hash === '#demo') history.pushState(null, '', location.pathname + location.search);
-}
-
-/**
- * `100dvh` already tracks the browser's own address bar; it does not
- * reliably track the on-screen keyboard on every WebKit version. While
- * app mode is active, the visualViewport API (where present) is the
- * more honest source for "how much space is actually left above the
- * keyboard" - setting the panel's own height directly to it keeps the
- * composer visible above the keyboard rather than covered by it,
- * instead of a fixed-height box the keyboard simply overlaps.
- */
-function updateAppModeViewportHeight() {
-  if (!document.body.classList.contains('app-mode')) return;
-  if (window.visualViewport) {
-    wiredPanel.style.height = `${window.visualViewport.height}px`;
-  }
-}
-
-if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', updateAppModeViewportHeight);
-}
-
-appModeBtn.addEventListener('click', enterAppMode);
-appModeBackBtn.addEventListener('click', exitAppMode);
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && document.body.classList.contains('app-mode')) exitAppMode();
-});
-
-window.addEventListener('hashchange', () => {
-  setAppMode(location.hash === '#demo' && phoneViewport.matches);
-});
-
-// A shared link landing directly on #demo, on a phone, should show the
-// full-viewport view immediately - not the ordinary page with the
-// visitor left to scroll down and discover it themselves.
-if (location.hash === '#demo' && phoneViewport.matches) setAppMode(true);
+initRouting();

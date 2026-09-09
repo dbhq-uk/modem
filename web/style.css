@@ -912,6 +912,20 @@ body.app-mode {
   margin: 0 0 var(--modem-space-xs) 0;
 }
 
+/* `.demo__controls` sets `display: flex` at the same (0,1,0) specificity
+ * as the `[hidden]` attribute the browser's own default stylesheet uses
+ * for `display: none` - an author rule always beats a user-agent one at
+ * an equal-specificity tie, regardless of source order, so `hidden`
+ * alone was silently losing on any element carrying both. Every other
+ * `hidden`-by-default element in this file sets no `display` of its own
+ * and so never hits this; `#route-start-block` is the one exception
+ * (`class="demo__controls route-start"`), caught by loading the page
+ * with JavaScript on and finding the Start button visible on the plain
+ * landing route, where nothing should have shown it at all. */
+.route-start[hidden] {
+  display: none;
+}
+
 /* ---------------------------------------------------------------------
  * Captions - a phase's plain-English gloss, always outside the modem
  * transcript it sits beside (see page.js's own doc: real modem output

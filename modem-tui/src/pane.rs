@@ -170,6 +170,25 @@ impl Pane {
         self.auto_answer = on;
     }
 
+    /// Answers the call and enters data mode without any `ATA` appearing
+    /// in `history` - "picking up without anybody typing ATA" (see
+    /// `main.rs`'s own doc), not the ordinary `ATA` a person types
+    /// through [`Pane::type_line`]. Calling `session_mut().answer()`
+    /// alone (the original shape of every auto-answer call site) leaves
+    /// this pane's own `AtProcessor` stuck in command mode forever, since
+    /// only its `execute` method's command arms ever put it in data
+    /// mode - see [`modem_core::at::AtProcessor::force_data_mode`]'s own
+    /// doc for the defect that leaves: this end could still *receive*
+    /// data, but anything *typed into it* would be parsed as an AT
+    /// command line and silently fail with `ERROR`, never reaching the
+    /// wire. Found via `examples/mockup.rs` exercising exactly that
+    /// shape - answer auto-answering, then typing a reply - which no
+    /// test in this crate previously did.
+    pub fn answer_silently(&mut self) {
+        self.session.answer();
+        self.at.force_data_mode();
+    }
+
     /// `ORIGINATE` or `ANSWER`, matching the mockups' own capitalisation.
     ///
     /// Reads [`Session::role`] (Task 19), not this pane's own `Config`
@@ -234,6 +253,21 @@ impl Pane {
 
     pub fn carrier(&self) -> bool {
         self.session.carrier_detected()
+    }
+
+    /// This pane's own session state - see `Session::state`'s own doc.
+    /// An immutable read, unlike `session_mut().state()`, for exactly
+    /// the same reason `carrier()`/`has_turn()` exist alongside it: a
+    /// caller checking this (a redraw, a completion predicate) should
+    /// not need a mutable borrow just to ask. Prefer this over `carrier()`
+    /// for "has the call actually connected" - carrier alone can read
+    /// true from a disclosed, pre-existing false-early transient (see
+    /// `modem-core/src/carrier.rs`'s own module doc), which `state()`
+    /// cannot: it only reaches `Connected` once the overture (or, on the
+    /// answer end, real carrier that has actually held) genuinely
+    /// completes.
+    pub fn state(&self) -> SessionState {
+        self.session.state()
     }
 
     /// Whether this pane's own session currently holds permission to
@@ -449,7 +483,7 @@ impl Pane {
             }
         }
         if self.auto_answer && self.session.state() == SessionState::Idle {
-            self.session.answer();
+            self.answer_silently();
         }
         let bytes = self.session.receive();
         if !bytes.is_empty() {

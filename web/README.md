@@ -76,8 +76,26 @@ AudioWorklet needs a secure context - see `spike/README.md` finding 2.
 
 ```bash
 sudo tailscale cert "$(tailscale status --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
+ln -sfn ../brand web/brand   # once - see below
 cd web && python3 ../spike/serve.py
 ```
+
+The symlink matters: `index.html` loads `../brand/tokens.css` relative to
+itself, which resolves correctly once deployed (`brand/` sits alongside
+the site at the deployed root - see `.github/workflows/deploy.yml`'s own
+`dist/` assembly), but serving `web/` alone locally has no `brand/`
+sibling for that URL to resolve to, so every design token silently comes
+back undefined and the page renders with no colour, spacing or type
+scale at all - easy to miss, since the page still "looks like a page",
+just an entirely unstyled one. The symlink makes `web/` self-contained
+for preview, the same shape `dist/` has after a real build. Gitignored,
+not tracked - a one-time local step, not part of the deployed tree.
+
+`spike/serve.py`'s own `RewritingHandler` also rewrites `/demo`,
+`/originate` and `/receive` to `index.html` locally, the same 200
+rewrite `web/_redirects` gives them on Cloudflare Pages - without it, a
+fresh load or a reload on any of the three routes 404s locally even
+though it works once deployed.
 
 Then open `https://<your-machine>.<your-tailnet>.ts.net:8444/harness.html`
 and click the button. Both results are also written to

@@ -6,4 +6,5 @@
 /spike/pkg-browser
 /spike/pkg-worklet
 /web/modem.wasm
+/web/brand
 .wrangler/
