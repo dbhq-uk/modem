@@ -49,3 +49,45 @@
   # one, and the whole site is a few hundred kilobytes, so the round
   # trips it costs are not the problem worth optimising.
   Cache-Control: no-cache
+
+# Pages applies /* to the HTML routes but keeps its own four-hour
+# max-age for requests with a static-asset extension, so those need
+# naming outright. Enumerated rather than globbed because Pages' _headers
+# wildcard is a path splat: `/*.js` matches nothing (measured - it
+# deployed cleanly and .js kept coming back max-age=14400).
+#
+# Every file here is code the page loads and none of them carry a
+# content hash, so a stale one is a broken site rather than a stale
+# picture. Adding a module means adding a line; the ci job that checks
+# generated assets would not catch a miss, so this list is worth reading
+# when web/ gains a file.
+/style.css
+  Cache-Control: no-cache
+/page.js
+  Cache-Control: no-cache
+/boot.js
+  Cache-Control: no-cache
+/session.js
+  Cache-Control: no-cache
+/modem.js
+  Cache-Control: no-cache
+/wired.js
+  Cache-Control: no-cache
+/waterfall.js
+  Cache-Control: no-cache
+/terminal-line.js
+  Cache-Control: no-cache
+/audio-diagnostics.js
+  Cache-Control: no-cache
+/analytics.js
+  Cache-Control: no-cache
+/consent.js
+  Cache-Control: no-cache
+/explained.js
+  Cache-Control: no-cache
+/qrcode-gen.js
+  Cache-Control: no-cache
+/worklet.js
+  Cache-Control: no-cache
+/wired-worklet.js
+  Cache-Control: no-cache
