@@ -1485,3 +1485,71 @@ body.app-mode {
     font-size: 16px;
   }
 }
+
+/* -------------------------------------------------------------------
+ * Consent prompt
+ *
+ * A native <dialog> opened with showModal(), which renders in the
+ * browser's top layer - above the .crt-frame scanline and vignette
+ * overlays without needing a z-index to beat them, since the top layer
+ * sits above the whole stacking context rather than inside it.
+ *
+ * Styled as a terminal panel: ground behind, amber rule and heading,
+ * the same dial-button the rest of the page uses for its controls.
+ * ------------------------------------------------------------------- */
+.consent {
+  max-width: 52ch;
+  margin: auto;
+  padding: var(--modem-space-sm) var(--modem-space-md);
+  background: var(--modem-ground);
+  border: 1px solid var(--modem-amber-bright);
+  color: var(--modem-white-bright);
+  font-family: var(--modem-type-face);
+  font-size: var(--modem-type-scale-base);
+  line-height: var(--modem-line-height-ratio);
+}
+
+.consent[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--modem-space-sm);
+}
+
+.consent::backdrop {
+  background: rgb(0 0 0 / 0.72);
+}
+
+.consent h2 {
+  margin: 0;
+  color: var(--modem-amber-bright);
+  font-size: var(--modem-type-scale-small);
+  letter-spacing: 0.1em;
+  text-shadow: 0 0 var(--modem-bloom-radius) currentColor;
+}
+
+.consent p {
+  margin: 0;
+  color: var(--modem-white-dim);
+}
+
+.consent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--modem-space-sm);
+  justify-content: flex-end;
+}
+
+/* Accept carries the amber the heading uses, so the affirmative action
+   reads first; decline stays in the page's ordinary green. Both are
+   real buttons at the same size - the decline is not made harder to
+   hit or harder to see, which is the whole point of asking. */
+.consent [data-consent-accept] {
+  color: var(--modem-amber-bright);
+  border-color: var(--modem-amber-bright);
+}
+
+.consent [data-consent-accept]:hover,
+.consent [data-consent-accept]:focus-visible {
+  background: var(--modem-amber-bright);
+  color: var(--modem-ground);
+}

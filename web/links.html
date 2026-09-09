@@ -237,6 +237,23 @@
 
 </div>
 
+<dialog class="consent" data-consent aria-labelledby="consent-title">
+  <h2 id="consent-title">CARRIER DETECT</h2>
+  <p>
+    We would like to count how many people come here to listen, using Google
+    Analytics. Cookies are only set if you accept, and the modem answers
+    exactly the same either way.
+  </p>
+  <div class="consent-actions">
+    <button type="button" class="dial-button" data-consent-decline>Decline</button>
+    <button type="button" class="dial-button" data-consent-accept autofocus>Accept</button>
+  </div>
+</dialog>
+
+<!-- Denied by default - consent.js owns the prompt, and loads after
+     analytics.js so that __dbhqEnableGA is defined by the time Accept
+     can be clicked. -->
 <script type="module" src="analytics.js"></script>
+<script type="module" src="consent.js"></script>
 </body>
 </html>
