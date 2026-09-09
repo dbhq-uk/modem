@@ -172,19 +172,31 @@ jobs:
           echo "modem.dbhq.uk -> $CODE"
           [ "$CODE" = "200" ]
 
+      # Six real pages as of task 3n (9 Sep 2026) - the single page this
+      # site used to be is gone, so every one of these has to actually
+      # serve, not just the root. Same polling pattern as the edge-wait
+      # step above: a freshly purged edge does not serve everywhere the
+      # instant the purge returns.
+      - name: The six pages must be serving
+        run: |
+          set -euo pipefail
+          for path in "" explained prior-art downloads projects about; do
+            CODE=""
+            for i in $(seq 1 10); do
+              CODE=$(curl -sL -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/${path}?cb=${GITHUB_SHA}-$i")
+              [ "$CODE" = "200" ] && break
+              sleep 6
+            done
+            echo "/${path} -> $CODE"
+            [ "$CODE" = "200" ]
+          done
+
       # explained.html absorbed links.html entirely on 9 Sep 2026 - the old
       # file is gone from the repo, so the only thing standing between an
       # old /links link and a 404 is this _redirects rule actually shipping.
-      - name: /explained must serve and /links must redirect to it
+      - name: /links must redirect to /explained
         run: |
           set -euo pipefail
-          for i in $(seq 1 10); do
-            CODE=$(curl -sL -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/explained?cb=${GITHUB_SHA}-$i")
-            [ "$CODE" = "200" ] && break
-            sleep 6
-          done
-          echo "/explained -> $CODE"
-          [ "$CODE" = "200" ]
           REDIRECT_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/links?cb=${GITHUB_SHA}")
           FINAL=$(curl -sL -o /dev/null -w "%{url_effective}" "https://modem.dbhq.uk/links?cb=${GITHUB_SHA}")
           echo "/links -> $REDIRECT_CODE, final $FINAL"

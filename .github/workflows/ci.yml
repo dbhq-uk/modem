@@ -157,10 +157,12 @@ jobs:
 
   # Everything under brand/ except _gen/ is generated, and so is the pair
   # of terminal frames inside web/index.html's "Two ways to try this"
-  # section (web/_gen/frames.py). Nothing stopped somebody hand-editing
-  # an SVG or a marked HTML region, or editing a generator and forgetting
-  # to regenerate - both leave the committed asset disagreeing with its
-  # own source, silently. This regenerates and fails on any diff.
+  # section (web/_gen/frames.py), and the shared nav/footer/consent
+  # regions on all seven web/*.html pages (web/_gen/pages.py, added task
+  # 3n, 9 Sep 2026). Nothing stopped somebody hand-editing an SVG or a
+  # marked HTML region, or editing a generator and forgetting to
+  # regenerate - both leave the committed asset disagreeing with its own
+  # source, silently. This regenerates and fails on any diff.
   generated_assets:
     runs-on: ubuntu-latest
     steps:
@@ -185,7 +187,10 @@ jobs:
           done
       - name: Generated assets must match their generators
         run: |
-          if ! git diff --exit-code -- brand/ web/index.html; then
+          # Every page pages.py touches, explicitly - a generator that
+          # gains a new page and forgets to list it here would pass this
+          # check while silently shipping a stale region on that page.
+          if ! git diff --exit-code -- brand/ web/index.html web/explained.html web/prior-art.html web/downloads.html web/projects.html web/about.html web/404.html; then
             echo
             echo "A generated file differs from what its generator produces."
             echo "Either it was hand-edited, or a generator changed and nobody"
