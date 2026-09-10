@@ -119,6 +119,13 @@ FOOTER = """<footer class="endorsement">
   </p>
 </footer>"""
 
+# The two dialog buttons carry their own icons rather than going through
+# web/_gen/icons.py: that script matches on a button's visible text, and
+# "Decline"/"Accept" are generated here, so it would never see them in a
+# source file to rewrite. A cross and a tick - the one pair on the site
+# where the two choices are opposites and the glyph says so faster than
+# the word.
+#
 # boot.js first - it decides whether the CRT power-on sweep plays at all
 # on this load (see that file), so it wants to run before anything else
 # has a chance to hold the main thread. Then analytics.js then consent.js,
@@ -138,8 +145,8 @@ CONSENT = """<script type="module" src="boot.js"></script>
     exactly the same either way.
   </p>
   <div class="consent-actions">
-    <button type="button" class="dial-button" data-consent-decline>Decline</button>
-    <button type="button" class="dial-button" data-consent-accept autofocus>Accept</button>
+    <button type="button" class="dial-button" data-consent-decline><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg><span>Decline</span></button>
+    <button type="button" class="dial-button" data-consent-accept autofocus><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"/></svg><span>Accept</span></button>
   </div>
 </dialog>"""
 

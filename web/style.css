@@ -885,7 +885,15 @@ main > section > .endpoint,
    anchor carries no button reset, so text-decoration and display need
    setting explicitly here rather than assumed. */
 a.dial-button {
-  display: inline-block;
+  /* inline-FLEX, matching `.dial-button` above rather than fighting it.
+     This said `inline-block`, and `a.dial-button` outranks `.dial-button`
+     on specificity, so every link-styled button silently lost the flex
+     container - and with it the `gap` that separates the icon from the
+     label and the `flex: none` that keeps the icon square. The icon sat
+     jammed against the first letter and squashed narrow (Dan, 10 Sep
+     2026). Buttons were fine; only the <a>s were wrong, which is why it
+     looked like an icon problem rather than a layout one. */
+  display: inline-flex;
   text-decoration: none;
 }
 
@@ -1251,7 +1259,12 @@ body.app-mode {
 }
 
 .endpoint.app-mode .app-mode-back {
-  display: inline-block;
+  /* inline-FLEX. This is the third rule to have overridden
+     `.dial-button`'s flex with `inline-block` and silently removed the
+     icon gap - and the worst of the three, because app mode is the only
+     state this button is ever visible in, so it would have been wrong
+     100% of the time it was on screen. */
+  display: inline-flex;
   align-self: flex-start;
   flex-shrink: 0;
   margin-bottom: var(--modem-space-xs);
