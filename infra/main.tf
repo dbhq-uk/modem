@@ -107,6 +107,29 @@ resource "cloudflare_record" "modem" {
 # The better answer is hashed filenames plus `immutable`, which wants a
 # build step this site's plain JS does not have. If one ever arrives,
 # delete this rule rather than leaving both.
+#
+# Applied 10 Sep 2026 and verified: .js, .css, the HTML and the WASM all
+# return `no-cache` at the edge.
+#
+# Applying it was blocked for a day by something worth recording, because
+# the symptom pointed the wrong way. `terraform init` returned 403 on
+# HeadObject against dbhq-modem-tfstate, which reads as "the credential
+# cannot see this bucket" - and the first conclusion drawn from it, that
+# the R2 token needed widening and that heliograph was locked out too,
+# was wrong on both counts. The token `dbhq - R2 terraform state` already
+# granted Bucket Item Read+Write on four buckets. One entry named
+# `modem-tfstate`; the bucket is `dbhq-modem-tfstate`. It held access to a
+# bucket that does not exist and none to the one that does.
+#
+# Fixed by correcting that one resource name on the existing token - no
+# new credential, and no key roll, since editing a policy does not change
+# the access key or secret the loader holds.
+#
+# Underneath it is a naming inconsistency worth knowing about: three state
+# buckets are `dbhq-` prefixed and heliograph's is not, so the token entry
+# looks like it was written to heliograph's convention while the bucket
+# was created to dbhq's. Standardising is a separate job and not one to
+# start while live state sits in them.
 resource "cloudflare_ruleset" "modem_code_revalidates" {
   zone_id     = var.zone_id
   name        = "modem.dbhq.uk - code revalidates"
