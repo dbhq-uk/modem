@@ -108,21 +108,35 @@
 
   <main id="main">
 
-    <!-- The same three siblings the footer names on every page (see
-         web/_gen/pages.py), given the room a dedicated page allows -
-         each with the one-sentence reason to click a bare name never
-         gave (see the design spec's defect 3). Styled with the same
-         resource-row pattern /research uses for its own external
-         links, rather than inventing a second "sibling row" component
-         for what is the same shape of content: a link, and one sentence
-         on why it is worth a visitor's time. -->
+    <!-- The DBHQ siblings, given the room a dedicated page allows - each
+         with the one-sentence reason to click a bare name never gave (see
+         the design spec's defect 3). Styled with the same resource-row
+         pattern /research uses for its own external links, rather than
+         inventing a second "sibling row" component for what is the same
+         shape of content: a link, and one sentence on why it is worth a
+         visitor's time.
+
+         SKILLS JOINED THE LIST ON 10 Sep 2026, and the 9 Sep spec is why
+         it was not here before: there was a marketplace repo and nine
+         *-skill repos in the org but no site, and "this project's
+         credibility rests on not listing things that are not there. It
+         goes in the moment it is live." It is live - a page per skill at
+         skills.dbhq.uk, all ten pages serving.
+
+         The heading and the intro had to change with it. "Other DBHQ
+         experiments" and "two other experiments" were accurate over bbs
+         and heliograph; skills.dbhq.uk is not an experiment, it is what
+         the practice publishes, and calling it one would be the small
+         lie this page exists to avoid. The replacement is NOT "Also from
+         DBHQ" either - that is this page's own H1, and a section heading
+         repeating the H1 above it is a rung that says nothing. -->
     <section class="resources" aria-labelledby="siblings-heading">
-      <h2 id="siblings-heading">Other DBHQ experiments</h2>
-      <p>Two other experiments you can use rather than read about, and the practice behind all three.</p>
+      <h2 id="siblings-heading">Sites you can open now</h2>
+      <p>Three more things you can use rather than read about, and the practice behind all four.</p>
       <ul class="resource-list">
         <li class="resource-row">
           <a class="resource-row__link" href="https://dbhq.uk" rel="noopener">DBHQ</a>
-          <p class="resource-row__description">The practice behind these experiments.</p>
+          <p class="resource-row__description">The practice behind all of them.</p>
         </li>
         <li class="resource-row">
           <a class="resource-row__link" href="https://bbs.dbhq.uk" rel="noopener">BBS</a>
@@ -131,6 +145,10 @@
         <li class="resource-row">
           <a class="resource-row__link" href="https://heliograph.dbhq.uk" rel="noopener">heliograph</a>
           <p class="resource-row__description">Debug a remote machine through an operator, using Git.</p>
+        </li>
+        <li class="resource-row">
+          <a class="resource-row__link" href="https://skills.dbhq.uk" rel="noopener">Skills</a>
+          <p class="resource-row__description">Install agent skills for Claude Code and Codex.</p>
         </li>
       </ul>
     </section>
