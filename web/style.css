@@ -63,8 +63,28 @@
      staying at 70: if prose stopped short of the column, an h2's own
      border-bottom would run past the end of the paragraph under it, and
      the page would look wider without reading wider. */
-  --col-content: 46rem;
-  --col-feature: 72rem;
+  /* ONE column, not two.
+   *
+   * These were 46rem and 72rem: prose in the narrower `content` track,
+   * wide artefacts breaking out into `feature`, symmetric about it. That
+   * is a common and defensible pattern, and on this page it meant the
+   * rendered terminal frames began 200px to the left of the paragraph
+   * introducing them - which reads as a misalignment rather than as a
+   * breakout (Dan, 10 Sep 2026: "text margin should match what the image
+   * is").
+   *
+   * So both tracks are the same width now, and every band - prose,
+   * headings, frames, panels - starts on one edge. 62rem is set by the
+   * widest artefact rather than by taste: the 100-column split frame is
+   * 977px intrinsic, and this is 992px.
+   *
+   * Reading measure is handled separately, by the cap on `p, li` and on
+   * the headings below. A 62rem column is about 103 characters of
+   * monospace, far past comfortable, so text stops well short of the
+   * column's right edge - deliberately. The left edge is the one that
+   * has to agree, and now does. */
+  --col-content: 62rem;
+  --col-feature: 62rem;
   /* rem, not the 4ch --modem-space-md this started as, and for exactly
      the reason the paragraph above gives for the content column: `ch`
      resolves against each element's own font-size, so a shared ch
@@ -413,15 +433,28 @@ h3 {
    follows each element's own font size, which is what a measure means. */
 p,
 li {
-  /* Deliberately a little WIDER than --col-content, so inside the
-     content column the column wins and a paragraph ends exactly where
-     the heading rule above it does. Measured: 76ch left prose 23px short
-     of the h2's own border-bottom, which reads as a mistake rather than
-     as a measure.
-     It still does real work outside that column - `.endpoint` sits in
-     the wider `feature` track, and this is what stops its prose running
-     to a hundred characters there. */
+  /* The reading measure, now that the column itself is set by the
+     widest artefact rather than by what is comfortable to read. Applies
+     to the headings too: an h2 carries a border-bottom, and a rule that
+     ran the full 62rem while the paragraph under it stopped at 80ch
+     would be the same misalignment this change exists to remove, just on
+     the right edge instead of the left. */
   max-width: 80ch;
+}
+
+/* The same measure as the prose above, but in rem rather than ch.
+ *
+ * `ch` is relative to each element's own font-size - the reason this
+ * file's very first note gives for sizing the column in rem - so 80ch on
+ * an h2 at twice the body size is about 1500px and the cap never bites.
+ * Measured: with the ch cap the h2 rules still ran the full 992px column
+ * while the paragraphs under them stopped at 750px.
+ *
+ * 47rem is that 750px, so a heading's border-bottom now ends where the
+ * text beneath it does. */
+h2,
+h3 {
+  max-width: 47rem;
 }
 
 /* ---------------------------------------------------------------------
@@ -697,7 +730,12 @@ main > section > .endpoint,
 .scenario > .win,
 .scenario > .win-group {
   grid-column: feature;
-  justify-self: center;
+  /* start, not center. Centring an artefact inside the column put the
+     977px frame 8px right of the text and the 714px one 139px right of
+     it - two more left edges, which is the thing this whole change is
+     removing. They share the text's edge now and run to whatever width
+     they need. */
+  justify-self: start;
   max-width: 100%;
 }
 
@@ -1567,7 +1605,12 @@ body.app-mode {
   background: var(--modem-ground);
   width: max-content;
   max-width: 100%;
-  margin: var(--modem-space-sm) auto 0 auto;
+  /* Left margin 0, not auto. `auto` centred the frame inside its grid
+     area on top of the `justify-self: start` above, which put the 977px
+     frame 8px right of the text and the 714px one 139px right of it -
+     the exact misalignment this column change exists to remove, arriving
+     by a second route. */
+  margin: var(--modem-space-sm) 0 0 0;
 }
 
 /* The narrower "one device" pair (two 72-column single panes) shown in
