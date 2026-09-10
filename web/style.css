@@ -884,6 +884,33 @@ a.dial-button {
   border-color: var(--modem-white-dim);
   cursor: not-allowed;
   text-shadow: none;
+  /* The channel that makes this unmistakably different from
+     --secondary above, rather than identical to it. */
+  opacity: 0.55;
+}
+
+/* ---------------------------------------------------------------------
+ * Button icons - a 1em glyph in the button's own colour, so it inherits
+ * every state (secondary, hover, focus, disabled) without a second set
+ * of rules to keep in step.
+ *
+ * `currentColor` throughout and no fills of their own: these are line
+ * marks on a phosphor screen, not illustrations. Sized in `em` rather
+ * than px so they track the button's type scale on a phone.
+ * ------------------------------------------------------------------- */
+.dial-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+}
+
+.dial-button__icon {
+  width: 1.1em;
+  height: 1.1em;
+  flex: none;
+  /* Optical, not mathematical: a 1.1em box next to monospace capitals
+     sits a shade high without this. */
+  transform: translateY(0.5px);
 }
 
 /* The two secondary launcher buttons ("Open originating modem", "Open
@@ -891,9 +918,30 @@ a.dial-button {
  * behind a mode choice - see page.js's own routing doc - so they need to
  * read as clearly lower-emphasis without a whole second button style:
  * same shape and touch target as .dial-button, dimmer colour. */
+/* Secondary, not disabled - and for a while there was no way to tell.
+ *
+ * This rule set `color` and `border-color` to --modem-white-dim, and so
+ * does `.dial-button:disabled` a few lines down. The two were pixel
+ * identical apart from the cursor, so "Open originating modem" and "Open
+ * receiving modem" read as greyed out and unavailable next to a bright
+ * green Demo (Dan, 10 Sep 2026). Two of the page's three ways in looked
+ * switched off.
+ *
+ * Secondary now means readable text with a quieter frame - the same
+ * white the body copy uses, which is legible by definition, over a dim
+ * border. Disabled keeps the dim text AND drops to 55% opacity, so the
+ * two states differ in more than one channel rather than sharing all of
+ * them. */
 .dial-button--secondary {
-  color: var(--modem-white-dim);
+  color: var(--modem-white-bright);
   border-color: var(--modem-white-dim);
+  text-shadow: none;
+}
+
+.dial-button--secondary:hover:not(:disabled),
+.dial-button--secondary:focus-visible {
+  color: var(--modem-green-bright);
+  border-color: var(--modem-green-bright);
 }
 
 .dial-button--secondary:hover:not(:disabled),
@@ -1688,31 +1736,48 @@ body.app-mode {
 }
 
 .endorsement__byline {
-  margin: 0;
+  margin: 0 auto;
+  /* Narrower than the page's reading measure on purpose: centred text
+     wraps worse than left-aligned text, and at the footer's smaller type
+     the full column ran to three increasingly ragged lines. */
+  max-width: 62ch;
 }
 
 /* Two labelled groups side by side where there is room, stacking on a
    narrow viewport via the same wrap every other flex row on this page
    already uses. */
-.endorsement__groups {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: var(--modem-space-lg);
-  margin-top: var(--modem-space-md);
+/* One link under the byline, with GitHub's own mark beside it.
+ *
+ * This replaced two labelled groups. The sibling list went to /projects,
+ * which left "This project" as a heading over a single GitHub link whose
+ * URL the byline directly above already carried - a label, a lot of
+ * vertical space and one orphaned word (Dan, 10 Sep 2026: "foot looks
+ * crap still"). Saying it once, with a mark that makes it findable at a
+ * glance, is the whole job. */
+.endorsement__source {
+  margin: var(--modem-space-md) 0 0 0;
 }
 
-.endorsement__group-label {
-  margin: 0 0 var(--modem-space-xs) 0;
-  letter-spacing: 0.05em;
-}
-
-.endorsement__links {
-  display: flex;
-  justify-content: center;
+.endorsement__github {
+  display: inline-flex;
   align-items: center;
-  gap: var(--modem-space-sm);
-  margin: 0;
+  gap: 0.55em;
+  color: var(--modem-white-bright);
+  text-decoration: none;
+  border: 1px solid var(--modem-white-dim);
+  padding: var(--modem-space-xs) var(--modem-space-sm);
+}
+
+.endorsement__github:hover,
+.endorsement__github:focus-visible {
+  color: var(--modem-green-bright);
+  border-color: var(--modem-green-bright);
+}
+
+.endorsement__github-mark {
+  width: 1.15em;
+  height: 1.15em;
+  flex: none;
 }
 
 /* The "Also from DBHQ" group's own list - one sibling per line, each

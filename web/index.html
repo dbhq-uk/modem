@@ -214,9 +214,9 @@
            infra/main.tf), so a fix now reaches a visitor on their next
            load rather than tomorrow. -->
       <div class="demo__controls" id="launcher">
-        <button class="dial-button" id="launch-demo-btn" type="button">Demo</button>
-        <button class="dial-button dial-button--secondary" id="launch-originate-btn" type="button">Open originating modem</button>
-        <button class="dial-button dial-button--secondary" id="launch-receive-btn" type="button">Open receiving modem</button>
+        <button class="dial-button" id="launch-demo-btn" type="button"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="4" width="20" height="16" rx="1"/><path d="M12 4v16"/></svg><span>Demo</span></button>
+        <button class="dial-button dial-button--secondary" id="launch-originate-btn" type="button"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M17 8a5 5 0 0 1 0 8"/><path d="M20 5a9 9 0 0 1 0 14"/></svg><span>Open originating modem</span></button>
+        <button class="dial-button dial-button--secondary" id="launch-receive-btn" type="button"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v4"/></svg><span>Open receiving modem</span></button>
       </div>
 
       <!-- A direct link or a reload on /demo, /originate or /receive
@@ -359,6 +359,15 @@
         </div>
         <div class="terminal__output" id="chat-log" role="log" aria-label="Received characters"></div>
         <div class="endpoint__row">
+          <!-- Originate does not dial on its own. The whole point of this
+               screen is the QR code above it: you open the receiving
+               modem on a second device, and that takes longer than the
+               20 second no-answer timeout the call would otherwise be
+               running against. So the call waits for this (Dan, 10 Sep
+               2026: "it starts dialling straight away which doesn't give
+               you time to sort the second device"). Hidden entirely on
+               /receive, which has nothing to dial. -->
+          <button type="button" class="dial-button" id="endpoint-dial" hidden>Dial now</button>
           <button type="button" id="endpoint-hangup" disabled>Hang up</button>
           <button type="button" id="endpoint-stop">Stop</button>
         </div>
@@ -527,15 +536,12 @@
 <footer class="endorsement">
   <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. The full workspace - modem-core, modem-audio, modem-tui, modem-wasm and this page - lives on <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>, MIT licensed.</p>
 
-  <div class="endorsement__groups">
-    <div class="endorsement__group">
-      <p class="endorsement__group-label">This project</p>
-      <p class="endorsement__links">
-        <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
-      </p>
-    </div>
-
-  </div>
+  <p class="endorsement__source">
+    <a class="endorsement__github" href="https://github.com/dbhq-uk/modem" rel="noopener">
+      <svg class="endorsement__github-mark" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      <span>Source on GitHub</span>
+    </a>
+  </p>
 </footer>
 <!-- END generated: footer -->
 

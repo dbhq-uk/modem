@@ -98,6 +98,20 @@ const endpointDeadline = document.getElementById('endpoint-deadline');
 const endpointDataCheck = document.getElementById('endpoint-databcheck');
 const endpointHangupBtn = document.getElementById('endpoint-hangup');
 const endpointStopBtn = document.getElementById('endpoint-stop');
+const endpointDialBtn = document.getElementById('endpoint-dial');
+
+/** The running clock's reading at the moment Dial was pressed, so the
+ * no-answer timeout measures the call rather than the page.
+ *
+ * `updateEndpointDeadline` used to compare the clock directly against
+ * ORIGINATE_NO_ANSWER_MS, which was fine while the call started the
+ * instant the endpoint did. Now that the visitor presses Dial when their
+ * second device is ready - possibly minutes later - the same comparison
+ * would hang the call up on its first tick, before a single ring. */
+let endpointDialStartedMs = null;
+/** The latest reading from the running clock, so the dial handler can
+ * take the baseline above without reaching into the clock's closure. */
+let endpointElapsedMs = 0;
 const chatInput = document.getElementById('chat-input');
 const chatSendBtn = document.getElementById('chat-send');
 const chatLog = document.getElementById('chat-log');
@@ -410,6 +424,10 @@ function showLanding() {
   launcher.hidden = false;
   routeStartBlock.hidden = true;
   wiredPanel.hidden = true;
+  endpointDialStartedMs = null;
+  endpointElapsedMs = 0;
+  endpointDialBtn.hidden = true;
+  endpointDialBtn.disabled = false;
   endpointPanel.hidden = true;
 }
 
@@ -510,6 +528,16 @@ async function exitToLanding() {
 }
 
 appModeBackBtn.addEventListener('click', exitToLanding);
+endpointDialBtn.addEventListener('click', () => {
+  if (!endpoint) return;
+  endpointDialStartedMs = endpointElapsedMs;
+  endpointDialBtn.disabled = true;
+  endpointDialBtn.hidden = true;
+  endpointDeadline.textContent = '';
+  endpoint.dial(FIXED_DIGITS);
+  appendTerminalLine(chatLog, `ATDT${FIXED_DIGITS}`, { command: true });
+});
+
 endpointBackBtn.addEventListener('click', exitToLanding);
 
 document.addEventListener('keydown', (e) => {
@@ -1105,7 +1133,9 @@ function endpointCaptionFor(role, state, stage, carrier) {
 
 function updateEndpointDeadline(role, elapsedMs) {
   if (role === Role.ORIGINATE) {
-    if (lastEndpointState === SessionState.DIALLING && elapsedMs > ORIGINATE_NO_ANSWER_MS) {
+    // Since the dial, not since the page - see endpointDialStartedMs.
+    const sinceDial = endpointDialStartedMs === null ? 0 : elapsedMs - endpointDialStartedMs;
+    if (lastEndpointState === SessionState.DIALLING && sinceDial > ORIGINATE_NO_ANSWER_MS) {
       endpointDeadline.textContent = 'No answer within 20s - ending this attempt.';
       endpointDeadline.className = 'diagnostic diagnostic--warning';
       if (endpoint) endpoint.hangup();
@@ -1236,12 +1266,19 @@ async function startEndpointRoute(role) {
         endpointDeadline.className = 'diagnostic diagnostic--warning';
         return;
       }
+      endpointElapsedMs = elapsedMs;
       updateEndpointDeadline(role, elapsedMs);
     });
 
     if (role === Role.ORIGINATE) {
-      endpoint.dial(FIXED_DIGITS);
-      appendTerminalLine(chatLog, `ATDT${FIXED_DIGITS}`, { command: true });
+      // Waits for the visitor to press Dial - see index.html's own note.
+      // Dialling here meant the 20 second no-answer timeout started
+      // before they had picked up the second device, so the call was
+      // always over before the other end existed.
+      endpointDialBtn.hidden = false;
+      endpointDialBtn.disabled = false;
+      endpointStatus.textContent = 'READY';
+      endpointCaption.textContent = 'Open the receiving modem on the other device, then press Dial now.';
     } else {
       endpoint.answer();
     }

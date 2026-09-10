@@ -85,38 +85,31 @@ def render_nav(current_id: str | None) -> str:
     return f'<nav class="site-nav" aria-label="Primary">\n{body}\n</nav>'
 
 
-# The footer: the required "a DBHQ experiment by..." byline, then two
-# labelled groups - see brand's own design spec, "the sibling links give
-# nobody a reason to click". Identical, word for word, on all six pages
-# and on 404.html, per the brief ("The same footer, including the 'Also
-# from DBHQ' block"). The "This project" group carries only the GitHub
-# link now: the six-item primary nav already covers every internal
-# destination this group used to hold (Explained on index.html, Try on
-# explained.html), so repeating either here would be the nav's own job
-# done twice.
-# The "Also from DBHQ" sibling list used to sit here, on every page. It
-# came out on 10 Sep 2026 (Dan): /projects carries the same three links
-# and is in the primary nav, so repeating them in the footer of all seven
-# pages said the same thing twice and made the footer the longest thing
-# on short pages.
+# The footer: the required "a DBHQ experiment by..." byline, then one
+# link to the source with GitHub's own mark beside it. Identical, word
+# for word, on all six pages and on 404.html.
 #
-# Crawling is unaffected - /projects is in the nav on every page and in
-# the sitemap, so the links there are found and followed like any other.
-# What does change is internal weight: three sitewide links become three
-# links on one page, which is a smaller signal to the siblings. That is
-# the deliberate trade, not an oversight.
+# It carried two labelled groups until 10 Sep 2026. "Also from DBHQ" went
+# first: /projects carries the same three links and is in the primary
+# nav, so repeating them in the footer of all seven pages said it twice
+# and made the footer the longest thing on the short pages. Crawling is
+# unaffected - /projects is in the nav and the sitemap - though internal
+# weight to the siblings drops from sitewide to one page, which is the
+# deliberate trade.
+#
+# That left "This project" as a label over a single GitHub link whose URL
+# the byline directly above already carried: a heading, a lot of vertical
+# space, and one orphaned word (Dan: "foot looks crap still"). Now one
+# marked link, said once.
 FOOTER = """<footer class="endorsement">
   <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. The full workspace - modem-core, modem-audio, modem-tui, modem-wasm and this page - lives on <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>, MIT licensed.</p>
 
-  <div class="endorsement__groups">
-    <div class="endorsement__group">
-      <p class="endorsement__group-label">This project</p>
-      <p class="endorsement__links">
-        <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>
-      </p>
-    </div>
-
-  </div>
+  <p class="endorsement__source">
+    <a class="endorsement__github" href="https://github.com/dbhq-uk/modem" rel="noopener">
+      <svg class="endorsement__github-mark" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      <span>Source on GitHub</span>
+    </a>
+  </p>
 </footer>"""
 
 # boot.js first - it decides whether the CRT power-on sweep plays at all
