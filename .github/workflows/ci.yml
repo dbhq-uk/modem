@@ -292,17 +292,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install audio and browser dependencies
-        # Chromium needs an audio output device or `audioWorklet.addModule`
-        # never settles - the demo cannot start and the failure looks like
-        # a hang rather than an error. A dummy ALSA sink is enough; there
-        # is nothing to listen to, only something to render into.
+      - name: Try to give Chromium an audio output device
+        # Chromium needs one or `audioWorklet.addModule` never settles: the
+        # audio rendering thread never starts, the module is never even
+        # fetched, and the demo cannot run. Measured directly - the
+        # AudioContext still reports `state: "running"` and exposes
+        # `audioWorklet`, so every ordinary capability check says yes while
+        # nothing works.
+        #
+        # Best effort, and the tests do not depend on it succeeding. The
+        # two that need a live AudioWorklet probe for it and skip with a
+        # reason when it is absent (see web/tests/smoke.spec.mjs); the
+        # other twenty-six need no audio at all and are the ones that would
+        # have caught every defect that reached Dan. A permanent red here
+        # would get ignored, and ignoring it would waste those.
         run: |
           set -euo pipefail
           sudo rm -f /etc/apt/sources.list.d/*google* || true
           sudo apt-get update || true
-          sudo apt-get install -y alsa-utils libasound2-dev
+          sudo apt-get install -y alsa-utils libasound2-dev pulseaudio pulseaudio-utils || true
           sudo modprobe snd-dummy || true
+          pulseaudio --check || pulseaudio -D --exit-idle-time=-1 || true
+          pactl load-module module-null-sink sink_name=ci || true
+          pactl list short sinks || echo "no sink available - the two audio tests will skip"
       - name: Build the worklet artifact
         run: cargo build --release --target wasm32-unknown-unknown -p modem-wasm --no-default-features
       - name: Assemble the deployable tree

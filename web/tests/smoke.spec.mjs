@@ -49,6 +49,40 @@ function failOnPageErrors(page, errors) {
   page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
 }
 
+/** Whether this browser can actually start an AudioWorklet.
+ *
+ * `audioWorklet.addModule` needs the audio rendering thread, and in a
+ * container with no output device that thread never starts - the promise
+ * simply never settles and never fetches the module. Measured directly:
+ * the AudioContext reports `state: "running"` and `audioWorklet` is
+ * present, and the request for the worklet file is still never made. So
+ * the usual capability checks all say yes and the demo still cannot run.
+ *
+ * The two tests below need the demo to genuinely run, so they need this.
+ * They skip rather than fail where it is unavailable, and say why: a
+ * permanent red gets ignored, and ignoring it would waste the fourteen
+ * tests around it that do not need audio at all.
+ *
+ * Probed against the site's own worklet, on the site's own origin, so
+ * the CSP applies exactly as it does in the real thing. */
+async function audioWorkletStarts(page) {
+  await page.goto('/');
+  return page.evaluate(async () => {
+    try {
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      const ctx = new Ctor();
+      const settled = await Promise.race([
+        ctx.audioWorklet.addModule('/wired-worklet.js').then(() => true),
+        new Promise((resolve) => setTimeout(() => resolve(false), 5000)),
+      ]);
+      await ctx.close().catch(() => {});
+      return settled;
+    } catch {
+      return false;
+    }
+  });
+}
+
 test.describe('every page', () => {
   for (const path of PAGES) {
     test(`${path} loads with no console errors`, async ({ page }) => {
@@ -100,6 +134,7 @@ test.describe('the launcher', () => {
   });
 
   test('Demo brings both ends up to CONNECTED', async ({ page }) => {
+    test.skip(!(await audioWorkletStarts(page)), 'no audio output device - AudioWorklet cannot start here');
     await page.goto('/');
     await dismissConsent(page);
     await page.locator('#launch-demo-btn').click();
@@ -138,6 +173,7 @@ test.describe('the receiving end', () => {
   // caption right beneath it.
   test('reads IDLE, not ANSWERING, while nothing is on the line', async ({ page, browserName }) => {
     test.skip(browserName !== 'chromium', 'needs a fake microphone device');
+    test.skip(!(await audioWorkletStarts(page)), 'no audio output device - AudioWorklet cannot start here');
     await page.goto('/receive/');
     await dismissConsent(page);
     await page.locator('#route-start-btn').click();
