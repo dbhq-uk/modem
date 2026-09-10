@@ -229,6 +229,8 @@
            that click: one button, its label and the paragraph above it
            set per route by page.js. -->
       <div class="demo__controls route-start" id="route-start-block" hidden>
+        <button type="button" class="dial-button dial-button--secondary app-mode-back" id="route-start-back-btn"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg><span>Back</span></button>
+        <h3 class="scenario__label" id="route-start-heading"></h3>
         <p id="route-start-copy"></p>
         <button class="dial-button" id="route-start-btn" type="button"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 4l14 8-14 8V4Z"/></svg><span>Start</span></button>
       </div>
@@ -331,10 +333,10 @@
              copyable link, side by side with the same "near each
              other" fact /receive states on its own. -->
         <div class="share-block" id="share-block" hidden>
-          <p>Open receiving modem on your phone:</p>
+          <p id="share-block-copy"></p>
           <div class="qr-code" id="qr-code" aria-hidden="true"></div>
           <p class="share-block__link">
-            <label for="share-link" class="sr-only">Receiving modem link</label>
+            <label for="share-link" class="sr-only" id="share-link-label">Link to the other end</label>
             <input type="text" id="share-link" readonly>
             <button type="button" id="share-copy-btn">Copy link</button>
           </p>

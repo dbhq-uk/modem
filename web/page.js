@@ -59,6 +59,8 @@ const launchOriginateBtn = document.getElementById('launch-originate-btn');
 const launchReceiveBtn = document.getElementById('launch-receive-btn');
 const routeStartBlock = document.getElementById('route-start-block');
 const routeStartCopy = document.getElementById('route-start-copy');
+const routeStartHeading = document.getElementById('route-start-heading');
+const routeStartBackBtn = document.getElementById('route-start-back-btn');
 const routeStartBtn = document.getElementById('route-start-btn');
 
 const appModeBackBtn = document.getElementById('app-mode-back-btn');
@@ -86,6 +88,7 @@ const endpointHeading = document.getElementById('endpoint-heading');
 const endpointIntro = document.getElementById('endpoint-intro');
 const shareBlock = document.getElementById('share-block');
 const qrCodeEl = document.getElementById('qr-code');
+const shareBlockCopy = document.getElementById('share-block-copy');
 const shareLinkInput = document.getElementById('share-link');
 const shareCopyBtn = document.getElementById('share-copy-btn');
 const shareCopyStatus = document.getElementById('share-copy-status');
@@ -404,6 +407,15 @@ const ROUTE_START_COPY = {
   originate: 'This device will dial out - it needs your microphone, asked for only once you press Start.',
   receive: 'This device will listen for a call - it needs your microphone, asked for only once you press Start.',
 };
+// Names the thing the visitor arrived for, at the top of the overlay -
+// the same job `.scenario__label` does on the running panel. Without it
+// the Start screen states a consequence ("this device will listen for a
+// call") without ever naming what it is.
+const ROUTE_START_HEADING = {
+  demo: 'Demo - both ends, right here',
+  originate: 'Originate - dialling out',
+  receive: 'Receive - listening for a call',
+};
 const ROUTE_START_LABEL = {
   demo: 'Start demo',
   originate: 'Start originating modem',
@@ -414,6 +426,12 @@ let pendingRoute = null;
 
 function showLanding() {
   pendingRoute = null;
+  // The route-start block is an app-mode overlay in its own right now,
+  // so leaving the class on it would pin a full-viewport panel over the
+  // landing page. exitToLanding calls exitAppMode first and covers the
+  // live case; this covers every other caller.
+  routeStartBlock.classList.remove('app-mode');
+  routeStartBlock.style.removeProperty('height');
   // Undo whatever `launchRoute` did to a button that was pressed and then
   // failed to start, so the landing page is never left showing
   // "Starting..." on a dead control.
@@ -434,32 +452,17 @@ function showLanding() {
 function showRouteStart(route) {
   pendingRoute = route;
   launcher.hidden = true;
-  routeStartBlock.hidden = false;
   routeStartCopy.textContent = ROUTE_START_COPY[route];
+  routeStartHeading.textContent = ROUTE_START_HEADING[route];
   labelOf(routeStartBtn).textContent = ROUTE_START_LABEL[route];
-  // Land on the control, not on the top of the page.
+  // The route opens as the overlay, not as a section of the homepage.
   //
-  // Every one of these routes is arrived at deliberately - a scanned QR
-  // code, a copied link, a shared URL - and the visitor came for the one
-  // thing the route names. Without this they get the full-height hero
-  // and the homepage intro first, with the Start button somewhere below
-  // the fold, which on a phone reads as "the QR code took me to the
-  // website" rather than "the QR code took me to the receiving modem"
-  // (Dan, 10 Sep 2026).
-  //
-  // The chrome above stays in the document rather than being hidden:
-  // someone who has just scanned a stranger's QR code is entitled to
-  // scroll up and see whose site this is. This moves the viewport, it
-  // does not take the page away.
-  //
-  // `instant`, not `smooth`: a scroll animation running as the page
-  // paints is the flicker this same pass exists to remove. Guarded
-  // because the API is only meaningful once there is a layout to scroll.
-  requestAnimationFrame(() => {
-    if (!routeStartBlock.hidden) {
-      routeStartBlock.scrollIntoView({ block: 'center', behavior: 'instant' });
-    }
-  });
+  // Scrolling the block into view was the first attempt at this and was
+  // not enough: the visitor still landed on the homepage, just further
+  // down it, with the nav and the hero and the rest of the page around
+  // the one control they came for. A scanned QR code should put the
+  // receiving modem on screen, so it does - see .route-start.app-mode.
+  enterAppModeFor(routeStartBlock);
   // Re-enabled as well as relabelled: a previous attempt that failed left
   // it disabled and reading "Starting...", and this is the one path back
   // to a usable button.
@@ -578,6 +581,10 @@ endpointDialBtn.addEventListener('click', () => {
 });
 
 endpointBackBtn.addEventListener('click', exitToLanding);
+// The route-start overlay's own Back. Without it a scanned QR code puts
+// a full-screen panel on a phone with no way out but the browser's own
+// back gesture.
+routeStartBackBtn.addEventListener('click', exitToLanding);
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && document.body.classList.contains('app-mode')) exitToLanding();
@@ -638,7 +645,11 @@ function enterAppModeFor(panel) {
   // click that had already succeeded. Covering something is a visual
   // accident; hiding it is the actual intent.
   launcher.hidden = true;
-  routeStartBlock.hidden = true;
+  // Unless the route-start screen IS the panel being shown - it is an
+  // app-mode overlay in its own right now (see .route-start.app-mode),
+  // and hiding the thing it was just asked to display would be a neat
+  // way to show nothing at all.
+  if (panel !== routeStartBlock) routeStartBlock.hidden = true;
   updateAppModeViewportHeight();
   requestAnimationFrame(updateAppModeViewportHeight);
   const backBtn = panel.querySelector('.app-mode-back');
@@ -1194,6 +1205,19 @@ function updateEndpointDeadline(role, elapsedMs) {
   }
 }
 
+// Both ends carry one, each pointing at the other.
+//
+// Only /originate had a QR code until 10 Sep 2026, on the assumption
+// that the laptop dials and the phone answers. It runs the other way
+// just as often - pick Receiving modem on the laptop and you still need
+// to get the second device onto /originate, and there was nothing on
+// screen to do it with (Dan: "visa versa when recieving mode is selected
+// on the laptop and the qr is followed from there").
+const SHARE_TARGET = {
+  [Role.ORIGINATE]: { path: '/receive/', copy: 'Open the receiving modem on the other device:' },
+  [Role.ANSWER]: { path: '/originate/', copy: 'Open the originating modem on the other device:' },
+};
+
 function renderShareBlock(url) {
   qrCodeEl.innerHTML = '';
   if (window.qrcode) {
@@ -1239,12 +1263,10 @@ async function startEndpointRoute(role) {
   signalIndicators.hidden = true;
   chatLog.innerHTML = '';
 
-  if (role === Role.ORIGINATE) {
-    shareBlock.hidden = false;
-    renderShareBlock(`${location.origin}/receive/`);
-  } else {
-    shareBlock.hidden = true;
-  }
+  const share = SHARE_TARGET[role];
+  shareBlock.hidden = false;
+  shareBlockCopy.textContent = share.copy;
+  renderShareBlock(`${location.origin}${share.path}`);
 
   let dataCheckStarted = false;
   try {
@@ -1325,15 +1347,49 @@ async function startEndpointRoute(role) {
 
     checkAudibleOrWarn(endpoint.ctx, endpoint.analyser, endpoint.diagnostics);
   } catch (err) {
+    // Stay in the panel and say what went wrong.
+    //
+    // This used to write the message below and then call
+    // `exitToLanding()`, which tears the panel down, calls
+    // `showLanding()` - resetting every caption on it, including the one
+    // just written - and pushes the URL back to `/`. So every failure
+    // here presented as the panel appearing for an instant and vanishing,
+    // with no message anywhere and the address bar no longer on the
+    // route. On a phone, where a denied microphone is the single most
+    // likely outcome and the permission prompt is a system dialog the
+    // page never sees, that is indistinguishable from the receiving
+    // modem simply not opening (Dan, 10 Sep 2026: "recieving modem
+    // doesn't pop up on mobile ... following qr code or clicking
+    // button").
+    //
+    // The half-built endpoint is still torn down - a rejected
+    // `openMicrophone` can leave an AudioContext and a worklet behind,
+    // and leaving those running would be a real leak. What does not
+    // happen any more is the navigation: the panel stays up, in app
+    // mode, showing the reason and its own Back button, which is the one
+    // control that gets the visitor out deliberately rather than by
+    // surprise.
     console.error(err);
+    // Teardown first, then re-dress the panel: teardownEndpoint hides it
+    // and wipes every caption on it, so anything written before this
+    // line is thrown away by it.
+    if (endpoint) await teardownEndpoint();
+    endpointPanel.hidden = false;
     endpointStatus.textContent = 'IDLE';
     if (err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError')) {
-      endpointCaption.textContent = 'Microphone permission was denied - allow access and press Start again.';
+      endpointCaption.textContent = 'Microphone permission was denied - allow access in your browser settings, then press Back and start again.';
     } else {
       endpointCaption.textContent = `Could not start: ${err.message || err}`;
     }
     endpointCaption.className = 'endpoint__caption diagnostic--warning';
-    await exitToLanding();
+    // Nothing below the status is meaningful without a running endpoint,
+    // and leaving a dead composer and a live-looking Hang up on screen
+    // reads as a working panel that is ignoring you.
+    signalIndicators.hidden = true;
+    endpointDialBtn.hidden = true;
+    endpointHangupBtn.disabled = true;
+    chatInput.disabled = true;
+    chatSendBtn.disabled = true;
   }
 }
 

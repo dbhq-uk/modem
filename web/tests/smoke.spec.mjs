@@ -197,11 +197,13 @@ test.describe('the routes', () => {
       // that is exactly what made this invisible for so long.
       await expect(page.locator('#launcher')).toBeHidden();
 
-      // And the control is where the visitor is looking. A direct link
-      // is arrived at deliberately; landing above the fold of the
-      // homepage hero is how it stopped reading as "this took me to the
-      // receiving modem".
+      // And the route opens as the overlay, not as a section of the
+      // homepage. A direct link is arrived at deliberately - usually a
+      // scanned QR code - and the visitor came for the one thing the
+      // route names.
       await expect(page.locator('#route-start-block')).toBeInViewport();
+      await expect(page.locator('#route-start-block')).toHaveClass(/app-mode/);
+      await expect(page.locator('#route-start-back-btn')).toBeVisible();
       expect(errors).toEqual([]);
     });
   }
@@ -221,6 +223,63 @@ test.describe('the receiving end', () => {
     await page.locator('#route-start-btn').click();
     await expect(page.locator('#endpoint-status')).toHaveText('IDLE', { timeout: 30000 });
     await expect(page.locator('#endpoint-caption')).toHaveText('Listening for a call');
+  });
+});
+
+test.describe('hidden means hidden', () => {
+  // Three separate bugs, one cause: an author rule setting `display` on
+  // a class ties the UA sheet's `[hidden]` at (0,1,0) and wins, so the
+  // attribute did nothing. `.demo__controls` and `.dial-button` both do
+  // it. Asserted through computed visibility, never the attribute - the
+  // attribute was set correctly the entire time these were broken,
+  // which is exactly why nobody found them for so long.
+  test('an element marked hidden is not on screen, whatever its class sets', async ({ page }) => {
+    await page.goto('/');
+    // .dial-button sets display: inline-flex; this button ships with the
+    // `hidden` attribute in the markup and had never once been honoured,
+    // so "Dial now" was on the receiving modem, which never dials.
+    await expect(page.locator('#endpoint-dial')).toBeHidden();
+    // .demo__controls sets display: flex.
+    await expect(page.locator('#route-start-block')).toBeHidden();
+  });
+});
+
+test.describe('when starting the modem fails', () => {
+  // The catch in startEndpointRoute used to write its diagnostic and
+  // then call exitToLanding(), which tears the panel down, resets every
+  // caption on it - including the one just written - and pushes the URL
+  // back to /. So any failure presented as the panel flashing up and
+  // vanishing with nothing said anywhere, which on a phone is
+  // indistinguishable from the receiving modem never opening at all
+  // (Dan, 10 Sep 2026).
+  //
+  // Deliberately not asserting *which* failure. A denied microphone is
+  // the likeliest one on a real phone, but this runner has no audio
+  // output device so it fails earlier, at the worklet. The regression
+  // being guarded is the panel disappearing, and that is the same
+  // whatever threw - so the test forces a failure it can rely on and
+  // then checks the panel is still there, still saying something, still
+  // on its own URL.
+  test('the panel stays up, says why, and does not bounce home', async ({ page }) => {
+    await page.addInitScript(() => {
+      navigator.mediaDevices.getUserMedia = () => {
+        const e = new Error('Permission denied');
+        e.name = 'NotAllowedError';
+        return Promise.reject(e);
+      };
+    });
+    await page.goto('/receive/');
+    await dismissConsent(page);
+    await page.locator('#route-start-btn').click();
+
+    const caption = page.locator('#endpoint-caption');
+    await expect(caption).not.toBeEmpty({ timeout: 20000 });
+    await expect(caption).toHaveClass(/diagnostic--warning/);
+    // Still the receiving modem, still on its own URL - not bounced home.
+    await expect(page.locator('#endpoint-panel')).toBeVisible();
+    await expect(page.locator('#endpoint-back-btn')).toBeVisible();
+    await expect(page.locator('#endpoint-status')).toHaveText('IDLE');
+    expect(new URL(page.url()).pathname).toBe('/receive/');
   });
 });
 

@@ -18,6 +18,43 @@
  * their tokens.css <link>. */
 
 /* ---------------------------------------------------------------------
+ * `hidden` must actually hide.
+ *
+ * The browser's default stylesheet expresses the `hidden` attribute as
+ * `[hidden] { display: none }` at (0,1,0) specificity. Any author rule
+ * that sets `display` on the same element ties at that specificity, and
+ * an author rule beats a user-agent one on a tie regardless of source
+ * order - so `hidden` silently loses on every element whose class sets
+ * a display value.
+ *
+ * This stylesheet has three such classes, and the fault was found three
+ * separate times as three separate bugs before anybody looked at the
+ * pattern:
+ *
+ *   .route-start    (display: flex, via .demo__controls) - the Start
+ *                   button visible on the plain landing route, where
+ *                   nothing should have shown it.
+ *   #launcher       (display: flex, via .demo__controls) - the three
+ *                   landing-page choices still on screen on /demo/,
+ *                   /originate/ and /receive/, so a scanned QR code
+ *                   landed on a page offering all three again.
+ *   .dial-button    (display: inline-flex) - "Dial now" showing on the
+ *                   receiving modem, which never dials, from the first
+ *                   paint onwards. `hidden` is in that button's markup
+ *                   and has never once been honoured.
+ *
+ * The first two were patched individually, each time on the belief that
+ * the element being patched was the only one affected. Fixing the class
+ * of bug instead: this is the one rule in the file that earns
+ * `!important`, because `hidden` is a semantic assertion that an element
+ * is not relevant, and no presentational rule should ever be able to
+ * outvote it.
+ * ------------------------------------------------------------------- */
+[hidden] {
+  display: none !important;
+}
+
+/* ---------------------------------------------------------------------
  * The page's own typeface, self-hosted.
  *
  * IBM Plex Mono (Dan, 10 Sep 2026), replacing the `ui-monospace, ...`
@@ -1390,6 +1427,71 @@ body.app-mode {
   padding-right: calc(var(--modem-space-sm) + env(safe-area-inset-right, 0px));
 }
 
+/* The route-start screen is an overlay too.
+ *
+ * A direct link to /demo, /originate or /receive is arrived at
+ * deliberately - most often here by scanning the QR code the
+ * originating end puts on screen - and the visitor came for the one
+ * thing the route names, not for the homepage with that thing somewhere
+ * on it. So the route's Start screen gets the same full-viewport
+ * treatment its running panel does: same geometry, same safe-area
+ * padding, same Back button (Dan, 10 Sep 2026: "qr code should got
+ * straight to pop up").
+ *
+ * The microphone still needs a real gesture - `getUserMedia` will not
+ * accept a navigation as one - so a Start button remains the floor.
+ * This makes it the only thing on screen rather than one control among
+ * a page of them, and pressing it swaps this overlay for the endpoint's
+ * without the viewport moving at all.
+ *
+ * Geometry deliberately duplicated from `.endpoint.app-mode` rather
+ * than factored into a shared class: these two want the same box today,
+ * but the endpoint's is load-bearing (it holds a transcript that must
+ * scroll and a composer that must stay reachable above a soft keyboard)
+ * and this one holds two lines and a button. Tying them together would
+ * mean every future change to the panel's box silently reshaping a
+ * screen with entirely different contents. */
+.route-start.app-mode {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  margin: 0;
+  grid-column: auto;
+  justify-self: stretch;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--modem-space-sm);
+  background: var(--modem-ground);
+  overflow-y: auto;
+  height: 100vh;
+  height: 100dvh;
+  padding: calc(var(--modem-space-md) + env(safe-area-inset-top, 0px))
+           calc(var(--modem-space-sm) + env(safe-area-inset-right, 0px))
+           calc(var(--modem-space-md) + env(safe-area-inset-bottom, 0px))
+           calc(var(--modem-space-sm) + env(safe-area-inset-left, 0px));
+}
+
+/* Back sits at the top of the overlay, not in the vertically centred
+   group with the copy and the button. */
+.route-start.app-mode .app-mode-back {
+  position: absolute;
+  top: calc(var(--modem-space-sm) + env(safe-area-inset-top, 0px));
+  left: calc(var(--modem-space-sm) + env(safe-area-inset-left, 0px));
+  display: inline-flex;
+}
+
+.route-start.app-mode .scenario__label {
+  margin: 0;
+  font-size: var(--modem-type-scale-large);
+}
+
+.route-start.app-mode p {
+  margin: 0;
+}
+
 .endpoint.app-mode .app-mode-back {
   /* inline-FLEX. This is the third rule to have overridden
      `.dial-button`'s flex with `inline-block` and silently removed the
@@ -1527,32 +1629,9 @@ body.app-mode {
   margin: 0 0 var(--modem-space-xs) 0;
 }
 
-/* `.demo__controls` sets `display: flex` at the same (0,1,0) specificity
- * as the `[hidden]` attribute the browser's own default stylesheet uses
- * for `display: none` - an author rule always beats a user-agent one at
- * an equal-specificity tie, regardless of source order, so `hidden`
- * alone silently loses on any element carrying both.
- *
- * Scoped to `.route-start[hidden]` when first found, on the theory that
- * `#route-start-block` was the only element carrying `.demo__controls`
- * and a `hidden` attribute. It was not. `#launcher` is
- * `class="demo__controls"` as well, and it is hidden by script rather
- * than in the markup, which is why it escaped: nothing renders it
- * wrongly on a first paint, so no page load shows the fault.
- *
- * The consequence ran for as long as the routes have existed.
- * `showRouteStart` and `enterAppModeFor` both set `launcher.hidden =
- * true` and neither did anything, so /demo/, /originate/ and /receive/
- * all kept the three landing-page buttons on screen above their own
- * control - and a QR code scanned onto /receive/ landed on a page
- * offering all three choices again (Dan, 10 Sep 2026: the QR "should
- * take you directly to receiving modem").
- *
- * Keyed on the class that causes it rather than on either instance, so
- * a third `.demo__controls` cannot reintroduce this a third time. */
-.demo__controls[hidden] {
-  display: none;
-}
+/* See the `[hidden]` rule at the top of this file. This is where the
+ * problem was chased twice, one element at a time, before being fixed
+ * once for the whole stylesheet. */
 
 /* ---------------------------------------------------------------------
  * Captions - a phase's plain-English gloss, always outside the modem
