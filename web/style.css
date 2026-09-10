@@ -1374,10 +1374,29 @@ body.app-mode {
  * library's `fill="black"` always loses to a stylesheet rule, no
  * `!important` needed. Sized in rem, not the library's own px, so it
  * scales with the rest of the page's type. */
+/* Dark modules on a light ground, not the phosphor-on-black the rest of
+   this page uses.
+ *
+ * It was green (#33FF33) on ground (#0A0A0A), which is an *inverted* QR:
+ * light modules on a dark background. The contrast is fine - about 15:1 -
+ * and that is not the problem. The problem is that the QR specification
+ * has dark modules on light, and while many decoders cope with inversion,
+ * iOS Camera is not reliably one of them. So the code rendered beautifully
+ * and a phone would not read it (Dan, 10 Sep 2026: "qr code doesnt open
+ * on mobile").
+ *
+ * `--modem-white-bright` on `--modem-ground` keeps it inside the brand's
+ * own palette while putting it the right way round, and reads as a
+ * printed label sitting on the terminal rather than part of it.
+ *
+ * Larger, too. 10rem is 160px, which is thin for a phone held across a
+ * desk - and this code exists specifically to be scanned by a second
+ * device from a distance. It scales with the viewport now, with the old
+ * size as the floor. */
 .qr-code {
   display: inline-block;
-  max-width: 10rem;
-  background: var(--modem-ground);
+  width: clamp(10rem, 40vw, 15rem);
+  background: var(--modem-white-bright);
   padding: var(--modem-space-xs);
   border: 1px solid var(--modem-white-dim);
 }
@@ -1389,11 +1408,11 @@ body.app-mode {
 }
 
 .qr-code svg rect {
-  fill: var(--modem-ground);
+  fill: var(--modem-white-bright);
 }
 
 .qr-code svg path {
-  fill: var(--modem-green-bright);
+  fill: var(--modem-ground);
 }
 
 /* ---------------------------------------------------------------------
