@@ -270,7 +270,11 @@ export class WiredEndpoint extends EventTarget {
         this.dispatchEvent(new CustomEvent('error', { detail: msg.message }));
         break;
       case 'status':
-        this.dispatchEvent(new CustomEvent('status', { detail: { a: msg.a, b: msg.b } }));
+        // Retained for the same reason modem.js retains it: the worklet
+        // posts only on change, so a listener registered afterwards has
+        // no way to learn the current state by waiting.
+        this.lastStatus = { a: msg.a, b: msg.b };
+        this.dispatchEvent(new CustomEvent('status', { detail: this.lastStatus }));
         break;
       case 'data':
         this.dispatchEvent(new CustomEvent('data', { detail: { side: msg.side, bytes: msg.bytes } }));

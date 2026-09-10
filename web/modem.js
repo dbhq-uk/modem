@@ -77,6 +77,9 @@ export class ModemEndpoint extends EventTarget {
     this.ctx = null;
     this.node = null;
     this.micStream = null;
+    /** The most recent status the worklet posted, or null. See the
+     * `status` case in the message handler for why this is retained. */
+    this.lastStatus = null;
     this._resolveReady = null;
     this._rejectReady = null;
     // Exposed for page.js's Sound help panel - see audio-diagnostics.js.
@@ -270,6 +273,14 @@ export class ModemEndpoint extends EventTarget {
         this.dispatchEvent(new CustomEvent('error', { detail: msg.message }));
         break;
       case 'status':
+        // Retained, not just dispatched. The worklet posts status only
+        // on a real change (see worklet.js), so anything that registers
+        // a status listener *after* a state is reached will wait for a
+        // change that may never come. `lastStatus` is how a late
+        // listener can ask what is true now - see page.js's
+        // `startEndpointDataCheck`, which was doing exactly that and
+        // silently never running.
+        this.lastStatus = msg;
         this.dispatchEvent(new CustomEvent('status', { detail: msg }));
         break;
       case 'data':
@@ -403,6 +414,10 @@ export class ModemEndpoint extends EventTarget {
       for (const track of this.micStream.getTracks()) track.stop();
       this.micStream = null;
     }
+    // Cleared with everything else: a stale status outliving the
+    // endpoint it described would prime the next check with the last
+    // call's state.
+    this.lastStatus = null;
     if (this.node) {
       this.node.disconnect();
     }

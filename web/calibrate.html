@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>modem acoustic calibration</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="../brand/tokens.css">
+<link rel="stylesheet" href="style.css">
+<style>
+  /* Deliberately plain. This is an instrument, not a page - it is not in
+     the nav, not in the sitemap, and noindexed. It borrows the brand
+     tokens so it is legible in the dark, and nothing else. */
+  body { padding: var(--modem-space-sm); }
+  .cal { max-width: 62rem; margin: 0 auto; }
+  .cal ol { padding-left: 1.4em; }
+  .cal li { margin-bottom: var(--modem-space-sm); }
+  .cal__out {
+    white-space: pre-wrap;
+    word-break: break-word;
+    border: 1px solid var(--modem-white-dim);
+    padding: var(--modem-space-sm);
+    font-size: var(--modem-type-scale-small);
+    min-height: 6rem;
+  }
+  .cal__row { display: flex; flex-wrap: wrap; gap: var(--modem-space-sm); margin: var(--modem-space-sm) 0; }
+  .cal__meter { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main class="cal">
+  <h1>Acoustic calibration</h1>
+  <p>An instrument, not a demo. It measures what this device's microphone
+  actually hears at the four Bell 103 tones, so the two-device mode can be
+  calibrated against real hardware instead of a model.</p>
+
+  <p><strong>Run every step on both devices.</strong> Steps 1 and 2 are done
+  on each device on its own. Step 3 needs both: one plays, the other
+  listens, then swap.</p>
+
+  <ol>
+    <li>
+      <strong>Room</strong> - silence, both devices quiet. 4 seconds.
+      <div class="cal__row">
+        <button type="button" class="dial-button" id="step-room">Measure the room</button>
+      </div>
+    </li>
+    <li>
+      <strong>This device's own speaker</strong> - it plays its own mark
+      tone and measures how loud that is in its own microphone. This is the
+      number the whole problem turns on. 4 seconds, and it will be audible.
+      <div class="cal__row">
+        <button type="button" class="dial-button" id="step-self">Measure my own speaker</button>
+      </div>
+    </li>
+    <li>
+      <strong>The other device</strong> - put them where you would actually
+      use them. On one device press Play; on the other press Listen at the
+      same time. Then swap roles and do it again.
+      <div class="cal__row">
+        <button type="button" class="dial-button" id="step-play">Play a tone (12s)</button>
+        <button type="button" class="dial-button" id="step-listen">Listen (12s)</button>
+      </div>
+    </li>
+  </ol>
+
+  <p class="cal__meter" id="meter" role="status">Idle</p>
+
+  <div class="cal__row">
+    <button type="button" class="dial-button" id="copy">Copy results</button>
+    <button type="button" class="dial-button dial-button--secondary" id="reset">Start over</button>
+  </div>
+  <pre class="cal__out" id="out">No measurements yet.</pre>
+</main>
+<script type="module" src="calibrate.js"></script>
+</body>
+</html>

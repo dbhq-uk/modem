@@ -788,6 +788,11 @@ function startWiredDataCheck() {
 
   wired.addEventListener('data', onData);
   wired.addEventListener('status', onStatus);
+  // Same priming as the two-device check - see its own note. Side B
+  // waits for a genuine change here so it was never caught by this, but
+  // a listener that can only learn the current state by being told about
+  // a future one is wrong either way.
+  if (wired.lastStatus) onStatus({ detail: wired.lastStatus });
   wired.send('a', CANARY);
   setTimeout(() => wired.yieldTurn('a'), 800);
 }
@@ -846,6 +851,23 @@ function startEndpointDataCheck() {
 
   endpoint.addEventListener('status', onStatus);
   endpoint.addEventListener('data', onData);
+  // Prime from the status already known, do not wait for another one.
+  //
+  // This function is called from inside the `status` handler that first
+  // reports CONNECTED, and a listener added during an event's dispatch
+  // does not receive that event. The worklet then posts status only on a
+  // change (see worklet.js) - and for the originating end nothing
+  // changes afterwards, because it reaches CONNECTED already holding the
+  // turn. So `onStatus` waited for an event that had already happened
+  // and would never happen again: that end never sent its canary and
+  // never yielded, the answering end therefore never got the turn and
+  // never sent either, and both devices reported "nothing arrived from
+  // the far end within 10s" over a link that had connected perfectly
+  // (Dan, 10 Sep 2026).
+  //
+  // The answering end was unaffected and that is what hid it: it waits
+  // for `hasTurn` to go true, which is a genuine future change.
+  if (endpoint.lastStatus) onStatus({ detail: endpoint.lastStatus });
 }
 
 // -----------------------------------------------------------------------
