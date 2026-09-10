@@ -1321,23 +1321,10 @@ window.addEventListener('beforeunload', () => {
 // pressing anything should see that reflected accurately, not a blank list.
 renderSoundHelp();
 
-// The three launcher buttons ship `disabled` and are enabled here, at the
-// very end of this module, once every handler above is attached. See
-// index.html's own comment for the race this closes: they used to be
-// tappable from the moment the HTML painted, while this module and the
-// six it imports were still arriving, so an early tap on a cold mobile
-// connection hit nothing at all.
-//
-// Last statement before `initRouting`, and deliberately not earlier:
-// anything between this line and the listeners would be a window where
-// the button works only partly. Both run in the same task, so no frame is
-// ever painted with the launcher visible and its buttons dead.
-//
-// `route-start-block` needs no equivalent - it ships `hidden` and only
-// `showRouteStart` reveals it, so it cannot be pressed before this module
-// runs in the first place.
-for (const btn of [launchDemoBtn, launchOriginateBtn, launchReceiveBtn]) {
-  if (btn) btn.disabled = false;
-}
-
+// Deliberately does NOT enable the launcher buttons - they ship enabled
+// and this module must never be what makes them pressable. See
+// index.html's own comment: for a few hours on 10 Sep 2026 they shipped
+// `disabled` for this module to undo, and a returning visitor with a
+// cached copy of the previous page.js got markup that disabled them and
+// JavaScript that never enabled them. Dead button, no explanation.
 initRouting();

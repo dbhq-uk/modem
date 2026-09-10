@@ -187,29 +187,36 @@
            internal tap on any of these starts that route immediately
            (see page.js) - no second click, because clicking one of
            these three buttons is itself the explicit gesture. -->
-      <!-- `disabled` in the markup, enabled by page.js the moment it has
-           actually attached its click handlers.
+      <!-- Enabled in the markup, and it must stay that way.
 
-           These used to paint enabled as soon as the HTML arrived, while
-           page.js - a deferred module that must also pull in session.js,
-           modem.js, wired.js, audio-diagnostics.js, waterfall.js and
-           terminal-line.js before it runs - was still loading. A tap
-           inside that window reached no listener and was discarded
-           silently. On a desktop with a warm cache the window is too
-           short to hit. On a phone, on a cold connection, it is hundreds
-           of milliseconds, and people tap the moment they see a button:
-           "the demo is flake on mobile when it loads" (Dan, 10 Sep
-           2026), working or not purely on how fast the modules arrived.
+           These shipped `disabled` for a few hours on 10 Sep 2026, to be
+           enabled by page.js once its handlers were attached - closing a
+           real race where a tap on a cold mobile load landed before any
+           listener existed and was discarded. It closed that race and
+           opened a worse one: the HTML is served `max-age=0` and the
+           JavaScript was still on Pages' four-hour default, so a
+           returning visitor got the new markup with disabled buttons and
+           their *cached* page.js, which had no code to enable them. A
+           permanently dead Demo button, and no way for the visitor to
+           know why.
 
-           The tap cannot be queued and replayed once the handlers exist,
-           which would be the tempting fix: starting audio needs a real
-           user gesture, and a replayed or synthesised one will not
-           resume an AudioContext on WebKit. So the honest version is to
-           not offer the button until pressing it will do something. -->
+           The rule is the one this page already follows for the CRT
+           sweep: the unscripted state must be the working one. A control
+           that needs JavaScript to arrive before it can be pressed fails
+           closed every time that JavaScript is stale, blocked or slow.
+           Losing an early tap is recoverable - press it again. A dead
+           button is not.
+
+           The early-tap race is real and still open. It is handled where
+           it can be handled without this trade: page.js shows
+           "Starting..." on the pressed button, and the caching that made
+           stale JavaScript last four hours is fixed at the zone (see
+           infra/main.tf), so a fix now reaches a visitor on their next
+           load rather than tomorrow. -->
       <div class="demo__controls" id="launcher">
-        <button class="dial-button" id="launch-demo-btn" type="button" disabled>Demo</button>
-        <button class="dial-button dial-button--secondary" id="launch-originate-btn" type="button" disabled>Open originating modem</button>
-        <button class="dial-button dial-button--secondary" id="launch-receive-btn" type="button" disabled>Open receiving modem</button>
+        <button class="dial-button" id="launch-demo-btn" type="button">Demo</button>
+        <button class="dial-button dial-button--secondary" id="launch-originate-btn" type="button">Open originating modem</button>
+        <button class="dial-button dial-button--secondary" id="launch-receive-btn" type="button">Open receiving modem</button>
       </div>
 
       <!-- A direct link or a reload on /demo, /originate or /receive
@@ -528,14 +535,6 @@
       </p>
     </div>
 
-    <div class="endorsement__group">
-      <p class="endorsement__group-label">Also from DBHQ</p>
-      <ul class="endorsement__siblings">
-        <li><a href="https://dbhq.uk">DBHQ</a> - the practice behind these experiments.</li>
-        <li><a href="https://bbs.dbhq.uk">BBS</a> - explore a bulletin board system.</li>
-        <li><a href="https://heliograph.dbhq.uk">heliograph</a> - debug a remote machine through an operator, using Git.</li>
-      </ul>
-    </div>
   </div>
 </footer>
 <!-- END generated: footer -->

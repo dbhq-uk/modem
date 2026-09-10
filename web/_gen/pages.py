@@ -94,6 +94,17 @@ def render_nav(current_id: str | None) -> str:
 # destination this group used to hold (Explained on index.html, Try on
 # explained.html), so repeating either here would be the nav's own job
 # done twice.
+# The "Also from DBHQ" sibling list used to sit here, on every page. It
+# came out on 10 Sep 2026 (Dan): /projects carries the same three links
+# and is in the primary nav, so repeating them in the footer of all seven
+# pages said the same thing twice and made the footer the longest thing
+# on short pages.
+#
+# Crawling is unaffected - /projects is in the nav on every page and in
+# the sitemap, so the links there are found and followed like any other.
+# What does change is internal weight: three sitewide links become three
+# links on one page, which is a smaller signal to the siblings. That is
+# the deliberate trade, not an oversight.
 FOOTER = """<footer class="endorsement">
   <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. The full workspace - modem-core, modem-audio, modem-tui, modem-wasm and this page - lives on <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>, MIT licensed.</p>
 
@@ -105,14 +116,6 @@ FOOTER = """<footer class="endorsement">
       </p>
     </div>
 
-    <div class="endorsement__group">
-      <p class="endorsement__group-label">Also from DBHQ</p>
-      <ul class="endorsement__siblings">
-        <li><a href="https://dbhq.uk">DBHQ</a> - the practice behind these experiments.</li>
-        <li><a href="https://bbs.dbhq.uk">BBS</a> - explore a bulletin board system.</li>
-        <li><a href="https://heliograph.dbhq.uk">heliograph</a> - debug a remote machine through an operator, using Git.</li>
-      </ul>
-    </div>
   </div>
 </footer>"""
 
