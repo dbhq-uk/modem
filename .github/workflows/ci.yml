@@ -132,6 +132,44 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: The README's terminal frame must line up
+        # A box-drawn frame whose rows are not all the same width does not
+        # render as a box - the right border steps in and out and the
+        # whole thing reads as broken. Found on 10 Sep 2026 with two
+        # waterfall rows at 71 characters against a 72-character border,
+        # which is invisible in a diff and obvious on the repo's front
+        # page. Character count, not display width: every glyph in the
+        # frame is East-Asian Ambiguous, so it is one cell wide in the
+        # Latin monospace GitHub actually renders it in.
+        run: |
+          python3 - <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          text = Path('README.md').read_text()
+          in_block = False
+          rows = []
+          for number, line in enumerate(text.splitlines(), 1):
+              if line.startswith('```'):
+                  in_block = not in_block
+                  continue
+              if in_block and re.match(r'^[\u2551\u2554\u255a\u2560]', line):
+                  rows.append((number, len(line), line[:24]))
+
+          if not rows:
+              sys.exit("no box-drawn frame found in README.md - has it moved?")
+
+          widths = {width for _, width, _ in rows}
+          if len(widths) > 1:
+              print("README.md's terminal frame has rows of different widths:")
+              for number, width, start in rows:
+                  print(f"  line {number}: {width} chars  {start!r}")
+              sys.exit(f"widths seen: {sorted(widths)} - every row must match the border")
+
+          print(f"{len(rows)} frame rows, all {widths.pop()} characters")
+          PY
+
       # Repo rule: plain hyphens only, never em or en dashes.
       - name: No em dashes or en dashes
         run: |
