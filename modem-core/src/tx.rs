@@ -47,6 +47,9 @@ pub struct Tx {
     /// buffer was already full for. Drained before generating anything
     /// new, so no produced sample is ever dropped.
     pending: VecDeque<f32>,
+    /// Output scale, 1.0 unless deliberately turned down. See
+    /// [`Tx::set_amplitude`].
+    amplitude: f32,
 }
 
 impl Tx {
@@ -65,6 +68,7 @@ impl Tx {
             resampler: Resampler::new(DSP_RATE, cfg.sample_rate as f64),
             resample_out: Vec::new(),
             pending: VecDeque::with_capacity(PENDING_CAP),
+            amplitude: 1.0,
         }
     }
 
@@ -93,6 +97,28 @@ impl Tx {
 
     pub fn pending(&self) -> bool {
         !self.bits.is_empty()
+    }
+
+    /// Scales everything this `Tx` emits.
+    ///
+    /// Exists for one caller: `Session`'s `idle_tx`, the transmitter that
+    /// holds continuous mark while this end does not have the turn. On a
+    /// telephone line that tone never returns to this end's own receiver.
+    /// Over a room it does, loudly - a device's own loudspeaker is inches
+    /// from its own microphone and the far device is 10-20cm away - so at
+    /// full scale it is the loudest thing this end's receiver has to see
+    /// past, and it is self-inflicted. `modem-core/tests/acoustic.rs`
+    /// measures what that costs; `IDLE_MARK_AMPLITUDE` in `session.rs`
+    /// carries the value chosen and why.
+    ///
+    /// Safe to turn a long way down as far as carrier goes: detection is
+    /// a *ratio* test (`carrier.rs`'s `ToneDominance` compares narrowband
+    /// against wideband energy), so scaling the tone scales both sides
+    /// and leaves the ratio alone - measured still detecting at 0.02.
+    /// What it is *not* safe to do is step the level inside a burst; see
+    /// `TAIL_IDLE_GAP_BITS`.
+    pub fn set_amplitude(&mut self, amplitude: f32) {
+        self.amplitude = amplitude;
     }
 
     /// How many samples `n` bits occupy at this `Tx`'s configured rate -
@@ -171,11 +197,12 @@ impl Tx {
                 .process(&self.scratch[..need], &mut self.resample_out[..max_out]);
 
             for &v in &self.resample_out[..produced] {
+                let v = v as f32 * self.amplitude;
                 if written < out.len() {
-                    out[written] = v as f32;
+                    out[written] = v;
                     written += 1;
                 } else {
-                    self.pending.push_back(v as f32);
+                    self.pending.push_back(v);
                 }
             }
         }

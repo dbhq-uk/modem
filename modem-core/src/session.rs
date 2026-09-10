@@ -173,6 +173,74 @@ use crate::{Config, Duplex, Role};
 /// improve on it.
 const TRAINING_PREAMBLE: [u8; 2] = [0x55, 0x55];
 
+/// Output scale for `idle_tx`, the tone this end holds while it does not
+/// have the turn.
+///
+/// On a telephone line, holding full-scale mark costs nothing: your own
+/// transmit never comes back into your own receiver. Over a room it
+/// does, and it is the loudest thing there - your own loudspeaker is
+/// inches from your own microphone, the far device is 10-20cm away. So
+/// the end that is *listening* spends the whole burst jamming itself
+/// with its own idle tone.
+///
+/// `modem-core/tests/acoustic.rs` measures what that costs and finds it
+/// asymmetric, which is why only one direction ever failed in the field.
+/// The interferer is each end's own mark tone, the top of its own band,
+/// and the two bands are not equally far from it:
+///
+/// | Receiving end | Listening on   | Own mark | Gap    | Tolerated |
+/// |---------------|----------------|----------|--------|-----------|
+/// | Originate     | 2025 / 2225 Hz | 1270 Hz  | 755 Hz | 4x        |
+/// | Answer        | 1070 / 1270 Hz | 2225 Hz  | 955 Hz | 1.5x      |
+///
+/// 0.2 is -14 dB. It takes the weaker band from tolerating 1.5x its own
+/// loudspeaker to about 7.5x, which is the point of the number: two
+/// devices on a desk sit around 7x on geometry alone (2 cm from your own
+/// speaker, 15 cm from theirs, inverse square), so 1.5x was always going
+/// to fail and 7.5x has margin.
+///
+/// The value is bounded below by carrier detection, and that turned out
+/// not to bind here at all. `carrier_survives_a_quiet_idle_tone` holds
+/// against fixed room noise all the way to 0.1 - including noise at the
+/// same level as the tone - because `ToneDominance` is a ratio test and
+/// scaling the tone scales both sides of it. 0.2 keeps a factor of two
+/// over the lowest level measured working.
+///
+/// Idle mark's only job is keeping the far end's carrier up between
+/// bursts. Data is transmitted from `tx` at full scale and is not
+/// affected by this at all.
+///
+/// Not zero, and that is the constraint setting the floor rather than
+/// the ceiling: a connected modem never goes silent. See this module's
+/// doc on the defect that closed, and
+/// `half_duplex_end_without_turn_transmits_continuous_idle_mark_not_silence`.
+///
+/// This was tried once before `TAIL_IDLE_GAP_BITS` existed and broke
+/// turn handover at every level from 0.8 down, because the level step
+/// landed inside the tail of the `Turn` packet. The tail gap is what
+/// makes this safe; neither change is much use without the other.
+pub const IDLE_MARK_AMPLITUDE: f32 = 0.2;
+
+/// Bit periods of idle mark queued behind the `Turn` packet by
+/// `yield_turn`, closing a burst the way [`GRANT_IDLE_GAP_BITS`] opens
+/// one.
+///
+/// A burst does not end at its last data bit. The far end's deframer has
+/// to see mark held past the final stop bit before it can call the byte
+/// complete, and the correlator window that decides that bit spans about
+/// a symbol either side of it - so whatever the transmitter does
+/// immediately afterwards lands inside the decision on the last byte of
+/// the packet.
+///
+/// While `tx` and `idle_tx` run at the same level that is invisible: the
+/// tone simply continues. The moment they do not, the level step lands
+/// inside the tail of the `Turn` packet, corrupts it, fails its CRC, and
+/// the turn is never handed over - which is exactly what happened when
+/// `idle_tx` was first attenuated, at every level tried from 0.8 down.
+///
+/// Two character times, matching the opening gap.
+const TAIL_IDLE_GAP_BITS: usize = 20;
+
 /// Bit periods of idle mark queued directly behind [`TRAINING_PREAMBLE`]
 /// by `grant_turn`, so a burst always has the gap its receiver needs
 /// between acquisition and data.
@@ -307,7 +375,9 @@ impl Session {
         self.overture = Some(Overture::new(digits));
         self.overture_stage = None;
         self.tx = Some(Tx::new(self.cfg));
-        self.idle_tx = Some(Tx::new(self.cfg));
+        let mut idle = Tx::new(self.cfg);
+        idle.set_amplitude(IDLE_MARK_AMPLITUDE);
+        self.idle_tx = Some(idle);
         self.rx = Some(Rx::new(self.cfg));
         self.reader = PacketReader::new();
         self.inbox.clear();
@@ -336,7 +406,9 @@ impl Session {
         self.overture = None;
         self.overture_stage = None;
         self.tx = Some(Tx::new(self.cfg));
-        self.idle_tx = Some(Tx::new(self.cfg));
+        let mut idle = Tx::new(self.cfg);
+        idle.set_amplitude(IDLE_MARK_AMPLITUDE);
+        self.idle_tx = Some(idle);
         self.rx = Some(Rx::new(self.cfg));
         self.reader = PacketReader::new();
         self.inbox.clear();
@@ -527,6 +599,13 @@ impl Session {
                 payload: Vec::new(),
             };
             tx.write(&encode_packet(&pkt));
+            // A tail of idle mark behind the Turn packet, for the same
+            // reason grant_turn puts one in front of the data: a
+            // deframer needs to see mark held past the last stop bit to
+            // finish the byte. Queued into `tx` rather than left to
+            // `idle_tx`, so it goes out under the `yielding` bypass at
+            // this burst's own level - see TAIL_IDLE_GAP_BITS.
+            tx.write_idle_mark(TAIL_IDLE_GAP_BITS);
         }
         self.has_turn = false;
         self.yielding = true;
@@ -1056,14 +1135,21 @@ mod tests {
         let s64_2: Vec<f64> = out2.iter().map(|&x| x as f64).collect();
         let answer_mark2 = goertzel(&s64_2, 2225.0, 8000.0);
         let originate_mark2 = goertzel(&s64_2, 1270.0, 8000.0);
+        // Stated as a ratio between the two bands rather than as two
+        // absolute thresholds. The claim being made is "its own band and
+        // not the other one", which is what a ratio says; the absolute
+        // numbers additionally encoded an output level, and quietly
+        // started failing the moment `idle_tx` stopped running at full
+        // scale (see IDLE_MARK_AMPLITUDE) even though the thing under
+        // test was unchanged.
         assert!(
-            answer_mark2 >= 0.9,
-            "answer() did not transmit the answer band's mark tone (2225 Hz): {answer_mark2}"
+            answer_mark2 >= 18.0 * originate_mark2,
+            "answer() did not transmit the answer band's mark tone (2225 Hz) clear of the \
+             originate band's: 2225 Hz {answer_mark2}, 1270 Hz {originate_mark2}"
         );
         assert!(
-            originate_mark2 <= 0.05,
-            "answer() leaked the originate band's mark tone (1270 Hz) instead of transmitting \
-             its own: {originate_mark2}"
+            answer_mark2 > 0.05,
+            "answer() transmitted effectively nothing at all: {answer_mark2}"
         );
     }
 
@@ -1277,23 +1363,31 @@ mod tests {
 
         let rms =
             (out.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>() / out.len() as f64).sqrt();
+        // Scaled to the level idle mark actually runs at (see
+        // IDLE_MARK_AMPLITUDE). Still the same claim - a real sustained
+        // tone, not a DC offset and not a single spike, either of which
+        // would satisfy a bare non-zero check - just no longer assuming
+        // that level is 1.0.
+        let expected_rms = 0.707 * IDLE_MARK_AMPLITUDE as f64;
         assert!(
-            rms > 0.3,
-            "answer's idle output has implausibly low RMS ({rms}) for a full-amplitude tone - \
-             a DC offset or a single spike would also satisfy a bare non-zero check"
+            rms > 0.6 * expected_rms,
+            "answer's idle output has implausibly low RMS ({rms}) against the {expected_rms} \
+             expected of a tone at IDLE_MARK_AMPLITUDE - a DC offset or a single spike would \
+             also satisfy a bare non-zero check"
         );
 
         let s64: Vec<f64> = out.iter().map(|&x| x as f64).collect();
         let own_mark = goertzel(&s64, 2225.0, 8000.0);
         let far_mark = goertzel(&s64, 1270.0, 8000.0);
+        // A ratio, for the reason given on the identical pair in
+        // dial_transmits_in_the_originate_band...: "its own tone and not
+        // the far end's" is a comparison between the two, and pinning it
+        // to absolute magnitudes tied the test to the output level as
+        // well.
         assert!(
-            own_mark >= 0.9,
-            "answer's idle output is not its own mark tone (2225 Hz): {own_mark}"
-        );
-        assert!(
-            far_mark <= 0.05,
-            "answer's idle output leaked the far end's mark tone (1270 Hz) instead of its own: \
-             {far_mark}"
+            own_mark >= 18.0 * far_mark,
+            "answer's idle output is not clearly its own mark tone (2225 Hz) rather than the \
+             far end's (1270 Hz): 2225 Hz {own_mark}, 1270 Hz {far_mark}"
         );
 
         originate.yield_turn();
@@ -1349,7 +1443,7 @@ mod tests {
         let s64: Vec<f64> = out.iter().map(|&x| x as f64).collect();
         let own_mark = goertzel(&s64, 2225.0, 8000.0);
         assert!(
-            own_mark >= 0.9,
+            own_mark >= 0.9 * IDLE_MARK_AMPLITUDE as f64,
             "answer must still transmit its own idle mark, not the data queued before it held \
              the turn: {own_mark}"
         );

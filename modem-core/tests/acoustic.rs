@@ -49,6 +49,7 @@ use modem_core::impair::{
     add_awgn, agc, band_limit, duplex_leak, measure_ber, noise_suppression, reverb,
 };
 use modem_core::rx::Rx;
+use modem_core::session::IDLE_MARK_AMPLITUDE;
 use modem_core::tx::Tx;
 use modem_core::{Config, Duplex, Role};
 
@@ -126,6 +127,14 @@ fn receive(sent_by: Role, air: &[f32]) -> Vec<u8> {
 /// Continuous idle mark from `role` - what `session.rs` has an end
 /// transmit whenever it does not hold the turn, and therefore what that
 /// device's own microphone hears from its own loudspeaker.
+///
+/// Emitted at `IDLE_MARK_AMPLITUDE`, the level `Session` actually holds
+/// it at, so the gains swept below are *acoustic* ratios - how much
+/// louder this device's own speaker is at its own microphone than the
+/// far device is - rather than raw sample amplitudes. That is the number
+/// a room decides, and it is set by geometry: at 2 cm from your own
+/// speaker and 15 cm from theirs, inverse square puts it around 7x
+/// before anything electrical is involved.
 fn own_speaker(role: Role, len: usize) -> Vec<f32> {
     let mut tx = Tx::new(Config {
         sample_rate: RATE,
@@ -134,6 +143,9 @@ fn own_speaker(role: Role, len: usize) -> Vec<f32> {
     });
     let mut air = vec![0.0f32; len];
     tx.read(&mut air);
+    for s in air.iter_mut() {
+        *s *= IDLE_MARK_AMPLITUDE;
+    }
     air
 }
 
@@ -167,7 +179,7 @@ fn answer_band_tolerates_less_of_its_own_speaker_than_originate_does() {
         let base = transmit(role, PAYLOAD);
         let own = own_speaker(far(role), base.len());
         let mut worst_ok = 0.0f32;
-        for gain in [0.0f32, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0] {
+        for gain in [0.0f32, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0] {
             let air = duplex_leak(&base, &own, gain);
             if ber_of(role, &air) <= WORKING {
                 worst_ok = gain;
@@ -180,9 +192,10 @@ fn answer_band_tolerates_less_of_its_own_speaker_than_originate_does() {
     }
     let (originate, answer) = (limits[0], limits[1]);
     assert!(
-        originate >= 4.0,
-        "the originate band no longer tolerates 4x its own speaker ({originate}x) - \
-         this is the direction that worked in the field"
+        originate >= 8.0,
+        "the originate band no longer tolerates 8x its own speaker ({originate}x) - \
+         this is the direction that worked in the field even before idle mark was \
+         attenuated"
     );
     assert!(
         answer < originate,
@@ -190,10 +203,16 @@ fn answer_band_tolerates_less_of_its_own_speaker_than_originate_does() {
          answer {answer}x). If that is real it is an improvement, and this test and this \
          module's explanation of the field asymmetry both need rewriting"
     );
+    // The number that decides whether two devices on a desk work at all.
+    // Geometry alone puts the acoustic ratio around 7x (see
+    // `own_speaker`), and before `IDLE_MARK_AMPLITUDE` this band gave out
+    // at 1.5x - which is why answer-to-originate was the direction that
+    // always failed.
     assert!(
-        answer >= 1.0,
-        "the answer band cannot tolerate even equal-level leak ({answer}x) - \
-         two-device mode would be unusable rather than merely fragile"
+        answer >= 4.0,
+        "the answer band tolerates only {answer}x its own loudspeaker. A desk is about 7x \
+         on geometry alone, so two-device mode is back to failing in one direction - which \
+         is exactly what IDLE_MARK_AMPLITUDE exists to prevent"
     );
 }
 
@@ -271,6 +290,72 @@ fn the_room_alone_is_survivable_in_both_bands() {
             "{role:?}'s band no longer survives band-limiting, a desk reflection and \
              {ROOM_SNR_DB} dB room noise ({ber:.4}) - the acoustic advice on the site \
              assumes it does"
+        );
+    }
+}
+
+/// Fixed-level noise, independent of the signal - which is what a room
+/// actually is.
+///
+/// `impair::add_awgn` takes an SNR, so its noise scales down with the
+/// tone and can never show an absolute floor being approached. That
+/// matters here specifically: the question is how *quiet* idle mark can
+/// get before a receiver stops hearing it, and a relative-SNR model
+/// answers "arbitrarily quiet" no matter what the truth is.
+fn fixed_noise(air: &mut [f32], amplitude: f32, seed: u64) {
+    let mut x = seed | 1;
+    for s in air.iter_mut() {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        let u = ((x >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0;
+        *s += amplitude * u as f32;
+    }
+}
+
+/// What bounds `IDLE_MARK_AMPLITUDE` from below, measured.
+///
+/// Idle mark exists to keep the far end's carrier up between bursts, so
+/// how quiet it can be is decided by carrier detection and nothing else -
+/// data is transmitted from `tx` at full scale regardless.
+///
+/// This turned out not to bind at the levels that matter: detection
+/// holds down to 0.1 against room noise at the *same level as the tone*,
+/// because `ToneDominance` is a ratio test and scaling the tone scales
+/// both sides of it. The chosen 0.2 therefore keeps a factor of two over
+/// the lowest level measured working, and the acoustic tolerance above
+/// is what actually picked it.
+#[test]
+fn carrier_survives_a_quiet_idle_tone() {
+    for noise in [0.01f32, 0.03, 0.06, 0.1] {
+        let mut tx = Tx::new(Config {
+            sample_rate: RATE,
+            role: Role::Originate,
+            duplex: Duplex::Full,
+        });
+        let mut air = vec![0.0f32; RATE as usize];
+        tx.read(&mut air);
+        for s in air.iter_mut() {
+            *s *= IDLE_MARK_AMPLITUDE;
+        }
+        fixed_noise(&mut air, noise, 0xC0FF_EE01);
+
+        let mut rx = Rx::new(Config {
+            sample_rate: RATE,
+            role: Role::Answer,
+            duplex: Duplex::Full,
+        });
+        let mut buf = vec![0u8; 256];
+        for chunk in air.chunks(256) {
+            rx.write(chunk);
+            rx.read(&mut buf);
+        }
+        assert!(
+            rx.carrier_detected(),
+            "idle mark at IDLE_MARK_AMPLITUDE ({IDLE_MARK_AMPLITUDE}) was not detected as \
+             carrier against fixed room noise at {noise}. That is the floor this constant \
+             has to clear - if it no longer does, raise the constant rather than lowering \
+             this test"
         );
     }
 }
