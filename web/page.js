@@ -420,6 +420,13 @@ let pendingRoute = null;
 
 function showLanding() {
   pendingRoute = null;
+  // Undo whatever `launchRoute` did to a button that was pressed and then
+  // failed to start, so the landing page is never left showing
+  // "Starting..." on a dead control.
+  for (const [button, label] of LAUNCH_LABELS) {
+    button.disabled = false;
+    button.textContent = label;
+  }
   launcher.hidden = false;
   routeStartBlock.hidden = true;
   wiredPanel.hidden = true;
@@ -432,6 +439,10 @@ function showRouteStart(route) {
   routeStartBlock.hidden = false;
   routeStartCopy.textContent = ROUTE_START_COPY[route];
   routeStartBtn.textContent = ROUTE_START_LABEL[route];
+  // Re-enabled as well as relabelled: a previous attempt that failed left
+  // it disabled and reading "Starting...", and this is the one path back
+  // to a usable button.
+  routeStartBtn.disabled = false;
   wiredPanel.hidden = true;
   endpointPanel.hidden = true;
 }
@@ -457,26 +468,50 @@ async function startRoute(route) {
 // route's own <link rel="canonical"> declares. Pushing that form
 // directly means a visitor who reloads, shares, or bookmarks straight
 // from the address bar never takes the redirect hop at all.
-launchDemoBtn.addEventListener('click', () => {
-  history.pushState(null, '', '/demo/');
-  launcher.hidden = true;
-  startRoute('demo');
-});
-launchOriginateBtn.addEventListener('click', () => {
-  history.pushState(null, '', '/originate/');
-  launcher.hidden = true;
-  startRoute('originate');
-});
-launchReceiveBtn.addEventListener('click', () => {
-  history.pushState(null, '', '/receive/');
-  launcher.hidden = true;
-  startRoute('receive');
-});
+/** The three launcher buttons and their resting labels, captured once so
+ * a pressed button can be put back exactly as it was if the route fails
+ * to start. */
+const LAUNCH_BUTTONS = [launchDemoBtn, launchOriginateBtn, launchReceiveBtn].filter(Boolean);
+const LAUNCH_LABELS = new Map(LAUNCH_BUTTONS.map((b) => [b, b.textContent]));
+
+/**
+ * Starts a route from the landing page, and says so while it happens.
+ *
+ * Bringing a route up is not instant: the WASM has to be fetched, the
+ * worklet module added, and the worklet side has to compile and
+ * instantiate it - hundreds of milliseconds on a phone, and longer on a
+ * cold connection. The old handler hid the launcher on the first line and
+ * showed nothing at all until the panel was ready, so for that whole
+ * stretch a tap produced an empty page. Indistinguishable, to the person
+ * holding the phone, from a button that does not work - which is half of
+ * what "the demo is flake on mobile" was describing (Dan, 10 Sep 2026);
+ * the other half was the tap landing before the handlers existed, see
+ * index.html.
+ *
+ * So the launcher stays put and the pressed button says what it is doing.
+ * Nothing needs to hide it: every route ends in a full-viewport app-mode
+ * panel (`position: fixed; inset: 0`) that covers it, and if the route
+ * fails instead, `exitToLanding` -> `showLanding` restores the buttons to
+ * exactly the labels captured above.
+ */
+function launchRoute(button, route, path) {
+  history.pushState(null, '', path);
+  for (const b of LAUNCH_BUTTONS) b.disabled = true;
+  button.textContent = 'Starting...';
+  startRoute(route);
+}
+
+launchDemoBtn.addEventListener('click', () => launchRoute(launchDemoBtn, 'demo', '/demo/'));
+launchOriginateBtn.addEventListener('click', () => launchRoute(launchOriginateBtn, 'originate', '/originate/'));
+launchReceiveBtn.addEventListener('click', () => launchRoute(launchReceiveBtn, 'receive', '/receive/'));
 
 routeStartBtn.addEventListener('click', () => {
   if (!pendingRoute) return;
   const route = pendingRoute;
-  routeStartBlock.hidden = true;
+  // Same reasoning as `launchRoute`: say it is starting rather than
+  // leaving an empty page behind while the WASM and the worklet load.
+  routeStartBtn.disabled = true;
+  routeStartBtn.textContent = 'Starting...';
   startRoute(route);
 });
 
