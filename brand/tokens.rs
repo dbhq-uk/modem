@@ -28,7 +28,7 @@ pub const ERROR: (u8, u8, u8) = (0xFF, 0x33, 0x33);
 /// The terminal face, as a CSS font stack - informational here.
 /// `ratatui` draws in the user's own terminal and cannot set a font;
 /// the page consumes this value directly.
-pub const TYPE_FACE: &str = "ui-monospace, 'Cascadia Code', 'Cascadia Mono', 'JetBrains Mono', Consolas, 'Liberation Mono', Menlo, monospace";
+pub const TYPE_FACE: &str = "'IBM Plex Mono', ui-monospace, 'Cascadia Code', 'Cascadia Mono', 'JetBrains Mono', Consolas, 'Liberation Mono', Menlo, monospace";
 
 /// Type scale, rem.
 pub const TYPE_SCALE_SMALL_REM: f32 = 0.8;

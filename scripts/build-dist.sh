@@ -34,6 +34,15 @@ cp target/wasm32-unknown-unknown/release/modem_wasm.wasm dist/web/modem.wasm
 # a glob-friendly extension. _headers carries the CSP that permits WASM
 # instantiation - without it the demo is blocked at the edge.
 cp web/_headers web/_redirects web/manifest.json web/robots.txt web/sitemap.xml dist/web/
+
+# The self-hosted webfonts. Not a glob above because they live in a
+# subdirectory, and no `|| true` here: the site's CSP is `font-src
+# 'self'`, so if these are missing there is no remote fallback to save
+# it - the page silently drops to whatever monospace the OS has, and the
+# terminal frames lose their box-drawing alignment. See the @font-face
+# block in web/style.css.
+mkdir -p dist/web/fonts
+cp web/fonts/*.woff2 web/fonts/LICENCE-*.txt dist/web/fonts/
 cp brand/tokens.css brand/icon.svg brand/icon-*.png brand/favicon.ico dist/brand/
 cp brand/wordmark.svg dist/brand/ 2>/dev/null || true
 

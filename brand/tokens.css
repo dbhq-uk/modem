@@ -13,7 +13,7 @@
   --modem-amber-dim: #805800;
   --modem-error: #FF3333;
 
-  --modem-type-face: ui-monospace, 'Cascadia Code', 'Cascadia Mono', 'JetBrains Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+  --modem-type-face: 'IBM Plex Mono', ui-monospace, 'Cascadia Code', 'Cascadia Mono', 'JetBrains Mono', Consolas, 'Liberation Mono', Menlo, monospace;
   --modem-type-scale-small: 0.8rem;
   --modem-type-scale-base: 1.0rem;
   --modem-type-scale-large: 1.25rem;

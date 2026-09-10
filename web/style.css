@@ -17,6 +17,83 @@
  * parallel instead. See index.html/links.html's own comment beside
  * their tokens.css <link>. */
 
+/* ---------------------------------------------------------------------
+ * The page's own typeface, self-hosted.
+ *
+ * IBM Plex Mono (Dan, 10 Sep 2026), replacing the `ui-monospace, ...`
+ * system stack the type token used to carry. That stack meant the page
+ * rendered in a different face on every OS - Cascadia on Windows, Menlo
+ * on macOS, Liberation here - so the one thing this site is entirely
+ * made of was the one thing not pinned.
+ *
+ * Self-hosted, not Google Fonts, for two reasons. The CSP in
+ * web/_headers sends `font-src 'self'`, so a fonts.gstatic.com origin
+ * is blocked at the edge. And Google's css2 subsets carry
+ * latin/latin-ext/cyrillic/greek only - they omit box-drawing
+ * (U+2500-257F) and block elements (U+2580-259F), which is what the
+ * terminal frames are made of. A font without those glyphs does not
+ * fail visibly; the browser falls back per-glyph to a face whose
+ * advance width differs, and a 100-column frame drifts out of true
+ * across the row, differently on every OS. Measured before choosing:
+ * of eight candidates only IBM Plex Mono and JetBrains Mono carry all
+ * 160.
+ *
+ * Subset here to U+0020-007E, U+00A0-00FF, general punctuation, and the
+ * whole of U+2500-25FF. 44KB becomes 9KB a weight. The box-drawing and
+ * block ranges are taken whole rather than cherry-picked from the 17
+ * non-ASCII codepoints the pages currently use, because the frames are
+ * generated from modem-tui and a new frame may reach for a box
+ * character no page happens to contain today.
+ *
+ * ## The carrier dot
+ *
+ * IBM Plex Mono has no U+25CF BLACK CIRCLE, which is the lit CARRIER
+ * indicator in every frame. Left alone it is exactly the per-glyph
+ * fallback described above, on the one row that matters most.
+ *
+ * So one glyph comes from JetBrains Mono, scoped by unicode-range and
+ * nothing else. This is safe rather than lucky: both faces are 1000
+ * units per em with a 600-unit advance, so the substituted circle
+ * occupies precisely one cell and the grid holds. Both are OFL 1.1;
+ * both licences ship in web/fonts/ beside the files.
+ * ------------------------------------------------------------------- */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  /* block, not swap: the frames are box-drawing art, and a swap-in
+     mid-paint reflows every one of them. The files are 9KB and
+     same-origin, so the block period is short. */
+  font-display: block;
+  src: url('fonts/ibm-plex-mono-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url('fonts/ibm-plex-mono-700.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('fonts/carrier-dot-400.woff2') format('woff2');
+  unicode-range: U+25CF;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url('fonts/carrier-dot-700.woff2') format('woff2');
+  unicode-range: U+25CF;
+}
+
 /* Page-only constants - not brand/tokens.json values: that file is for
    colour, type and CRT-effect values the TUI and the page must agree on,
    and a browser container width (or a UI-chrome font stack the terminal
