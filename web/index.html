@@ -187,10 +187,29 @@
            internal tap on any of these starts that route immediately
            (see page.js) - no second click, because clicking one of
            these three buttons is itself the explicit gesture. -->
+      <!-- `disabled` in the markup, enabled by page.js the moment it has
+           actually attached its click handlers.
+
+           These used to paint enabled as soon as the HTML arrived, while
+           page.js - a deferred module that must also pull in session.js,
+           modem.js, wired.js, audio-diagnostics.js, waterfall.js and
+           terminal-line.js before it runs - was still loading. A tap
+           inside that window reached no listener and was discarded
+           silently. On a desktop with a warm cache the window is too
+           short to hit. On a phone, on a cold connection, it is hundreds
+           of milliseconds, and people tap the moment they see a button:
+           "the demo is flake on mobile when it loads" (Dan, 10 Sep
+           2026), working or not purely on how fast the modules arrived.
+
+           The tap cannot be queued and replayed once the handlers exist,
+           which would be the tempting fix: starting audio needs a real
+           user gesture, and a replayed or synthesised one will not
+           resume an AudioContext on WebKit. So the honest version is to
+           not offer the button until pressing it will do something. -->
       <div class="demo__controls" id="launcher">
-        <button class="dial-button" id="launch-demo-btn" type="button">Demo</button>
-        <button class="dial-button dial-button--secondary" id="launch-originate-btn" type="button">Open originating modem</button>
-        <button class="dial-button dial-button--secondary" id="launch-receive-btn" type="button">Open receiving modem</button>
+        <button class="dial-button" id="launch-demo-btn" type="button" disabled>Demo</button>
+        <button class="dial-button dial-button--secondary" id="launch-originate-btn" type="button" disabled>Open originating modem</button>
+        <button class="dial-button dial-button--secondary" id="launch-receive-btn" type="button" disabled>Open receiving modem</button>
       </div>
 
       <!-- A direct link or a reload on /demo, /originate or /receive

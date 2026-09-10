@@ -521,11 +521,37 @@ window.addEventListener('popstate', async () => {
 // -----------------------------------------------------------------------
 let liveAppModePanel = null;
 
+/**
+ * Shows `panel` full-viewport and sizes it.
+ *
+ * Unhiding is done **here**, not by the caller, and the height is
+ * measured after it. Both call sites used to do it themselves and they
+ * did it in opposite orders: the two-device routes unhid the panel and
+ * then entered app mode, while Demo entered app mode and unhid the panel
+ * one line later - so Demo alone measured the viewport while its panel
+ * was still `hidden` and while `body.app-mode`'s `overflow: hidden` had
+ * only just been applied. On a phone that is exactly when the value is
+ * least trustworthy: toggling body overflow moves the address bar, and
+ * a `visualViewport.height` read synchronously in the same block is the
+ * height from *before* the move. The panel then keeps that stale pixel
+ * height, because `style.height` overrides `inset: 0`.
+ *
+ * That is a real candidate for "the demo is flaky on mobile when it
+ * loads" (Dan, 10 Sep 2026): it is the Demo route that had the bad
+ * ordering, and the symptom depends on where the address bar happened to
+ * be, which is why it is intermittent rather than broken.
+ *
+ * So: unhide, measure, then measure again on the next frame once layout
+ * and any address-bar movement have settled. The second call is
+ * idempotent and costs one frame.
+ */
 function enterAppModeFor(panel) {
   liveAppModePanel = panel;
   document.body.classList.add('app-mode');
   panel.classList.add('app-mode');
+  panel.hidden = false;
   updateAppModeViewportHeight();
+  requestAnimationFrame(updateAppModeViewportHeight);
   const backBtn = panel.querySelector('.app-mode-back');
   if (backBtn) backBtn.focus();
 }
@@ -550,9 +576,14 @@ function exitAppMode() {
  */
 function updateAppModeViewportHeight() {
   if (!liveAppModePanel) return;
-  if (window.visualViewport) {
-    liveAppModePanel.style.height = `${window.visualViewport.height}px`;
-  }
+  const height = window.visualViewport?.height;
+  // A zero or absent reading is not a viewport, it is a measurement
+  // taken at the wrong moment - and writing it to `style.height` would
+  // collapse the panel to nothing while `inset: 0` sat there ready to
+  // have sized it correctly. Leaving the property alone falls back to
+  // the stylesheet, which is the right answer whenever this is.
+  if (!Number.isFinite(height) || height <= 0) return;
+  liveAppModePanel.style.height = `${height}px`;
 }
 
 if (window.visualViewport) {
@@ -736,11 +767,46 @@ function endpointStateName(state) {
   }
 }
 
+/** The word on a panel's own status line, which is not always the name
+ * of the `SessionState` behind it.
+ *
+ * `Session::answer()` moves straight to `ANSWERING` and stays there for
+ * as long as the end sits off-hook with nothing on the line - which on
+ * /receive is from the moment the page opens until a call actually
+ * arrives, often for as long as somebody takes to pick up the other
+ * device. Printing "ANSWERING" through all of that claims a call that
+ * has not started (Dan, 10 Sep 2026: "Receive says answer before the
+ * ring has even started - should it not say idle").
+ *
+ * It also contradicted the caption directly beneath it, which has always
+ * read "Listening for a call" in exactly this state - see
+ * `endpointCaptionFor`. Two lines, one above the other, disagreeing
+ * about whether anything was happening.
+ *
+ * So the tally follows the carrier, not the enum: nothing on the line is
+ * IDLE, a carrier the end has not finished bringing up is ANSWERING, and
+ * `CONNECTED` speaks for itself. The state machine is untouched - this
+ * is a labelling rule, and `Session` keeps reporting exactly what it
+ * always did.
+ */
+function endpointStatusWord(state, carrier) {
+  if (state === SessionState.ANSWERING && !carrier) return 'IDLE';
+  return endpointStateName(state);
+}
+
 /** One word for a panel's own status line - the long combined string
  * (state/stage/turn/carrier) now lives only in the shared phase line
- * below, so the two are not saying almost the same thing twice. */
+ * below, so the two are not saying almost the same thing twice.
+ *
+ * Uses the same carrier-led rule as the two-device panel (see
+ * `endpointStatusWord`), and it shows up more sharply here: the answer
+ * pane is created and answered the instant the demo starts, so it read
+ * "ANSWERING" for the whole of the originating end's overture - eleven
+ * seconds of dial tone, DTMF and ringback during which the answering end
+ * has heard nothing at all, sitting beside a pane that is visibly still
+ * dialling. */
 function wiredShortStatus(status) {
-  return endpointStateName(status.state);
+  return endpointStatusWord(status.state, status.carrier);
 }
 
 /** The call's overall phase, shared above both panels rather than
@@ -855,8 +921,9 @@ async function startDemo() {
     wired.answer();
 
     startWiredWaterfall(wired);
+    // `enterAppModeFor` unhides it - see its own doc on why the order
+    // matters and why it is no longer the caller's to get wrong.
     enterAppModeFor(wiredPanel);
-    wiredPanel.hidden = false;
     // Auto-dial too - pressing Demo once is the entire demo, not the
     // first of several steps.
     dialWired();
@@ -1072,7 +1139,6 @@ async function startEndpointRoute(role) {
     ? 'This device dials out. There is no real telephone network behind this, so the digits are fixed and decorative - only the modem handshake and the connection underneath it are real.'
     : 'This device listens for a call and answers automatically - nothing to type.';
   wiredPanel.hidden = true;
-  endpointPanel.hidden = false;
   enterAppModeFor(endpointPanel);
   endpointStatus.textContent = 'Waiting for microphone permission';
   endpointCaption.textContent = '';
@@ -1098,7 +1164,7 @@ async function startEndpointRoute(role) {
       const { state, stage, carrier } = e.detail;
       lastEndpointState = state;
       lastEndpointCarrier = carrier;
-      endpointStatus.textContent = endpointStateName(state);
+      endpointStatus.textContent = endpointStatusWord(state, carrier);
       endpointCaption.textContent = endpointCaptionFor(role, state, stage, carrier);
       modemSignalDot.classList.toggle('signal-indicator__dot--active', carrier);
       const connected = state === SessionState.CONNECTED;
@@ -1239,5 +1305,24 @@ window.addEventListener('beforeunload', () => {
 // empty until the first click - a visitor who opens Sound help before
 // pressing anything should see that reflected accurately, not a blank list.
 renderSoundHelp();
+
+// The three launcher buttons ship `disabled` and are enabled here, at the
+// very end of this module, once every handler above is attached. See
+// index.html's own comment for the race this closes: they used to be
+// tappable from the moment the HTML painted, while this module and the
+// six it imports were still arriving, so an early tap on a cold mobile
+// connection hit nothing at all.
+//
+// Last statement before `initRouting`, and deliberately not earlier:
+// anything between this line and the listeners would be a window where
+// the button works only partly. Both run in the same task, so no frame is
+// ever painted with the launcher visible and its buttons dead.
+//
+// `route-start-block` needs no equivalent - it ships `hidden` and only
+// `showRouteStart` reveals it, so it cannot be pressed before this module
+// runs in the first place.
+for (const btn of [launchDemoBtn, launchOriginateBtn, launchReceiveBtn]) {
+  if (btn) btn.disabled = false;
+}
 
 initRouting();
