@@ -1140,6 +1140,27 @@ body.app-mode {
   inset: 0;
   z-index: 300;
   margin: 0;
+  /* Out of the column grid entirely.
+   *
+   * `.endpoint` is placed in the `feature` track further up this file,
+   * with `justify-self: center` and `max-width: 100%`. Those are right
+   * for the panel sitting in the page - and wrong the moment it becomes
+   * a full-viewport overlay, because they survive the switch: the rule
+   * above sets `position`, `inset` and the rest but says nothing about
+   * grid placement, so the placement keeps applying and the "full
+   * screen" view came out boxed into the feature track, centred, with
+   * its own border and scrollbar and black either side. It looked
+   * broken, which is what Dan reported on 10 Sep 2026 as "open
+   * originating and open receiving does not work" - it was in fact
+   * running, connected, with the microphone open, in a box two thirds of
+   * the way across the screen.
+   *
+   * Reset here rather than by narrowing the rule that sets them: those
+   * two lines are correct for every other state, and an overlay that
+   * ignores the page's column system is the point of an overlay. */
+  grid-column: auto;
+  justify-self: stretch;
+  max-width: none;
   display: flex;
   flex-direction: column;
   min-height: 0;

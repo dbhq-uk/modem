@@ -565,6 +565,13 @@ function enterAppModeFor(panel) {
   document.body.classList.add('app-mode');
   panel.classList.add('app-mode');
   panel.hidden = false;
+  // Hide the launcher explicitly rather than trusting the overlay to
+  // cover it. It did not: with the panel boxed into its grid track the
+  // launcher stayed in plain sight, still reading "Starting..." from the
+  // click that had already succeeded. Covering something is a visual
+  // accident; hiding it is the actual intent.
+  launcher.hidden = true;
+  routeStartBlock.hidden = true;
   updateAppModeViewportHeight();
   requestAnimationFrame(updateAppModeViewportHeight);
   const backBtn = panel.querySelector('.app-mode-back');
