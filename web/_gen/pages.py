@@ -96,6 +96,22 @@ def render_nav(current_id: str | None) -> str:
 # link to the source with GitHub's own mark beside it. Identical, word
 # for word, on all six pages and on 404.html.
 #
+# The byline is short on purpose. It used to carry the crate list and
+# "lives on GitHub" as well, which at the footer's type ran to three
+# centred lines of very uneven length - and centred text cannot be made
+# to flow, because you do not control where it breaks (Dan, 10 Sep 2026:
+# "balance the footer - work out how to make it flow nicely").
+#
+# Shortening it rather than restyling it, because the missing half was
+# duplication in the first place: "lives on GitHub" is the button
+# directly underneath, and the full crate list is a sentence on /about
+# ("Every crate in it - modem-core, modem-audio, modem-tui, modem-wasm -
+# and this page are open source under the MIT licence"). Nothing is lost
+# from the site; one line stops saying what the line below it says.
+#
+# What is left is short enough not to wrap at all above a phone, so there
+# is no rag to balance.
+#
 # It carried two labelled groups until 10 Sep 2026. "Also from DBHQ" went
 # first: /projects carries the same three links and is in the primary
 # nav, so repeating them in the footer of all seven pages said it twice
@@ -109,7 +125,7 @@ def render_nav(current_id: str | None) -> str:
 # space, and one orphaned word (Dan: "foot looks crap still"). Now one
 # marked link, said once.
 FOOTER = """<footer class="endorsement">
-  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. The full workspace - modem-core, modem-audio, modem-tui, modem-wasm and this page - lives on <a href="https://github.com/dbhq-uk/modem" rel="noopener">GitHub</a>, MIT licensed.</p>
+  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed.</p>
 
   <p class="endorsement__source">
     <a class="endorsement__github" href="https://github.com/dbhq-uk/modem" rel="noopener">

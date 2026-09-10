@@ -61,9 +61,9 @@ ICONS = (
     # A screen split into two panes - what the demo actually shows.
     ("Demo", '<rect x="2" y="4" width="20" height="16" rx="1"/><path d="M12 4v16"/>'),
     # A speaker pushing sound out.
-    ("Open originating modem", '<path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M17 8a5 5 0 0 1 0 8"/><path d="M20 5a9 9 0 0 1 0 14"/>'),
+    ("Originating modem", '<path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M17 8a5 5 0 0 1 0 8"/><path d="M20 5a9 9 0 0 1 0 14"/>'),
     # A microphone taking sound in.
-    ("Open receiving modem", '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v4"/>'),
+    ("Receiving modem", '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v4"/>'),
     # A handset going off-hook to place a call.
     ("Dial now", '<path d="M3 5a2 2 0 0 1 2-2h2l2 5-2 1a12 12 0 0 0 6 6l1-2 5 2v2a2 2 0 0 1-2 2A16 16 0 0 1 3 5Z"/>'),
     # Play.
