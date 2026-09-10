@@ -54,7 +54,14 @@ NAV_ITEMS = (
     ("explained", "Explained", "/explained"),
     ("prior-art", "Prior art", "/prior-art"),
     ("downloads", "Downloads", "/downloads"),
-    ("projects", "Projects", "/projects"),
+    # "DBHQ", not "Projects" (Dan, 10 Sep 2026). The page is titled "Also
+    # from DBHQ" and lists the practice and its two sibling experiments,
+    # so the nav item names the thing rather than describing the shape of
+    # the list. The id and the URL stay `projects`: the id is the internal
+    # key for aria-current, and changing the URL would break every link
+    # already pointing at /projects, including the sitemap and the
+    # sibling sites' own footers.
+    ("projects", "DBHQ", "/projects"),
     ("about", "About", "/about"),
 )
 

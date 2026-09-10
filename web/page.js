@@ -419,7 +419,7 @@ function showLanding() {
   // "Starting..." on a dead control.
   for (const [button, label] of LAUNCH_LABELS) {
     button.disabled = false;
-    button.textContent = label;
+    labelOf(button).textContent = label;
   }
   launcher.hidden = false;
   routeStartBlock.hidden = true;
@@ -436,7 +436,7 @@ function showRouteStart(route) {
   launcher.hidden = true;
   routeStartBlock.hidden = false;
   routeStartCopy.textContent = ROUTE_START_COPY[route];
-  routeStartBtn.textContent = ROUTE_START_LABEL[route];
+  labelOf(routeStartBtn).textContent = ROUTE_START_LABEL[route];
   // Re-enabled as well as relabelled: a previous attempt that failed left
   // it disabled and reading "Starting...", and this is the one path back
   // to a usable button.
@@ -470,7 +470,23 @@ async function startRoute(route) {
  * a pressed button can be put back exactly as it was if the route fails
  * to start. */
 const LAUNCH_BUTTONS = [launchDemoBtn, launchOriginateBtn, launchReceiveBtn].filter(Boolean);
-const LAUNCH_LABELS = new Map(LAUNCH_BUTTONS.map((b) => [b, b.textContent]));
+
+/** A button's own text node, never the button itself.
+ *
+ * These buttons are an icon plus a `<span>`, and assigning to
+ * `button.textContent` replaces *every* child - so restoring a label
+ * that way deleted the icon with it. `showLanding` runs on every load of
+ * the landing page, so the three launcher icons were being stripped
+ * before the first paint, on every visit. Found by counting them: ten in
+ * the file, seven in the DOM.
+ *
+ * Falls back to the button for anything without a span, so this is safe
+ * on a control that has no icon. */
+function labelOf(button) {
+  return button.querySelector('span') || button;
+}
+
+const LAUNCH_LABELS = new Map(LAUNCH_BUTTONS.map((b) => [b, labelOf(b).textContent]));
 
 /**
  * Starts a route from the landing page, and says so while it happens.
@@ -495,7 +511,7 @@ const LAUNCH_LABELS = new Map(LAUNCH_BUTTONS.map((b) => [b, b.textContent]));
 function launchRoute(button, route, path) {
   history.pushState(null, '', path);
   for (const b of LAUNCH_BUTTONS) b.disabled = true;
-  button.textContent = 'Starting...';
+  labelOf(button).textContent = 'Starting...';
   startRoute(route);
 }
 
@@ -509,7 +525,7 @@ routeStartBtn.addEventListener('click', () => {
   // Same reasoning as `launchRoute`: say it is starting rather than
   // leaving an empty page behind while the WASM and the worklet load.
   routeStartBtn.disabled = true;
-  routeStartBtn.textContent = 'Starting...';
+  labelOf(routeStartBtn).textContent = 'Starting...';
   startRoute(route);
 });
 

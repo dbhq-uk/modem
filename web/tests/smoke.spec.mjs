@@ -115,6 +115,30 @@ test.describe('the launcher', () => {
     }
   });
 
+  // page.js restores button labels (after "Starting...", and on the way
+  // back to the landing page), and it used to do that by assigning to
+  // `button.textContent` - which replaces every child, so it deleted the
+  // icon inside the button along with the old text. `showLanding` runs on
+  // every load of the landing page, so the three launcher icons were
+  // stripped before the first paint, every visit. The file had ten icons
+  // and the DOM had seven.
+  //
+  // Counting the served markup against the live DOM is what caught it,
+  // so that is what this asserts.
+  test('the icons in the markup survive into the DOM', async ({ page, request }) => {
+    const html = await (await request.get('/')).text();
+    const inMarkup = (html.match(/class="dial-button__icon"/g) || []).length;
+    expect(inMarkup).toBeGreaterThan(0);
+
+    await page.goto('/');
+    await expect(page.locator('.dial-button__icon')).toHaveCount(inMarkup);
+
+    // And specifically the three that were being stripped.
+    for (const id of ['#launch-demo-btn', '#launch-originate-btn', '#launch-receive-btn']) {
+      await expect(page.locator(`${id} .dial-button__icon`)).toHaveCount(1);
+    }
+  });
+
   test('Demo fetches the WASM from the site root, not the route directory', async ({ page }) => {
     const errors = [];
     failOnPageErrors(page, errors);

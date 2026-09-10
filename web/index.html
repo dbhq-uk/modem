@@ -112,7 +112,7 @@
   <a class="site-nav__link" href="/explained">Explained</a>
   <a class="site-nav__link" href="/prior-art">Prior art</a>
   <a class="site-nav__link" href="/downloads">Downloads</a>
-  <a class="site-nav__link" href="/projects">Projects</a>
+  <a class="site-nav__link" href="/projects">DBHQ</a>
   <a class="site-nav__link" href="/about">About</a>
 </nav>
 <!-- END generated: nav -->
@@ -226,7 +226,7 @@
            set per route by page.js. -->
       <div class="demo__controls route-start" id="route-start-block" hidden>
         <p id="route-start-copy"></p>
-        <button class="dial-button" id="route-start-btn" type="button">Start</button>
+        <button class="dial-button" id="route-start-btn" type="button"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 4l14 8-14 8V4Z"/></svg><span>Start</span></button>
       </div>
 
       <noscript><p>The demo needs JavaScript. Everything else on this page reads fine without it.</p></noscript>
@@ -244,8 +244,8 @@
           <ul class="sound-help__checkpoints" id="sound-help-checkpoints"></ul>
           <p class="sound-help__state" id="sound-help-state" role="status"></p>
           <div class="demo__controls">
-            <button type="button" class="dial-button dial-button--secondary" id="resume-sound-btn">Resume sound</button>
-            <button type="button" class="dial-button dial-button--secondary" id="copy-diagnostics-btn">Copy diagnostics</button>
+            <button type="button" class="dial-button dial-button--secondary" id="resume-sound-btn"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M17 9a4 4 0 0 1 0 6"/></svg><span>Resume sound</span></button>
+            <button type="button" class="dial-button dial-button--secondary" id="copy-diagnostics-btn"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="9" y="9" width="12" height="12" rx="1"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg><span>Copy diagnostics</span></button>
           </div>
           <p class="diagnostic" id="copy-diagnostics-status" role="status"></p>
         </div>
@@ -257,7 +257,7 @@
            Hidden until page.js actually starts the route; see its own
            doc on the landing/route-start/live split. -->
       <div class="endpoint wired" id="wired-panel" aria-labelledby="wired-heading" hidden>
-        <button type="button" class="dial-button dial-button--secondary app-mode-back" id="app-mode-back-btn">Back</button>
+        <button type="button" class="dial-button dial-button--secondary app-mode-back" id="app-mode-back-btn"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg><span>Back</span></button>
         <h3 class="scenario__label" id="wired-heading">Demo - both ends live, right here</h3>
         <p class="wired__intro">Two real sessions, cross-wired in software exactly as the binary's own split-screen demo wires them - the link never crosses the air, so this is genuinely <span class="mode-badge">DEMO MODE</span>, the same honesty the terminal app's own status bar carries. Answer picked up and originate dialled automatically; redial with different digits below, or hang up and stop whenever you like.</p>
 
@@ -317,7 +317,7 @@
            endpoint, a raw microphone, role fixed by the route rather
            than chosen here. Hidden until page.js starts it. -->
       <div class="endpoint" id="endpoint-panel" hidden aria-labelledby="endpoint-heading">
-        <button type="button" class="dial-button dial-button--secondary app-mode-back" id="endpoint-back-btn">Back</button>
+        <button type="button" class="dial-button dial-button--secondary app-mode-back" id="endpoint-back-btn"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg><span>Back</span></button>
         <h3 class="scenario__label" id="endpoint-heading"></h3>
         <p id="endpoint-intro"></p>
 
@@ -367,7 +367,7 @@
                2026: "it starts dialling straight away which doesn't give
                you time to sort the second device"). Hidden entirely on
                /receive, which has nothing to dial. -->
-          <button type="button" class="dial-button" id="endpoint-dial" hidden>Dial now</button>
+          <button type="button" class="dial-button" id="endpoint-dial" hidden><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5a2 2 0 0 1 2-2h2l2 5-2 1a12 12 0 0 0 6 6l1-2 5 2v2a2 2 0 0 1-2 2A16 16 0 0 1 3 5Z"/></svg><span>Dial now</span></button>
           <button type="button" id="endpoint-hangup" disabled>Hang up</button>
           <button type="button" id="endpoint-stop">Stop</button>
         </div>
@@ -527,7 +527,7 @@
     <section class="explainer-teaser" aria-labelledby="explainer-teaser-heading">
       <h2 id="explainer-teaser-heading">Why dial-up sounded like that</h2>
       <p>Nine phases make up the overture above - dial tone, DTMF, ringback, the ANSam answer tone and more - each rendered live by the same code that runs the connection, not a recording.</p>
-      <p><a class="dial-button" href="/explained">Hear every phase explained</a></p>
+      <p><a class="dial-button" href="/explained"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 8a6 6 0 1 1 12 0c0 3-2 4-3 6s-1 4-3 4a3 3 0 0 1-3-3"/><path d="M9 8a3 3 0 0 1 6 0"/></svg><span>Hear every phase explained</span></a></p>
     </section>
 
   </main>

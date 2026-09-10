@@ -54,8 +54,17 @@
    'self' already covers it, because nothing is fetched at all), and at
    nav size reads close enough to a geometric grotesque like Satoshi. */
 :root {
-  --col-content: 42rem;
-  --col-feature: 62rem;
+  /* Widened from 42rem/62rem on 10 Sep 2026 (Dan: "can we make page
+     wider and consistent across the site"). 42rem is 672px, which at
+     this page's monospace is almost exactly the 70ch the prose measure
+     allowed - so the column and the measure coincided and the page read
+     as narrow at every viewport above a tablet.
+     46rem gives about 76ch. The measure below moves with it rather than
+     staying at 70: if prose stopped short of the column, an h2's own
+     border-bottom would run past the end of the paragraph under it, and
+     the page would look wider without reading wider. */
+  --col-content: 46rem;
+  --col-feature: 72rem;
   /* rem, not the 4ch --modem-space-md this started as, and for exactly
      the reason the paragraph above gives for the content column: `ch`
      resolves against each element's own font-size, so a shared ch
@@ -404,7 +413,15 @@ h3 {
    follows each element's own font size, which is what a measure means. */
 p,
 li {
-  max-width: 70ch;
+  /* Deliberately a little WIDER than --col-content, so inside the
+     content column the column wins and a paragraph ends exactly where
+     the heading rule above it does. Measured: 76ch left prose 23px short
+     of the h2's own border-bottom, which reads as a mistake rather than
+     as a measure.
+     It still does real work outside that column - `.endpoint` sits in
+     the wider `feature` track, and this is what stops its prose running
+     to a hundred characters there. */
+  max-width: 80ch;
 }
 
 /* ---------------------------------------------------------------------
@@ -1755,7 +1772,14 @@ body.app-mode {
  * crap still"). Saying it once, with a mark that makes it findable at a
  * glance, is the whole job. */
 .endorsement__source {
-  margin: var(--modem-space-md) 0 0 0;
+  /* `margin-inline: auto`, not 0. This is a <p>, so the global
+     `p, li { max-width }` measure applies to it - and at the footer's
+     smaller type that measure is narrower than the column it sits in.
+     With a zero inline margin the paragraph sat at the left of the
+     track, so `text-align: center` centred the button inside a box that
+     was itself off-centre, and the button landed left of the byline
+     above it (Dan, 10 Sep 2026). */
+  margin: var(--modem-space-md) auto 0 auto;
 }
 
 .endorsement__github {
