@@ -361,6 +361,97 @@ pub fn duplex_leak(far: &[f32], near: &[f32], near_gain: f32) -> Vec<f32> {
         .collect()
 }
 
+/// Models a browser's **noise suppression**, which is the impairment
+/// most likely to stop an acoustic call working and the only one in this
+/// module that is aimed squarely at what this modem transmits.
+///
+/// # Why a modem should care about this at all
+///
+/// Noise suppressors work by estimating a *stationary* noise floor per
+/// frequency band and subtracting it. Stationary is the operative word:
+/// the estimator learns whatever has been sitting at a constant level
+/// for a while, and removes it, on the reasoning that speech is
+/// non-stationary and fan hum is not.
+///
+/// A Bell 103 mark tone is about as stationary as a signal gets. Worse,
+/// this project's own half-duplex discipline transmits *continuous* idle
+/// mark from whichever end does not hold the turn (see `session.rs`) -
+/// so the far end spends most of a call broadcasting exactly the signal
+/// a noise suppressor is built to learn and delete. By the time the turn
+/// changes hands and that tone starts carrying data, a suppressor has
+/// had seconds to train on it.
+///
+/// `web/modem.js` asks for `noiseSuppression: {exact: false}` and
+/// reports when a device refuses, which is the real defence. This models
+/// what happens when that request is not honoured - iOS Safari has
+/// historically ignored it, and a Bluetooth headset routes through the
+/// system's own voice pipeline regardless of what the page asked for.
+///
+/// # The model
+///
+/// One Goertzel-style envelope per band is overkill for the question
+/// being asked. Instead: a leaky per-sample estimate of the signal's
+/// mean magnitude with time constant `learn_secs`, subtracted from the
+/// instantaneous magnitude and floored at zero, sign preserved. That is
+/// spectral subtraction collapsed to one band - crude in the frequency
+/// domain, and faithful in the only respect that matters here, which is
+/// that a sustained constant-amplitude tone is attenuated towards
+/// nothing while a change in level passes through.
+///
+/// `strength` is the fraction of the learned floor actually subtracted:
+/// 0.0 leaves the signal alone, 1.0 subtracts the whole estimate.
+pub fn noise_suppression(samples: &mut [f32], rate: f64, learn_secs: f64, strength: f64) {
+    if strength <= 0.0 || samples.is_empty() {
+        return;
+    }
+    // One-pole smoother: alpha such that the estimate reaches 1 - 1/e of
+    // a step in `learn_secs`.
+    let alpha = 1.0 - pow(core::f64::consts::E, -1.0 / (learn_secs * rate));
+    let mut floor = 0.0f64;
+    for s in samples.iter_mut() {
+        let mag = (*s as f64).abs();
+        floor += alpha * (mag - floor);
+        let reduced = mag - strength * floor;
+        let reduced = if reduced > 0.0 { reduced } else { 0.0 };
+        *s = if *s < 0.0 {
+            -reduced as f32
+        } else {
+            reduced as f32
+        };
+    }
+}
+
+/// Models **automatic gain control**: the third of the three things
+/// `web/modem.js` asks a browser to turn off.
+///
+/// An AGC drives the signal towards a target level, which is helpful for
+/// speech and unhelpful here for two reasons. It destroys the absolute
+/// level information a carrier detector uses to decide whether anything
+/// is on the line at all, and - because it reacts over tens of
+/// milliseconds, which at 300 baud is several symbol periods - it
+/// modulates the amplitude *within* a burst, turning a clean FSK
+/// envelope into one that ramps.
+///
+/// `target` is the RMS the control loop aims for; `attack_secs` is its
+/// time constant.
+pub fn agc(samples: &mut [f32], rate: f64, target: f32, attack_secs: f64) {
+    if samples.is_empty() || target <= 0.0 {
+        return;
+    }
+    let alpha = 1.0 - pow(core::f64::consts::E, -1.0 / (attack_secs * rate));
+    let mut env = 0.0f64;
+    for s in samples.iter_mut() {
+        let mag = (*s as f64).abs();
+        env += alpha * (mag - env);
+        // Below this the loop is looking at silence, and an AGC that
+        // divides by it manufactures enormous gain out of nothing - real
+        // ones hold their gain instead.
+        let gain = if env > 1e-4 { target as f64 / env } else { 1.0 };
+        let gain = gain.clamp(0.0, 32.0);
+        *s = (*s as f64 * gain) as f32;
+    }
+}
+
 // ---------------------------------------------------------------------
 // Byte error rate
 // ---------------------------------------------------------------------
