@@ -266,7 +266,7 @@ jobs:
           # Every page pages.py touches, explicitly - a generator that
           # gains a new page and forgets to list it here would pass this
           # check while silently shipping a stale region on that page.
-          if ! git diff --exit-code -- brand/ web/index.html web/explained.html web/prior-art.html web/downloads.html web/projects.html web/about.html web/404.html; then
+          if ! git diff --exit-code -- brand/ web/index.html web/explained.html web/research.html web/downloads.html web/projects.html web/about.html web/404.html; then
             echo
             echo "A generated file differs from what its generator produces."
             echo "Either it was hand-edited, or a generator changed and nobody"

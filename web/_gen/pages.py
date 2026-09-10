@@ -3,7 +3,7 @@
 pages: the primary nav, the footer, and the consent/analytics block.
 
 Edit this, then regenerate - never hand-edit the three marked regions in
-web/index.html, web/explained.html, web/prior-art.html, web/downloads.html,
+web/index.html, web/explained.html, web/research.html, web/downloads.html,
 web/projects.html, web/about.html or web/404.html. Same rule
 web/_gen/frames.py already follows for the two rendered terminal frames.
 
@@ -52,7 +52,7 @@ NAV_ITEMS = (
     # nothing.
     ("try", "Hear it", "/"),
     ("explained", "Explained", "/explained"),
-    ("prior-art", "Prior art", "/prior-art"),
+    ("research", "Research", "/research"),
     ("downloads", "Downloads", "/downloads"),
     # "DBHQ", not "Projects" (Dan, 10 Sep 2026). The page is titled "Also
     # from DBHQ" and lists the practice and its two sibling experiments,
@@ -72,7 +72,7 @@ NAV_ITEMS = (
 PAGES = {
     "index.html": {"nav_id": "try", "regions": ("nav", "footer", "consent")},
     "explained.html": {"nav_id": "explained", "regions": ("nav", "footer", "consent")},
-    "prior-art.html": {"nav_id": "prior-art", "regions": ("nav", "footer", "consent")},
+    "research.html": {"nav_id": "research", "regions": ("nav", "footer", "consent")},
     "downloads.html": {"nav_id": "downloads", "regions": ("nav", "footer", "consent")},
     "projects.html": {"nav_id": "projects", "regions": ("nav", "footer", "consent")},
     "about.html": {"nav_id": "about", "regions": ("nav", "footer", "consent")},

@@ -121,7 +121,7 @@ jobs:
       - name: The six pages must be serving
         run: |
           set -euo pipefail
-          for path in "" explained prior-art downloads projects about; do
+          for path in "" explained research downloads projects about; do
             CODE=""
             for i in $(seq 1 10); do
               CODE=$(curl -sL -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/${path}?cb=${GITHUB_SHA}-$i")

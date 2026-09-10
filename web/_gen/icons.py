@@ -37,7 +37,7 @@ WEB = HERE.parent
 PAGES = (
     "index.html",
     "explained.html",
-    "prior-art.html",
+    "research.html",
     "downloads.html",
     "projects.html",
     "about.html",
@@ -80,7 +80,7 @@ ICONS = (
     # An ear, for the pages about listening.
     ("Hear every phase explained", '<path d="M6 8a6 6 0 1 1 12 0c0 3-2 4-3 6s-1 4-3 4a3 3 0 0 1-3-3"/><path d="M9 8a3 3 0 0 1 6 0"/>'),
     ("Read the phase-by-phase explainer", '<path d="M4 5a2 2 0 0 1 2-2h6v18H6a2 2 0 0 1-2-2V5Z"/><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/>'),
-    ("Standards, prior art and history", '<path d="M4 5a2 2 0 0 1 2-2h6v18H6a2 2 0 0 1-2-2V5Z"/><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/>'),
+    ("Standards, research and history", '<path d="M4 5a2 2 0 0 1 2-2h6v18H6a2 2 0 0 1-2-2V5Z"/><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/>'),
     ("Try the demo", '<rect x="2" y="4" width="20" height="16" rx="1"/><path d="M12 4v16"/>'),
     # Downward arrow into a tray.
     ("Releases on GitHub", '<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/>'),

@@ -14,7 +14,14 @@
 /index.html   /   301
 
 # links.html was absorbed into explained.html entirely on 9 Sep 2026 (see
-# the design spec) - the standards/prior-art/history content plus the
+# the design spec) - the standards/research/history content plus the
 # nine phases, now with a URL of their own. The file itself is gone;
 # anyone with the old URL still lands somewhere real.
 /links   /explained   301
+
+# /prior-art was renamed /research on 10 Sep 2026 (Dan). Same page, same
+# content; "prior art" named the legal-ish concept rather than what the
+# page is - standards, related tools and the history. Nothing was indexed
+# under the old URL (GSC showed 0 of 6 pages indexed at the time), so this
+# is mostly for anyone holding a link.
+/prior-art   /research   301

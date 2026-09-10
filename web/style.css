@@ -421,40 +421,36 @@ h3 {
   margin: 0;
 }
 
-/* Measure, which the grid deliberately does not own. A track is a width
-   in pixels; a comfortable line is a count of characters, and the two
-   only agree at one font size. Removing this rule (it was
-   `p { max-width: 70ch }`) on the theory the content track had replaced
-   it was wrong in both directions, measured: the footer sets 0.8rem
-   type, so its byline ran 88 characters inside the same 42rem track,
-   and `.endpoint` sits in the wider `feature` track, so its prose ran
-   to about 99 - and to the full viewport once the panel goes
-   fixed-position in app mode. `ch` is right here precisely because it
-   follows each element's own font size, which is what a measure means. */
+/* Measure - deliberately the same width as the column, so the page has
+   one right edge as well as one left one.
+ *
+ * This was 80ch on `p, li` and 47rem on the headings, which is a
+ * comfortable reading measure and was still wrong here, measured at
+ * 1440px: prose ended at x=992 while the terminal frames, the endpoint
+ * panels and the resource lists all ran to x=1216. Two right edges,
+ * 224px apart, on all six pages - the same misalignment that had already
+ * been fixed on the left, showing up on the right instead, and what
+ * "margins all over the place" (Dan, 10 Sep 2026) actually names.
+ *
+ * The column cannot come in to meet the text: it is 62rem because that
+ * is what a 100-column terminal frame needs at the base size, and
+ * narrowing it clips the frames. So the text goes out to meet the
+ * column. Prose lines are about 100 characters as a result, past the
+ * usual 45-75 band - which is the trade, taken knowingly: this is a
+ * monospace page whose whole visual argument is a terminal, 100 columns
+ * is that terminal's own unit, and the generous line-height carries it.
+ *
+ * Element-specific caps still win where they are narrower and exist for
+ * their own reasons - the footer's 62ch at 0.8rem type, `.endpoint`'s
+ * 60ch prose (that panel goes fixed-position and full-viewport in app
+ * mode, where no column constrains it at all). Those are the two cases
+ * that broke the last time this rule was removed outright; capping to
+ * the column rather than deleting the cap keeps them covered. */
 p,
-li {
-  /* The reading measure, now that the column itself is set by the
-     widest artefact rather than by what is comfortable to read. Applies
-     to the headings too: an h2 carries a border-bottom, and a rule that
-     ran the full 62rem while the paragraph under it stopped at 80ch
-     would be the same misalignment this change exists to remove, just on
-     the right edge instead of the left. */
-  max-width: 80ch;
-}
-
-/* The same measure as the prose above, but in rem rather than ch.
- *
- * `ch` is relative to each element's own font-size - the reason this
- * file's very first note gives for sizing the column in rem - so 80ch on
- * an h2 at twice the body size is about 1500px and the cap never bites.
- * Measured: with the ch cap the h2 rules still ran the full 992px column
- * while the paragraphs under them stopped at 750px.
- *
- * 47rem is that 750px, so a heading's border-bottom now ends where the
- * text beneath it does. */
+li,
 h2,
 h3 {
-  max-width: 47rem;
+  max-width: var(--col-content);
 }
 
 /* ---------------------------------------------------------------------

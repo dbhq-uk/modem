@@ -23,7 +23,7 @@
 // thing, not a mock.
 import { test, expect } from '@playwright/test';
 
-const PAGES = ['/', '/explained', '/prior-art', '/downloads', '/projects', '/about'];
+const PAGES = ['/', '/explained', '/research', '/downloads', '/projects', '/about'];
 
 /** Dismisses the consent dialog if it is showing.
  *
