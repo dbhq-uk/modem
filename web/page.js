@@ -17,40 +17,20 @@ import {
 import { Waterfall } from './waterfall.js';
 import { appendTerminalLine } from './terminal-line.js';
 
-// Registered before anything else here can throw, so a failure while
-// this module is still evaluating is *visible* rather than silent.
+// The window/unhandledrejection listeners that report a fatal startup
+// failure live in boot.js, NOT here.
 //
-// A `type="module"` script that throws at top level stops dead: no
-// handlers are attached, so every button on the page does nothing at
-// all, with no console entry a visitor would ever see and no network
-// request to notice. That happened live on 9 Sep 2026 - clicking Demo
-// did nothing, and the cause (a null canvas passed to `new Waterfall`)
-// was three hundred lines away from the symptom. The listener below
-// cannot prevent that, but it turns "nothing happens" into a line of
-// text naming the file and the line, which is the difference between a
-// five-minute diagnosis and an afternoon of one.
-function reportFatal(what) {
-  const el = document.getElementById('demo-diagnostic') || document.getElementById('mic-diagnostic');
-  if (!el || el.textContent) return;
-  el.textContent = `The demo could not start: ${what}`;
-  el.className = 'diagnostic diagnostic--warning';
-  el.hidden = false;
-}
-
-window.addEventListener('error', (e) => {
-  reportFatal(`${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`);
-});
-
-// Rejections as well as throws. The three launcher buttons call
-// `startRoute(...)` without awaiting it - deliberately, since nothing
-// after the call needs the result - so anything that rejects inside it
-// and is not caught there would otherwise go nowhere at all: no console
-// entry a visitor sees, no message on the page, just a button that
-// appears to do nothing. `startDemo` does catch its own failures and
-// says so; this is the backstop for the ones that do not.
-window.addEventListener('unhandledrejection', (e) => {
-  reportFatal(e.reason?.message || String(e.reason));
-});
+// They used to be the first statements in this file, under a comment
+// claiming they were "registered before anything else here can throw".
+// That was false in the case that matters most: a `type="module"` script
+// runs its imports before a single line of its own body, so if this file
+// or any of the six it imports fails to load - a transient mobile
+// connection is enough - the body never executes, the listeners are never
+// registered, and the page is inert with nothing to say. Codex caught the
+// false claim reviewing the mobile flakiness on 10 Sep 2026.
+//
+// boot.js imports nothing and is loaded ahead of this file, so its
+// listeners exist even when this module's own graph never arrives.
 
 // The single fix most likely to matter on iOS - see audio-diagnostics.js's
 // own doc - set as early as the module can run, well before any click.

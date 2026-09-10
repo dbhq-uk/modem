@@ -15,6 +15,24 @@ import { ensurePlaybackAudioSession, withTimeout, AudioDiagnostics } from './aud
 export { Duplex, Role, SessionState, STAGE_NAMES };
 
 const RESUME_TIMEOUT_MS = 4000;
+/**
+ * How long to wait for the worklet to report its Session ready before
+ * giving up on it.
+ *
+ * `ready` used to be awaited bare, and nothing on the other side is
+ * guaranteed to settle it: `processorerror` only records a diagnostic, it
+ * does not reject. So a worklet that was constructed but never ran - a
+ * rendering thread killed after an interruption, a compile that never
+ * finished - left `init` pending for ever, and with it the whole start
+ * sequence. No panel, no error, no timeout: the demo simply never
+ * appeared, which is indistinguishable from a dead button.
+ *
+ * Ten seconds is deliberately generous: this waits on a WASM compile
+ * inside the worklet on whatever phone is running it, which is slow and
+ * legitimately variable. The number exists to convert "hangs for ever"
+ * into "says what happened", not to police performance.
+ */
+const WORKLET_READY_TIMEOUT_MS = 10000;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -100,6 +118,24 @@ export class WiredEndpoint extends EventTarget {
     const sessionResult = ensurePlaybackAudioSession();
     if (!sessionResult.ok) this.diagnostics.log(`audioSession not set to 'playback': ${sessionResult.reason}`);
     const ctx = new AudioContextCtor();
+    // Published immediately, not at the end of `init`, because two things
+    // reach for it during the seconds this function then spends fetching
+    // WASM and loading the worklet:
+    //
+    //   - the page's own foreground handler calls `resumeIfSuspended()`
+    //     on visibilitychange. With `this.ctx` still null it did nothing,
+    //     so a phone backgrounded and restored during that window
+    //     consumed its one resume attempt and carried on with a
+    //     suspended context.
+    //   - `stop()` can only close `this.ctx`. A fetch or `addModule`
+    //     rejection before the old assignment left the context alive with
+    //     nothing holding it, so repeated failed starts accumulated
+    //     AudioContexts until a phone hit its limit.
+    //
+    // Both were found by Codex reviewing the mobile flakiness, 10 Sep
+    // 2026. Assigning here costs nothing: every other use is guarded on
+    // the fields set further down.
+    this.ctx = ctx;
     this.diagnostics.recordState(ctx);
     // Must happen here - the very first statement after construction,
     // still synchronous, before this function's first `await` - or the
@@ -149,7 +185,8 @@ export class WiredEndpoint extends EventTarget {
     // vanished with nothing on the port and nothing in the console.
     node.addEventListener('processorerror', (event) => this.diagnostics.onProcessorError(event));
 
-    this.ctx = ctx;
+    // `this.ctx` is already set, up where the context was created - see
+    // the note there.
     this.node = node;
 
     const ready = new Promise((resolve, reject) => {
@@ -158,7 +195,11 @@ export class WiredEndpoint extends EventTarget {
     });
     // Transferred, not copied - see modem.js's identical `init` for why.
     node.port.postMessage({ type: 'wasm', bytes: wasmBytes, duplex }, [wasmBytes]);
-    await ready;
+    await withTimeout(
+      ready,
+      WORKLET_READY_TIMEOUT_MS,
+      'the audio worklet never reported both Sessions ready - see Sound help for what the pipeline did manage',
+    );
     this.diagnostics.mark('wasmReady');
 
     // Always connected: an idle pair transmits silence, never anything
