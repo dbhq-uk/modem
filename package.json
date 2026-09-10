@@ -1,0 +1,11 @@
+{
+  "name": "modem-web-tests",
+  "private": true,
+  "description": "Browser smoke tests for modem.dbhq.uk. No build step and no runtime dependencies - the site is plain HTML, CSS and ES modules. This exists only so Playwright has somewhere to be declared.",
+  "scripts": {
+    "smoke": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.0"
+  }
+}

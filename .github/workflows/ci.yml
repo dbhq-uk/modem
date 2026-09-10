@@ -270,3 +270,51 @@ jobs:
       - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Browser smoke tests: the site actually working, in a real browser,
+  # against the exact tree the deploy uploads.
+  #
+  # Added 10 Sep 2026 because every check in this file passed through four
+  # consecutive shipped defects that made the page do nothing - a null
+  # canvas that killed page.js outright, a WASM URL that 404ed from the
+  # landing page but not from a direct link, launcher buttons that shipped
+  # disabled and a cached script that never enabled them, and a status
+  # tally contradicting its own caption. Each one served a perfect 200
+  # while the demo was dead, which is exactly what a check for "the file
+  # exists and the URL returns 200" cannot see. Dan found all four.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install audio and browser dependencies
+        # Chromium needs an audio output device or `audioWorklet.addModule`
+        # never settles - the demo cannot start and the failure looks like
+        # a hang rather than an error. A dummy ALSA sink is enough; there
+        # is nothing to listen to, only something to render into.
+        run: |
+          set -euo pipefail
+          sudo rm -f /etc/apt/sources.list.d/*google* || true
+          sudo apt-get update || true
+          sudo apt-get install -y alsa-utils libasound2-dev
+          sudo modprobe snd-dummy || true
+      - name: Build the worklet artifact
+        run: cargo build --release --target wasm32-unknown-unknown -p modem-wasm --no-default-features
+      - name: Assemble the deployable tree
+        run: ./scripts/build-dist.sh
+      - run: npm ci
+      - run: npx playwright install chromium --with-deps
+      - name: Smoke test the assembled site
+        run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            test-results/
+          retention-days: 7

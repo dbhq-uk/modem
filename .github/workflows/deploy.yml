@@ -58,72 +58,13 @@ jobs:
       # servable. Assembled explicitly rather than uploading the whole tree:
       # this is a public repo and the source has no business being served.
       - name: Assemble the upload
-        run: |
-          set -euo pipefail
-          mkdir -p dist/web dist/brand
-          cp web/*.html web/*.js web/*.css web/*.png web/*.webp web/*.avif dist/web/ 2>/dev/null || true
-          # The worklet artifact comes from the build above, not from the
-          # tree: web/modem.wasm is gitignored, so on a fresh checkout it
-          # does not exist at all. It used to be swept up by the glob
-          # above, where `|| true` swallowed its absence and shipped a
-          # page whose demo 404ed on its own payload. No `|| true` here -
-          # if this file is missing the deploy must stop.
-          cp target/wasm32-unknown-unknown/release/modem_wasm.wasm dist/web/modem.wasm
-          # _headers, _redirects and manifest.json need naming
-          # explicitly: none has a glob-friendly extension. _headers
-          # carries the CSP that permits WASM instantiation - without it
-          # the demo is blocked at the edge. _redirects is what makes
-          # /demo, /originate and /receive serve index.html while
-          # keeping the URL - without it those three routes 404.
-          cp web/_headers web/_redirects web/manifest.json web/robots.txt web/sitemap.xml dist/web/
-          cp brand/tokens.css brand/icon.svg brand/icon-*.png brand/favicon.ico dist/brand/
-          cp brand/wordmark.svg dist/brand/ 2>/dev/null || true
-          # The page is served at the root, not at /web/.
-          mv dist/web/* dist/
-          rmdir dist/web
-
-          # The three routes are real directories, not _redirects rewrites.
-          # Cloudflare Pages would not honour a 200 rewrite for them:
-          # rewriting /demo to /index.html canonicalised straight to /, and
-          # rewriting to /app.html went to /app - both times discarding the
-          # path that page.js reads to decide which route it is, which
-          # silently broke sharing a /receive link. Each directory gets a
-          # copy of the one index.html with <base href="/"> injected, so its
-          # relative assets still resolve from the root while
-          # location.pathname stays /demo/, /originate/ or /receive/.
-          # Canonical and og:url also need to be per-route, not copied
-          # verbatim from index.html's own "/" - a route is real,
-          # separately-listed content (see web/sitemap.xml), and its
-          # canonical has to say so itself. Getting this wrong silently
-          # tells search engines every one of /demo, /originate and
-          # /receive is a duplicate of "/", which is the opposite of
-          # what listing them in the sitemap is for. Cloudflare Pages
-          # 308s the slash-less path to this one (each route is a real
-          # directory), so the trailing-slash form is the one and only
-          # canonical for each - see the SEO task's own note on why
-          # /demo and /demo/ must not both be canonical.
-          python3 - <<'PY'
-          from pathlib import Path
-          src = Path('dist/index.html').read_text()
-          assert '<base' not in src, 'index.html already has a <base>; rework this step'
-          out = src.replace('<head>', '<head>\n<base href="/">', 1)
-          canonical = '<link rel="canonical" href="https://modem.dbhq.uk/">'
-          og_url = '<meta property="og:url" content="https://modem.dbhq.uk/">'
-          assert out.count(canonical) == 1, 'expected exactly one canonical link to rewrite per route'
-          assert out.count(og_url) == 1, 'expected exactly one og:url meta to rewrite per route'
-          for route in ('demo', 'originate', 'receive'):
-              d = Path('dist') / route
-              d.mkdir(parents=True, exist_ok=True)
-              route_out = out.replace(
-                  canonical, f'<link rel="canonical" href="https://modem.dbhq.uk/{route}/">',
-              ).replace(
-                  og_url, f'<meta property="og:url" content="https://modem.dbhq.uk/{route}/">',
-              )
-              (d / 'index.html').write_text(route_out)
-              print('wrote', d / 'index.html')
-          PY
-
-          ls -la dist
+        # scripts/build-dist.sh, not an inline copy of it: the smoke tests
+        # in ci.yml assemble the tree the same way and drive a browser at
+        # it, so the thing tested is the thing shipped. Two copies of this
+        # would drift the first time either changed, and the route
+        # directories it builds - with their injected <base href="/"> -
+        # are part of what those tests check.
+        run: ./scripts/build-dist.sh
 
       - name: Deploy to Cloudflare Pages
         env:

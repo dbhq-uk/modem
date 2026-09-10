@@ -8,3 +8,10 @@
 /web/modem.wasm
 /web/brand
 .wrangler/
+
+# Playwright: browsers live in a shared cache, results and reports are
+# per-run output.
+/node_modules/
+/dist/
+/test-results/
+/playwright-report/

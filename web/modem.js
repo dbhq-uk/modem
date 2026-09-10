@@ -173,7 +173,18 @@ export class ModemEndpoint extends EventTarget {
     const wasmBytes = await response.arrayBuffer();
     this.diagnostics.mark('fetched');
 
-    await ctx.audioWorklet.addModule(workletUrl);
+    // Deadlined for the same reason as the readiness wait below:
+    // `addModule` has to reach the audio rendering thread, and if that
+    // thread never starts - no output device, an interruption, a
+    // headless browser with no audio at all - the promise simply never
+    // settles. Found by the smoke tests hanging here for 25 seconds with
+    // no error and no panel, which is precisely what a visitor would
+    // have seen.
+    await withTimeout(
+      ctx.audioWorklet.addModule(workletUrl),
+      WORKLET_READY_TIMEOUT_MS,
+      'the browser never loaded the audio worklet module - it may have no audio output available',
+    );
     this.diagnostics.mark('moduleAdded');
     const node = new AudioWorkletNode(ctx, 'modem-processor', {
       numberOfInputs: 1,
