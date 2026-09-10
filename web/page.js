@@ -9,6 +9,7 @@ import { ModemEndpoint, summariseMicDiagnostics } from './modem.js';
 import { WiredEndpoint, decode as decodeWired } from './wired.js';
 import {
   ensurePlaybackAudioSession,
+  ensureCaptureAudioSession,
   attachSecurityPolicyListener,
   cspViolations,
   computeRms,
@@ -299,7 +300,13 @@ resumeSoundBtn.addEventListener('click', () => {
   // resume() on a context that is already running, and this button
   // exists specifically for the case where the automatic path did not
   // work and only a real gesture will.
-  ensurePlaybackAudioSession();
+  // The category that matches what is actually running. Unconditionally
+  // re-asserting `playback` here would, on iOS, take a live endpoint's
+  // microphone out from under it: `playback` is output-only there, and
+  // this button is most likely to be pressed *during* a call that is not
+  // working. See ensureCaptureAudioSession's own doc.
+  if (endpoint) ensureCaptureAudioSession();
+  else ensurePlaybackAudioSession();
   if (wired && wired.ctx) {
     wired.ctx.resume().catch((err) => {
       wired.diagnostics.resumeError = String(err && err.message ? err.message : err);
@@ -1050,6 +1057,9 @@ async function teardownWired() {
   lastWiredA = null;
   lastWiredB = null;
   stopWiredWaterfall();
+  // Leaving app mode is part of hiding the panel, not a separate step a
+  // caller has to remember - see teardownEndpoint's identical guard.
+  if (liveAppModePanel === wiredPanel) exitAppMode();
   wiredPanel.hidden = true;
   wiredLogA.innerHTML = '';
   wiredLogB.innerHTML = '';
@@ -1074,7 +1084,14 @@ wiredHangupBtn.addEventListener('click', () => {
   if (wired) wired.hangup();
 });
 
-wiredStopBtn.addEventListener('click', teardownWired);
+// exitToLanding, not teardownWired: Stop hides the panel, so it is a way
+// out of the demo and has to restore the page behind it. Wired straight
+// to the teardown, it hid the panel and left the launcher hidden and
+// `body.app-mode` set, so the page went blank with no buttons until a
+// reload (Dan, 10 Sep 2026: "when you exit demo ... the button have
+// dispeared until page refresh"). That was latent from the day Stop was
+// added and only became visible once `[hidden]` started being honoured.
+wiredStopBtn.addEventListener('click', exitToLanding);
 
 wiredSendBtn.addEventListener('click', () => {
   if (!wired || !wiredChat.value) return;
@@ -1374,7 +1391,7 @@ async function startEndpointRoute(role) {
     // and wipes every caption on it, so anything written before this
     // line is thrown away by it.
     if (endpoint) await teardownEndpoint();
-    endpointPanel.hidden = false;
+    enterAppModeFor(endpointPanel);
     endpointStatus.textContent = 'IDLE';
     if (err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError')) {
       endpointCaption.textContent = 'Microphone permission was denied - allow access in your browser settings, then press Back and start again.';
@@ -1410,6 +1427,11 @@ async function teardownEndpoint() {
   endpointRole = null;
   lastEndpointState = null;
   lastEndpointCarrier = false;
+  // As in teardownWired: whoever hides the live panel leaves app mode
+  // with it. `body.app-mode` sets `overflow: hidden`, so a stranded one
+  // is not merely untidy - it locks the page's scroll with nothing on
+  // screen to explain why.
+  if (liveAppModePanel === endpointPanel) exitAppMode();
   endpointPanel.hidden = true;
   chatLog.innerHTML = '';
   endpointStatus.textContent = 'IDLE';
@@ -1428,7 +1450,8 @@ endpointHangupBtn.addEventListener('click', () => {
   if (endpoint) endpoint.hangup();
 });
 
-endpointStopBtn.addEventListener('click', teardownEndpoint);
+// Same as the demo's Stop, and for the same reason - see its comment.
+endpointStopBtn.addEventListener('click', exitToLanding);
 
 chatSendBtn.addEventListener('click', () => {
   if (!endpoint || !chatInput.value) return;

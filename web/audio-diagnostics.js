@@ -21,20 +21,61 @@
  * newer WebKit at that.
  */
 let audioSessionResult = null;
+let audioSessionType = null;
 
-export function ensurePlaybackAudioSession() {
-  if (audioSessionResult) return audioSessionResult;
+/**
+ * Sets the page-wide session category, and remembers which one, so a
+ * later call asking for a *different* category is not swallowed as a
+ * repeat.
+ *
+ * The memo used to be `if (audioSessionResult) return` with no record of
+ * the type, which was fine while `playback` was the only category
+ * anybody asked for and became a bug the moment it was not - see
+ * `ensureCaptureAudioSession`.
+ */
+function setAudioSession(type) {
+  if (audioSessionResult && audioSessionType === type) return audioSessionResult;
   if (!('audioSession' in navigator)) {
-    audioSessionResult = { ok: false, reason: 'navigator.audioSession is not exposed by this browser' };
+    audioSessionResult = { ok: false, type, reason: 'navigator.audioSession is not exposed by this browser' };
     return audioSessionResult;
   }
   try {
-    navigator.audioSession.type = 'playback';
-    audioSessionResult = { ok: true, reason: null };
+    navigator.audioSession.type = type;
+    audioSessionType = type;
+    audioSessionResult = { ok: true, type, reason: null };
   } catch (err) {
-    audioSessionResult = { ok: false, reason: String(err) };
+    audioSessionResult = { ok: false, type, reason: String(err) };
   }
   return audioSessionResult;
+}
+
+/** Output only - the demo, and explained.html's overture playback. */
+export function ensurePlaybackAudioSession() {
+  return setAudioSession('playback');
+}
+
+/**
+ * Microphone *and* speaker - the /originate and /receive endpoints.
+ *
+ * `playback` is an output-only category on iOS, and asking for capture
+ * while it is active fails outright: `getUserMedia` rejects with
+ * "AudioSession category is not compatible with audio capture", which is
+ * exactly what an iPhone reported on 10 Sep 2026. Because
+ * `ensurePlaybackAudioSession` ran at module load on every page, that
+ * category was already set before the visitor could press anything, so
+ * the receiving modem could never once have opened a microphone on iOS.
+ *
+ * `play-and-record` is the category that permits both. It has to be set
+ * before `getUserMedia`, not after - the category is what the request is
+ * checked against.
+ *
+ * Still the silent-switch-ignoring behaviour that
+ * `ensurePlaybackAudioSession`'s own doc describes: `play-and-record`
+ * does not respect the ringer switch either, so nothing is given up by
+ * moving to it on these two routes.
+ */
+export function ensureCaptureAudioSession() {
+  return setAudioSession('play-and-record');
 }
 
 export function audioSessionStatus() {

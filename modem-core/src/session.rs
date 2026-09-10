@@ -119,13 +119,19 @@
 //! use throughout) is queued into `tx` at the *start* of every burst: once
 //! when this end first gets the turn (`grant_turn`, called from both
 //! `dial` - the originate end starts with the turn - and from decoding an
-//! incoming [`PacketKind::Turn`]), never mid-burst. The idle-mark gap that
-//! must follow it is not manufactured here; it falls out naturally from
-//! ordinary pacing, because `send` only ever appends to `tx`'s queue when
-//! the caller actually has something to say, and `tx` holds idle mark on
-//! its own the moment its queue runs dry. Every test in this module that
-//! exercises a real exchange pumps a short settle period after acquiring
-//! the turn before calling `send`, for exactly this reason.
+//! incoming [`PacketKind::Turn`]), never mid-burst. The idle-mark gap
+//! that must follow it is queued right behind it, in the same call - see
+//! [`GRANT_IDLE_GAP_BITS`].
+//!
+//! That gap used to be left to the caller. This doc claimed it "falls out
+//! naturally from ordinary pacing, because `send` only ever appends to
+//! `tx`'s queue when the caller actually has something to say", which was
+//! true of every test in this module - each settles after taking the turn
+//! before it sends - and false of the most obvious real caller there is:
+//! one that sends the moment it is told it has the turn. It decoded
+//! anyway at 8 kHz and did not at 48 kHz, the rate every browser actually
+//! runs at, so it failed only in the field. See [`GRANT_IDLE_GAP_BITS`]
+//! for the full account.
 //!
 //! This is proven, not assumed: `acquisition_preamble_is_needed_under_a_
 //! real_clock_offset` deletes `grant_turn`'s preamble and drives a real
@@ -166,6 +172,40 @@ use crate::{Config, Duplex, Role};
 /// enough for the timing loop to acquire on and that more does not
 /// improve on it.
 const TRAINING_PREAMBLE: [u8; 2] = [0x55, 0x55];
+
+/// Bit periods of idle mark queued directly behind [`TRAINING_PREAMBLE`]
+/// by `grant_turn`, so a burst always has the gap its receiver needs
+/// between acquisition and data.
+///
+/// Two character times at 8N1. `rx.rs` requires "at least one character
+/// time of idle mark" after the alternating preamble to put the deframer
+/// back in a known state; two is that with margin, and costs 20 bit
+/// periods - 67 ms at 300 baud - once per turn.
+///
+/// # Why this is queued rather than left to pacing
+///
+/// This module's doc used to say the gap "falls out naturally from
+/// ordinary pacing, because `send` only ever appends to `tx`'s queue when
+/// the caller actually has something to say". That held for this crate's
+/// own tests, every one of which settles after taking the turn before it
+/// sends, and it is false for the most obvious caller there is: one that
+/// sends the moment it is told it has the turn. web/page.js's
+/// bidirectional data check does exactly that - it sends from inside the
+/// status handler that first reports `hasTurn` - which queued data
+/// directly behind the preamble with no gap at all.
+///
+/// That decoded anyway at 8 kHz and did not at 48 kHz, which is the rate
+/// every browser AudioContext actually runs at, so both of the site's
+/// data checks failed in the field while the whole test suite passed:
+/// the in-page demo reporting "answer to originate did not arrive within
+/// 10s", and a real two-machine acoustic call reporting "nothing arrived
+/// from the far end within 10s" (Dan, 10 Sep 2026). Full duplex was
+/// unaffected at both rates, because nothing there ever re-acquires.
+///
+/// A contract every caller has to remember, that only bites at a sample
+/// rate no test used, is not a contract. The gap is part of what
+/// acquiring the turn *means*, so it is queued where the preamble is.
+const GRANT_IDLE_GAP_BITS: usize = 20;
 
 /// Where a [`Session`] is in the call.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -554,6 +594,9 @@ impl Session {
         self.yielding = false;
         if let Some(tx) = self.tx.as_mut() {
             tx.write(&TRAINING_PREAMBLE);
+            // The gap is queued here, not left to the caller's pacing -
+            // see GRANT_IDLE_GAP_BITS and this module's own doc.
+            tx.write_idle_mark(GRANT_IDLE_GAP_BITS);
         }
     }
 
@@ -1105,6 +1148,121 @@ mod tests {
     /// frequency assertions specifically while leaving RMS untouched -
     /// see the task report for the actual failing output either mutation
     /// produces.
+    /// The exact sequence both of the site's bidirectional data checks
+    /// run, at the layer where it can be tested deterministically.
+    ///
+    /// Both checks reported failures on 10 Sep 2026 - the in-page demo
+    /// with "answer to originate did not arrive within 10s", and a real
+    /// two-machine acoustic call with "nothing arrived from the far end
+    /// within 10s". Same shape in both: the originate-to-answer
+    /// direction carried data and the answer-to-originate direction did
+    /// not, which is the direction that depends on the turn actually
+    /// changing hands.
+    ///
+    /// Nothing in this module covered that round trip. Every existing
+    /// hand-over test stops at `answer.has_turn()`, and every data test
+    /// sends one way only, so "the turn changes hands" and "data flows
+    /// after it does" were each asserted and their composition never was.
+
+    #[test]
+    fn data_flows_back_after_the_turn_changes_hands() {
+        // 8 kHz is this crate's own DSP rate, so it exercises the
+        // resampler's identity bypass. 48 kHz is what an AudioContext
+        // actually runs at in every browser this ships to, and is
+        // therefore the rate both of the failing field reports were
+        // produced at - a round trip that only works at 8 kHz would
+        // prove nothing about either of them.
+        for rate in [8000u32, 48000u32] {
+            round_trip_at(rate);
+        }
+    }
+
+    fn round_trip_at(rate: u32) {
+        let mut originate = Session::new(Config {
+            sample_rate: rate,
+            ..cfg(Role::Originate)
+        });
+        let mut answer = Session::new(Config {
+            sample_rate: rate,
+            ..cfg(Role::Answer)
+        });
+        originate.dial("1");
+        answer.answer();
+        connect(&mut originate, &mut answer);
+
+        // A gap measured in seconds, not in blocks. `settle` is a fixed
+        // ten blocks, which is 0.32s at 8 kHz and only 0.053s at 48 kHz -
+        // so using it here would vary the thing under test with the rate.
+        // The page waits 800ms of wall clock (see startWiredDataCheck),
+        // so this matches that.
+        let gap_blocks = ((0.8 * rate as f64) / BLOCK as f64).ceil() as usize;
+        let settle_secs = |a: &mut Session, b: &mut Session| {
+            for _ in 0..gap_blocks {
+                pump(a, b);
+            }
+        };
+        settle_secs(&mut originate, &mut answer);
+
+        const CANARY: &[u8] = b"MODEM-CHECK-OK";
+
+        // Originate holds the turn at connect, so it sends first and then
+        // hands over - the page leaves a real gap between the two (see
+        // web/page.js's startWiredDataCheck), so this does too.
+        originate.send(CANARY);
+        settle_secs(&mut originate, &mut answer);
+        originate.yield_turn();
+
+        let mut answer_got = Vec::new();
+        let mut turned = false;
+        for _ in 0..MAX_ITERS {
+            pump(&mut originate, &mut answer);
+            answer_got.extend(answer.receive());
+            if answer.has_turn() && answer_got.windows(CANARY.len()).any(|w| w == CANARY) {
+                turned = true;
+                break;
+            }
+        }
+        assert!(
+            turned,
+            "answer never both received the canary and took the turn at {rate} Hz - \
+             got {:?}, has_turn {}",
+            core::str::from_utf8(&answer_got),
+            answer.has_turn()
+        );
+
+        // Now the direction that was failing in the field.
+        // Sent the instant the turn arrives, with no settle - exactly
+        // what web/page.js's data check does from inside its `hasTurn`
+        // status handler, and the shape that failed at 48 kHz before
+        // grant_turn started queuing the gap itself.
+        answer.send(CANARY);
+        settle_secs(&mut originate, &mut answer);
+        answer.yield_turn();
+
+        let mut originate_got = Vec::new();
+        for i in 0..MAX_ITERS {
+            pump(&mut originate, &mut answer);
+            originate_got.extend(originate.receive());
+            if originate_got.windows(CANARY.len()).any(|w| w == CANARY) {
+                let secs = (i * BLOCK) as f64 / rate as f64;
+                // The page allows 10s for this round trip. Asserted well
+                // inside that so a regression which merely made the
+                // hand-over slow - rather than broken - still fails here
+                // instead of turning into an intermittent field report.
+                assert!(
+                    secs < 5.0,
+                    "answer-to-originate took {secs:.2}s at {rate} Hz, against the page's 10s \
+                     budget - too close to the limit to be reliable on a real link"
+                );
+                return;
+            }
+        }
+        panic!(
+            "answer to originate never arrived at {rate} Hz: originate received {:?}",
+            core::str::from_utf8(&originate_got)
+        );
+    }
+
     #[test]
     fn half_duplex_end_without_turn_transmits_continuous_idle_mark_not_silence() {
         let mut originate = Session::new(cfg(Role::Originate));

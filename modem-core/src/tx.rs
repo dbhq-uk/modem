@@ -74,6 +74,23 @@ impl Tx {
         }
     }
 
+    /// Queues `n` bit periods of idle mark.
+    ///
+    /// A `Tx` whose queue is empty already holds mark, so this is not
+    /// about the tone - it is about *reserving time* in the queue, so
+    /// that whatever a caller appends next cannot start until the mark
+    /// has actually been held for `n` bits. That is the difference
+    /// between "there will be a gap if nobody says anything" and "there
+    /// is a gap", and a receiver's deframer needs the second one: it has
+    /// to see sustained mark before it can read the next space as a
+    /// start bit rather than as data.
+    ///
+    /// Used by `Session::grant_turn` - see its own doc and this module's
+    /// note on why every burst needs a preamble *and* a gap after it.
+    pub fn write_idle_mark(&mut self, n: usize) {
+        self.bits.extend(core::iter::repeat_n(true, n));
+    }
+
     pub fn pending(&self) -> bool {
         !self.bits.is_empty()
     }

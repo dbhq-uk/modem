@@ -6,7 +6,7 @@
 // lives in worklet.js. See spike/README.md for why that split exists at
 // all.
 import { Duplex, Role, SessionState, STAGE_NAMES } from './session.js';
-import { ensurePlaybackAudioSession, withTimeout, AudioDiagnostics } from './audio-diagnostics.js';
+import { ensureCaptureAudioSession, withTimeout, AudioDiagnostics } from './audio-diagnostics.js';
 
 export { Duplex, Role, SessionState, STAGE_NAMES };
 
@@ -122,10 +122,13 @@ export class ModemEndpoint extends EventTarget {
     if (!AudioContextCtor) {
       throw new Error('this browser exposes no AudioContext (or webkitAudioContext) at all');
     }
-    // WebKit's ambient-vs-playback session category - see
-    // audio-diagnostics.js's own doc and wired.js's identical call.
-    const sessionResult = ensurePlaybackAudioSession();
-    if (!sessionResult.ok) this.diagnostics.log(`audioSession not set to 'playback': ${sessionResult.reason}`);
+    // `play-and-record`, NOT `playback` - this is the one AudioContext
+    // in the project that also opens a microphone, and on iOS `playback`
+    // is an output-only category that makes `getUserMedia` reject
+    // outright. See ensureCaptureAudioSession's own doc; wired.js stays
+    // on `playback` because the demo only ever plays.
+    const sessionResult = ensureCaptureAudioSession();
+    if (!sessionResult.ok) this.diagnostics.log(`audioSession not set to 'play-and-record': ${sessionResult.reason}`);
     const ctx = new AudioContextCtor();
     // Published immediately, not at the end of `init`, because two things
     // reach for it during the seconds this function then spends fetching

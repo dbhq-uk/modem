@@ -283,6 +283,63 @@ test.describe('when starting the modem fails', () => {
   });
 });
 
+test.describe('leaving a live panel', () => {
+  // Stop was wired straight to the teardown, which hides the panel but
+  // never left app mode or put the launcher back - so the page went
+  // blank, with `body.app-mode`'s `overflow: hidden` still locking the
+  // scroll, until a reload (Dan, 10 Sep 2026: "when you exit demo ...
+  // the button have dispeared until page refresh"). Latent from the day
+  // Stop was added; it only surfaced once `[hidden]` began to be
+  // honoured, because until then hiding the launcher did nothing.
+  for (const [label, selector] of [['Back', '#route-start-back-btn']]) {
+    test(`${label} restores the landing page`, async ({ page }) => {
+      await page.goto('/receive/');
+      await dismissConsent(page);
+      await expect(page.locator('#launcher')).toBeHidden();
+
+      await page.locator(selector).click();
+
+      await expect(page.locator('#launcher')).toBeVisible();
+      await expect(page.locator('#launch-demo-btn')).toBeEnabled();
+      await expect(page.locator('body')).not.toHaveClass(/app-mode/);
+      expect(new URL(page.url()).pathname).toBe('/');
+    });
+  }
+
+  // Stop is the control that was actually broken, so it is the one that
+  // has to be exercised - the Back case above passed throughout, because
+  // Back always went through exitToLanding.
+  //
+  // Reached here from a failed start: this runner has no audio output
+  // device, so a working demo is not available to press Stop in, but the
+  // panel and its buttons are identical either way and the wiring under
+  // test is the click handler, not the audio.
+  for (const [label, selector] of [['Stop', '#endpoint-stop'], ['Back', '#endpoint-back-btn']]) {
+    test(`${label} on a live panel restores the landing page`, async ({ page }) => {
+      await page.addInitScript(() => {
+        navigator.mediaDevices.getUserMedia = () => {
+          const e = new Error('Permission denied');
+          e.name = 'NotAllowedError';
+          return Promise.reject(e);
+        };
+      });
+      await page.goto('/receive/');
+      await dismissConsent(page);
+      await page.locator('#route-start-btn').click();
+      await expect(page.locator('#endpoint-caption')).not.toBeEmpty({ timeout: 20000 });
+
+      await page.locator(selector).click();
+
+      await expect(page.locator('#launcher')).toBeVisible();
+      await expect(page.locator('#launch-demo-btn')).toBeEnabled();
+      await expect(page.locator('#endpoint-panel')).toBeHidden();
+      // body.app-mode sets overflow: hidden - a stranded one locks the
+      // page's scroll with nothing on screen to explain why.
+      await expect(page.locator('body')).not.toHaveClass(/app-mode/);
+    });
+  }
+});
+
 test.describe('the shared chrome', () => {
   test('the nav reaches every page and marks the current one', async ({ page }) => {
     for (const path of PAGES) {
