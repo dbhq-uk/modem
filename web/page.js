@@ -437,6 +437,29 @@ function showRouteStart(route) {
   routeStartBlock.hidden = false;
   routeStartCopy.textContent = ROUTE_START_COPY[route];
   labelOf(routeStartBtn).textContent = ROUTE_START_LABEL[route];
+  // Land on the control, not on the top of the page.
+  //
+  // Every one of these routes is arrived at deliberately - a scanned QR
+  // code, a copied link, a shared URL - and the visitor came for the one
+  // thing the route names. Without this they get the full-height hero
+  // and the homepage intro first, with the Start button somewhere below
+  // the fold, which on a phone reads as "the QR code took me to the
+  // website" rather than "the QR code took me to the receiving modem"
+  // (Dan, 10 Sep 2026).
+  //
+  // The chrome above stays in the document rather than being hidden:
+  // someone who has just scanned a stranger's QR code is entitled to
+  // scroll up and see whose site this is. This moves the viewport, it
+  // does not take the page away.
+  //
+  // `instant`, not `smooth`: a scroll animation running as the page
+  // paints is the flicker this same pass exists to remove. Guarded
+  // because the API is only meaningful once there is a layout to scroll.
+  requestAnimationFrame(() => {
+    if (!routeStartBlock.hidden) {
+      routeStartBlock.scrollIntoView({ block: 'center', behavior: 'instant' });
+    }
+  });
   // Re-enabled as well as relabelled: a previous attempt that failed left
   // it disabled and reading "Starting...", and this is the one path back
   // to a usable button.

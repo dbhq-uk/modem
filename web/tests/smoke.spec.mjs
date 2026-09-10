@@ -184,6 +184,24 @@ test.describe('the routes', () => {
       await expect(page.locator('#route-start-btn')).toHaveText(label);
       await expect(page.locator('#wired-panel')).toBeHidden();
       await expect(page.locator('#endpoint-panel')).toBeHidden();
+
+      // The landing page's three choices must be gone, not merely
+      // scrolled past. `showRouteStart` set `launcher.hidden = true`
+      // from the day the routes existed and it did nothing:
+      // `.demo__controls` carries `display: flex` at the same
+      // specificity as the UA sheet's `[hidden]`, so the author rule
+      // won. A QR code scanned onto /receive/ therefore landed on a page
+      // still offering Demo, Originating and Receiving. Asserted on
+      // `toBeHidden`, which resolves computed visibility rather than the
+      // attribute - the attribute was set correctly the whole time and
+      // that is exactly what made this invisible for so long.
+      await expect(page.locator('#launcher')).toBeHidden();
+
+      // And the control is where the visitor is looking. A direct link
+      // is arrived at deliberately; landing above the fold of the
+      // homepage hero is how it stopped reading as "this took me to the
+      // receiving modem".
+      await expect(page.locator('#route-start-block')).toBeInViewport();
       expect(errors).toEqual([]);
     });
   }

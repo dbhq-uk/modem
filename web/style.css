@@ -674,6 +674,27 @@ html.crt-boot .crt-warmup {
   position: relative;
   overflow: hidden;
   border-bottom: 1px solid var(--modem-white-dim);
+  /* The hero's own average colour, so it does not flash (Dan, 10 Sep
+     2026: "make the hero image no flicker when the site loads and the
+     page changes").
+   *
+   * Every navigation here is a full document load, so the hero box
+     paints before the image does. Against the page ground that box was
+     near-black and the image is dark green, and the gap between the two
+     is what reads as a flicker - on first load and again on every page
+     change.
+   *
+   * #0C1F08 is measured, not picked: web/hero-1536.avif averages
+     rgb(13,48,7), and .hero__image composites it at opacity 0.55 over
+     --modem-ground. So the empty box is already the colour the image
+     will be, and the image arriving changes nothing perceptible.
+   *
+   * A literal rather than a token because it is neither a brand colour
+     nor a value the TUI has any equivalent for - it is one specific
+     image's mean, and it belongs to that asset. Regenerate the backdrop
+     and this needs remeasuring; the source figure is in this comment so
+     it can be. */
+  background-color: #0C1F08;
 }
 
 .hero__image {
@@ -1510,13 +1531,26 @@ body.app-mode {
  * as the `[hidden]` attribute the browser's own default stylesheet uses
  * for `display: none` - an author rule always beats a user-agent one at
  * an equal-specificity tie, regardless of source order, so `hidden`
- * alone was silently losing on any element carrying both. Every other
- * `hidden`-by-default element in this file sets no `display` of its own
- * and so never hits this; `#route-start-block` is the one exception
- * (`class="demo__controls route-start"`), caught by loading the page
- * with JavaScript on and finding the Start button visible on the plain
- * landing route, where nothing should have shown it at all. */
-.route-start[hidden] {
+ * alone silently loses on any element carrying both.
+ *
+ * Scoped to `.route-start[hidden]` when first found, on the theory that
+ * `#route-start-block` was the only element carrying `.demo__controls`
+ * and a `hidden` attribute. It was not. `#launcher` is
+ * `class="demo__controls"` as well, and it is hidden by script rather
+ * than in the markup, which is why it escaped: nothing renders it
+ * wrongly on a first paint, so no page load shows the fault.
+ *
+ * The consequence ran for as long as the routes have existed.
+ * `showRouteStart` and `enterAppModeFor` both set `launcher.hidden =
+ * true` and neither did anything, so /demo/, /originate/ and /receive/
+ * all kept the three landing-page buttons on screen above their own
+ * control - and a QR code scanned onto /receive/ landed on a page
+ * offering all three choices again (Dan, 10 Sep 2026: the QR "should
+ * take you directly to receiving modem").
+ *
+ * Keyed on the class that causes it rather than on either instance, so
+ * a third `.demo__controls` cannot reintroduce this a third time. */
+.demo__controls[hidden] {
   display: none;
 }
 

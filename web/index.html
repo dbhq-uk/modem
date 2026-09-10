@@ -27,6 +27,9 @@
      own @import: an @import is a serial fetch (the browser must fetch and
      parse style.css before it even discovers the import), where two
      ordinary <link> tags fetch in parallel. -->
+<link rel="preload" as="image" type="image/avif" fetchpriority="high"
+      imagesrcset="hero-480.avif 480w, hero-768.avif 768w, hero-1080.avif 1080w, hero-1536.avif 1536w"
+      imagesizes="100vw">
 <link rel="preload" href="fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="../brand/tokens.css">
 <link rel="stylesheet" href="style.css">
@@ -132,7 +135,7 @@
     <picture>
       <source type="image/avif" srcset="hero-480.avif 480w, hero-768.avif 768w, hero-1080.avif 1080w, hero-1536.avif 1536w" sizes="100vw">
       <source type="image/webp" srcset="hero-480.webp 480w, hero-768.webp 768w, hero-1080.webp 1080w, hero-1536.webp 1536w" sizes="100vw">
-      <img class="hero__image" src="hero.png" width="1536" height="1024" decoding="async" fetchpriority="low" alt="" aria-hidden="true">
+      <img class="hero__image" src="hero.png" width="1536" height="1024" decoding="sync" fetchpriority="high" alt="" aria-hidden="true">
     </picture>
     <div class="hero__overlay">
       <!-- hero__content mirrors main's own max-width, so the wordmark
