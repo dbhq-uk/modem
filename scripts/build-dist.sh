@@ -37,7 +37,7 @@ cp web/_headers web/_redirects web/manifest.json web/robots.txt web/sitemap.xml 
 
 # The acoustic lab's collector, and the routes file that fences it in.
 #
-# `_routes.json` restricts _worker.js to /api/lab/*, so every other path
+# `_routes.json` restricts _worker.js to /lab/api/*, so every other path
 # on the site is served by the platform as a static asset and never
 # enters the worker at all. Without this file a `_worker.js` at the root
 # puts Pages into advanced mode and the worker handles *every* request,
