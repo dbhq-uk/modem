@@ -26,13 +26,23 @@
 //
 // # Abuse surface, and what bounds it
 //
-// `POST /api/lab/report` is unauthenticated, because the devices posting
-// to it are a phone and a laptop that cannot hold a secret any better
-// than the page they loaded can. It is bounded instead: 64 KB a request,
-// a 7-day TTL on every key written, and nothing is ever read back out by
-// this worker. The operator reads KV directly over the REST API. There
-// is no endpoint here that returns stored data, so the worst a stranger
-// can do is write rubbish into a namespace nobody serves.
+// The write endpoints take a shared key. This repository is public, so
+// the existence and shape of this endpoint are public too, and an
+// unauthenticated write on a free-tier KV namespace is a daily write
+// quota somebody else can spend. The key does not live here - it is
+// written into KV as `labkey` by the operator, and compared against
+// `?key=` on the request.
+//
+// This is a speed bump, not authentication: the key travels in a URL
+// that a phone and a laptop both hold in their address bars, and
+// anything a browser can hold, a browser can leak. It stops casual
+// abuse, which is all that is actually on the table here.
+//
+// Bounded regardless of the key: 64 KB a request, a 7-day TTL on every
+// key written, and nothing is ever read back out by this worker. The
+// operator reads KV directly over the REST API. There is no endpoint
+// here that returns stored data, so the worst anyone can do is write
+// rubbish into a namespace nobody serves.
 
 const MAX_BODY = 64 * 1024;
 /// Reports expire on their own. A calibration run is interesting for
@@ -100,6 +110,14 @@ export default {
     }
 
     if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405);
+
+    // Compared only if one has been set, so the lab still works the
+    // moment the namespace is empty - a missing key locks nobody out of
+    // their own instrument.
+    const expected = await env.LAB.get('labkey');
+    if (expected && url.searchParams.get('key') !== expected) {
+      return json({ error: 'bad or missing key' }, 403);
+    }
 
     const body = await readBody(request);
     if (body === null) return json({ error: 'body must be JSON and under 64 KB' }, 400);

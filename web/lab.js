@@ -51,9 +51,16 @@ function log(line) {
 }
 const setState = (t) => { els.state.textContent = t; };
 
+// Carried on every write. Taken from the URL the device was opened with
+// and kept, so a reload does not silently drop it - see _worker.js on
+// why this is a speed bump rather than authentication.
+const labKey = params.get('key') || localStorage.getItem('lab-key') || '';
+if (labKey) localStorage.setItem('lab-key', labKey);
+
 async function post(path, body) {
   try {
-    const res = await fetch(`/api/lab/${path}`, {
+    const qs = labKey ? `?key=${encodeURIComponent(labKey)}` : '';
+    const res = await fetch(`/api/lab/${path}${qs}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ device, ...body }),
