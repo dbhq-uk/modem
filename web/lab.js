@@ -211,7 +211,18 @@ async function runModem(step) {
   endpoint.addEventListener('error', (e) => mark('error', { detail: String(e.detail) }));
 
   try {
-    await endpoint.init({ role, duplex: Duplex.HALF_PING_PONG });
+    // Cache-busted on purpose. The site sends a four-hour Cache-Control
+    // on .js and .wasm, so a device that has run once would keep using
+    // the build it first fetched - and the whole point of the loop is
+    // changing the Rust and running again. With this, a new build is
+    // picked up on the next `modem` op and `reload` becomes optional.
+    const v = step.build || String(Date.now());
+    await endpoint.init({
+      role,
+      duplex: Duplex.HALF_PING_PONG,
+      wasmUrl: new URL(`modem.wasm?v=${v}`, location.origin + '/').href,
+      workletUrl: new URL(`worklet.js?v=${v}`, location.origin + '/').href,
+    });
     const diag = await endpoint.openMicrophone();
     mark('microphone', { summary: summariseMicDiagnostics(diag), applied: diag.applied });
     if (role === Role.ORIGINATE) {
@@ -256,7 +267,17 @@ async function executeStep(step, revision) {
   if (op === 'idle') return;
   if (op === 'reload') { location.reload(); return; }
 
-  await ensureAudio();
+  try {
+    await ensureAudio();
+  } catch (err) {
+    // Almost always the autoplay policy after a reload: the microphone
+    // is granted, the AudioContext is not allowed to start. Say which
+    // device it is rather than producing a silent empty run.
+    setState('needs a tap - press Join');
+    log(`audio blocked: ${err}`);
+    await report('needsGesture', { op, error: String(err) });
+    return;
+  }
   if (op === 'measure') {
     const result = await measure(step.seconds ?? 4);
     await report('measure', { label: step.label ?? null, seconds: step.seconds ?? 4, result });
@@ -315,12 +336,34 @@ async function poll() {
   setTimeout(poll, POLL_MS);
 }
 
+// A device that has joined once rejoins by itself on every later load.
+//
+// `reload` is part of the iteration loop, and before this each one cost
+// two taps on two devices across a room - which is exactly the friction
+// the lab exists to remove. Polling needs no audio and no gesture, so it
+// starts immediately; audio is only opened when an op that needs it
+// arrives, and `executeStep` already works that way.
+//
+// iOS may still refuse to start an AudioContext without a gesture even
+// with the microphone already granted. That case is reported rather than
+// hidden: the device posts `needsGesture` and says so on screen, so the
+// operator can see which device needs a tap instead of guessing why a
+// run produced nothing.
+async function autoRejoin() {
+  if (localStorage.getItem('lab-joined') !== '1') return;
+  running = true;
+  setState('rejoined after reload, waiting for instructions');
+  log('rejoined automatically');
+  poll();
+}
+
 els.join.addEventListener('click', async () => {
   try {
     // Inside the gesture: iOS will not start an AudioContext or grant a
     // microphone outside one.
     await ensureAudio();
     running = true;
+    localStorage.setItem('lab-joined', '1');
     setState('joined, waiting for instructions');
     log('joined');
     poll();
@@ -338,3 +381,5 @@ els.stop.addEventListener('click', async () => {
 });
 
 setState('Not connected. Press Join.');
+
+autoRejoin();
