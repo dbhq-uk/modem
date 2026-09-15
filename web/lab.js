@@ -94,8 +94,29 @@ function goertzel(samples, freq, rate) {
   return (2 * Math.hypot(s1 - s2 * Math.cos(k), s2 * Math.sin(k))) / samples.length;
 }
 
+/// Set by the Join tap. iOS will not start an AudioContext or grant a
+/// microphone without one, and - this is the part that matters - it does
+/// not *reject* either. It simply never settles, so anything awaiting it
+/// waits for ever.
+let hasGesture = false;
+
+/// Rejects rather than hanging. `ensureAudio` is awaited from inside the
+/// poll loop, and an await that never settles there wedges the device:
+/// it keeps polling, never runs another step, and looks from the
+/// operator's side exactly like a device that has gone to sleep. That
+/// happened repeatedly before this existed.
+function withDeadline(promise, ms, what) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} did not settle within ${ms}ms`)), ms)),
+  ]);
+}
+
 async function ensureAudio() {
   if (analyser) return;
+  if (!hasGesture) {
+    throw new Error('audio needs a tap on Join first');
+  }
   const AudioCtor = window.AudioContext || window.webkitAudioContext;
   try {
     // play-and-record, not playback: on iOS `playback` is output-only
@@ -103,17 +124,17 @@ async function ensureAudio() {
     if ('audioSession' in navigator) navigator.audioSession.type = 'play-and-record';
   } catch { /* not WebKit */ }
   ctx = new AudioCtor();
-  await ctx.resume();
+  await withDeadline(ctx.resume(), 5000, 'AudioContext.resume');
 
   let exact = true;
   try {
-    micStream = await navigator.mediaDevices.getUserMedia({
+    micStream = await withDeadline(navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: { exact: false },
         noiseSuppression: { exact: false },
         autoGainControl: { exact: false },
       },
-    });
+    }), 10000, 'getUserMedia');
   } catch {
     exact = false;
     micStream = await navigator.mediaDevices.getUserMedia({
@@ -301,6 +322,14 @@ async function executeStep(step, revision) {
   if (op === 'idle') return;
   if (op === 'reload') { location.reload(); return; }
 
+  if (!analyser && !hasGesture) {
+    // Decline rather than wait. Leaving `busy` set while an await that
+    // will never settle sits in the loop is what wedged this before.
+    setState('needs a tap - press Join');
+    log(`skipped ${op}: needs a tap on Join first`);
+    await report('needsGesture', { op });
+    return;
+  }
   try {
     await ensureAudio();
   } catch (err) {
@@ -393,6 +422,9 @@ async function poll() {
 let wakeLock = null;
 async function holdScreenAwake() {
   if (!('wakeLock' in navigator)) return;
+  // Needs a gesture like everything else here. Asking before one makes
+  // a NotAllowedError that reads like a fault and is not.
+  if (!hasGesture) return;
   try {
     wakeLock = await navigator.wakeLock.request('screen');
     log('screen wake lock held');
@@ -425,13 +457,17 @@ els.join.addEventListener('click', async () => {
   try {
     // Inside the gesture: iOS will not start an AudioContext or grant a
     // microphone outside one.
+    hasGesture = true;
     await ensureAudio();
+    const alreadyPolling = running;
     running = true;
     holdScreenAwake();
     localStorage.setItem('lab-joined', '1');
     setState('joined, waiting for instructions');
     log('joined');
-    poll();
+    // autoRejoin may already have one running. A second loop double-polls
+    // and races the `busy` flag against itself.
+    if (!alreadyPolling) poll();
   } catch (err) {
     setState(`could not start: ${err}`);
     log(`join failed: ${err}`);
