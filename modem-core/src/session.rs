@@ -193,11 +193,32 @@ const TRAINING_PREAMBLE: [u8; 2] = [0x55, 0x55];
 /// | Originate     | 2025 / 2225 Hz | 1270 Hz  | 755 Hz | 4x        |
 /// | Answer        | 1070 / 1270 Hz | 2225 Hz  | 955 Hz | 1.5x      |
 ///
-/// 0.2 is -14 dB. It takes the weaker band from tolerating 1.5x its own
-/// loudspeaker to about 7.5x, which is the point of the number: two
-/// devices on a desk sit around 7x on geometry alone (2 cm from your own
-/// speaker, 15 cm from theirs, inverse square), so 1.5x was always going
-/// to fail and 7.5x has margin.
+/// 0.05 is -26 dB, and it is a measured number rather than a modelled
+/// one. Two real devices - a Windows laptop and an iPhone, 10-20 cm
+/// apart - were driven through `/lab` on 15 September 2026 while the
+/// levels at each microphone were recorded. In the configuration that
+/// was failing, the laptop's own idle mark measured 0.117 at its own
+/// microphone against 0.00525 for the phone's data tone it had to
+/// decode: a 22x self-jam, against the 8x that band tolerates.
+///
+/// Two things that measurement showed and the model had missed. The
+/// laptop's loudspeaker couples into its own microphone about **ten
+/// times more strongly at 1270 Hz than at 2225 Hz** - a flat-response
+/// model cannot see that, and it makes the band asymmetry far worse
+/// than geometry alone suggests. And the far end's signal was never
+/// weak: it arrived 390x above that microphone's own noise floor. The
+/// link was not short of signal, it was buried under this tone.
+///
+/// 0.07 was the level that brought that 22x just under the threshold,
+/// and "just" is the problem: it left the weaker band sitting exactly on
+/// the measured figure with nothing spare. 0.05 puts real margin there.
+/// Before any of this it was 0.2, chosen from inverse-square arithmetic,
+/// which was not enough on real hardware.
+///
+/// The floor is carrier detection at the far end, and it is not close:
+/// `carrier_survives_a_quiet_idle_tone` holds down to 0.02 against room
+/// noise at the same level as the tone, because `ToneDominance` is a
+/// ratio test and scaling the tone scales both sides of it.
 ///
 /// The value is bounded below by carrier detection, and that turned out
 /// not to bind here at all. `carrier_survives_a_quiet_idle_tone` holds
@@ -219,7 +240,7 @@ const TRAINING_PREAMBLE: [u8; 2] = [0x55, 0x55];
 /// turn handover at every level from 0.8 down, because the level step
 /// landed inside the tail of the `Turn` packet. The tail gap is what
 /// makes this safe; neither change is much use without the other.
-pub const IDLE_MARK_AMPLITUDE: f32 = 0.2;
+pub const IDLE_MARK_AMPLITUDE: f32 = 0.05;
 
 /// Bit periods of idle mark queued behind the `Turn` packet by
 /// `yield_turn`, closing a burst the way [`GRANT_IDLE_GAP_BITS`] opens
@@ -1147,8 +1168,13 @@ mod tests {
             "answer() did not transmit the answer band's mark tone (2225 Hz) clear of the \
              originate band's: 2225 Hz {answer_mark2}, 1270 Hz {originate_mark2}"
         );
+        // Scaled to the level idle mark actually runs at, for exactly
+        // the reason the comment above gives. A bare 0.05 here was an
+        // absolute floor that happened to sit above the old idle level
+        // and below the new one, so it started failing on a change to a
+        // constant it never mentioned.
         assert!(
-            answer_mark2 > 0.05,
+            answer_mark2 > 0.2 * IDLE_MARK_AMPLITUDE as f64,
             "answer() transmitted effectively nothing at all: {answer_mark2}"
         );
     }

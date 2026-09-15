@@ -167,19 +167,29 @@ fn an_unimpaired_link_is_perfect() {
     }
 }
 
-/// The headline finding, as a threshold rather than a verdict.
+/// Both bands must clear the self-jam measured on real hardware.
 ///
-/// Both bands get the same desk: the same reflection, the same room
-/// noise, the same amount of their own loudspeaker. One survives four
-/// times its own speaker and the other does not survive three.
+/// This used to assert that the answer band tolerated *less* than the
+/// originate band, which was the finding at the time and is no longer
+/// true: at `IDLE_MARK_AMPLITUDE` they both clear the whole sweep. The
+/// asymmetry has not gone away - it is a property of the band plan - but
+/// the idle tone is now quiet enough that neither band reaches it.
+///
+/// So the threshold is the field measurement instead, which is a better
+/// anchor than a comparison between the two. On 15 September 2026 a
+/// Windows laptop and an iPhone 10-20 cm apart measured a **22x**
+/// self-jam at the laptop's microphone in the configuration that was
+/// failing: its own idle mark at 0.117 against 0.00525 for the phone's
+/// data tone. See docs/acoustic-harness.md.
+const FIELD_SELF_JAM: f32 = 22.0;
+
 #[test]
-fn answer_band_tolerates_less_of_its_own_speaker_than_originate_does() {
-    let mut limits = Vec::new();
+fn both_bands_clear_the_self_jam_measured_in_the_field() {
     for role in [Role::Originate, Role::Answer] {
         let base = transmit(role, PAYLOAD);
         let own = own_speaker(far(role), base.len());
         let mut worst_ok = 0.0f32;
-        for gain in [0.0f32, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0] {
+        for gain in [0.0f32, 4.0, 8.0, 12.0, 16.0, 22.0, 30.0, 40.0] {
             let air = duplex_leak(&base, &own, gain);
             if ber_of(role, &air) <= WORKING {
                 worst_ok = gain;
@@ -188,32 +198,14 @@ fn answer_band_tolerates_less_of_its_own_speaker_than_originate_does() {
             }
         }
         println!("LEAK {role:?} tolerated up to {worst_ok}x its own loudspeaker");
-        limits.push(worst_ok);
+        assert!(
+            worst_ok >= FIELD_SELF_JAM,
+            "{role:?} tolerates only {worst_ok}x its own loudspeaker, under the {FIELD_SELF_JAM}x \
+             measured on real hardware. Two devices on a desk would fail in this direction - \
+             which is exactly what was happening before IDLE_MARK_AMPLITUDE was measured rather \
+             than modelled"
+        );
     }
-    let (originate, answer) = (limits[0], limits[1]);
-    assert!(
-        originate >= 8.0,
-        "the originate band no longer tolerates 8x its own speaker ({originate}x) - \
-         this is the direction that worked in the field even before idle mark was \
-         attenuated"
-    );
-    assert!(
-        answer < originate,
-        "the two bands now tolerate their own loudspeaker equally (originate {originate}x, \
-         answer {answer}x). If that is real it is an improvement, and this test and this \
-         module's explanation of the field asymmetry both need rewriting"
-    );
-    // The number that decides whether two devices on a desk work at all.
-    // Geometry alone puts the acoustic ratio around 7x (see
-    // `own_speaker`), and before `IDLE_MARK_AMPLITUDE` this band gave out
-    // at 1.5x - which is why answer-to-originate was the direction that
-    // always failed.
-    assert!(
-        answer >= 4.0,
-        "the answer band tolerates only {answer}x its own loudspeaker. A desk is about 7x \
-         on geometry alone, so two-device mode is back to failing in one direction - which \
-         is exactly what IDLE_MARK_AMPLITUDE exists to prevent"
-    );
 }
 
 /// The theory this investigation started from, disproved.
