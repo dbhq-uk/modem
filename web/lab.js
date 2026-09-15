@@ -383,6 +383,27 @@ async function poll() {
 // hidden: the device posts `needsGesture` and says so on screen, so the
 // operator can see which device needs a tap instead of guessing why a
 // run produced nothing.
+// Hold the screen awake while the lab is running.
+//
+// An iPhone that locks its screen suspends the tab's timers, so the
+// device stops polling and simply vanishes from the lab - which is what
+// happened repeatedly, and looks identical to the page being broken.
+// Re-requested on visibilitychange because the lock is dropped whenever
+// the page is hidden and is not restored by itself.
+let wakeLock = null;
+async function holdScreenAwake() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    log('screen wake lock held');
+  } catch (err) {
+    log(`wake lock refused: ${err}`);
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && running && wakeLock === null) holdScreenAwake();
+});
+
 async function autoRejoin() {
   // Unconditional. It was gated on a flag this page had set on a
   // previous Join, which is useless for the case that matters: a device
@@ -394,6 +415,7 @@ async function autoRejoin() {
   // opened when an op that needs it arrives, so a stranger who loads
   // this page gets a poll loop and no microphone prompt.
   running = true;
+  holdScreenAwake();
   setState('rejoined after reload, waiting for instructions');
   log('rejoined automatically');
   poll();
@@ -405,6 +427,7 @@ els.join.addEventListener('click', async () => {
     // microphone outside one.
     await ensureAudio();
     running = true;
+    holdScreenAwake();
     localStorage.setItem('lab-joined', '1');
     setState('joined, waiting for instructions');
     log('joined');
