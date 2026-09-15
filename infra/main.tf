@@ -45,16 +45,66 @@ provider "cloudflare" {
   api_token = var.cloudflare_api_token
 }
 
+# KV for the acoustic lab (/lab), which drives two real devices in a room
+# and collects what they measure.
+#
+# The devices poll for an instruction and post their measurements; both
+# sides of that live here. `web/_worker.js` is the only thing that writes
+# to it, and the operator reads it back over the REST API - see
+# scripts/lab.py.
+#
+# Nothing in here is durable or valuable: every key the worker writes
+# carries a seven-day TTL, and the plan key is rewritten on every run.
+# Losing this namespace costs one calibration session, not data.
+resource "cloudflare_workers_kv_namespace" "lab" {
+  account_id = var.account_id
+  title      = "modem-lab"
+}
+
 resource "cloudflare_pages_project" "modem" {
   account_id        = var.account_id
   name              = var.pages_project
   production_branch = "main"
 
+  # Both environments get the same binding. Preview is not used by this
+  # project's deploy workflow, which always publishes to `main`, but a
+  # binding that exists in only one of them is the kind of asymmetry that
+  # wastes an afternoon the first time someone does use it.
+  deployment_configs {
+    production {
+      compatibility_date = "2026-09-08"
+      # Pinned to what the project already runs. The provider's own
+      # default is the legacy "bundled" model, so leaving this out makes
+      # every plan propose a silent downgrade of the account's usage
+      # model - a billing change, offered as drift.
+      usage_model = "standard"
+      kv_namespaces = {
+        LAB = cloudflare_workers_kv_namespace.lab.id
+      }
+    }
+    preview {
+      compatibility_date = "2026-09-08"
+      usage_model        = "standard"
+      kv_namespaces = {
+        LAB = cloudflare_workers_kv_namespace.lab.id
+      }
+    }
+  }
+
   lifecycle {
-    # Deploy config is managed out of band, by this repo's own deploy
-    # workflow driving wrangler. Terraform owns the project's existence and
-    # its custom domain, not its deployments.
-    ignore_changes = [build_config, deployment_configs, source]
+    # Deployments are managed out of band, by this repo's own deploy
+    # workflow driving wrangler. Terraform owns the project's existence,
+    # its custom domain and its bindings, not what has been uploaded to
+    # it.
+    #
+    # `deployment_configs` used to be on this list too, which was right
+    # while there was nothing in it - and wrong the moment the lab needed
+    # a KV binding, because a binding is not a deployment. Checked
+    # against the live project before narrowing it: the only things in
+    # deployment_configs were the compatibility date and defaults
+    # Cloudflare sets itself, so there was nothing here for Terraform to
+    # clobber.
+    ignore_changes = [build_config, source]
   }
 }
 

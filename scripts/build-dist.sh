@@ -35,6 +35,16 @@ cp target/wasm32-unknown-unknown/release/modem_wasm.wasm dist/web/modem.wasm
 # instantiation - without it the demo is blocked at the edge.
 cp web/_headers web/_redirects web/manifest.json web/robots.txt web/sitemap.xml dist/web/
 
+# The acoustic lab's collector, and the routes file that fences it in.
+#
+# `_routes.json` restricts _worker.js to /api/lab/*, so every other path
+# on the site is served by the platform as a static asset and never
+# enters the worker at all. Without this file a `_worker.js` at the root
+# puts Pages into advanced mode and the worker handles *every* request,
+# which on a live site means one mistake in it takes the whole thing
+# down. Both files, or neither.
+cp web/_worker.js web/_routes.json dist/web/
+
 # The self-hosted webfonts. Not a glob above because they live in a
 # subdirectory, and no `|| true` here: the site's CSP is `font-src
 # 'self'`, so if these are missing there is no remote fallback to save

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>modem acoustic lab</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="../brand/tokens.css">
+<link rel="stylesheet" href="style.css">
+<style>
+  body { padding: var(--modem-space-sm); }
+  .lab { max-width: 62rem; margin: 0 auto; }
+  .lab__id { font-size: var(--modem-type-scale-large); color: var(--modem-green-bright); }
+  .lab__state { font-variant-numeric: tabular-nums; }
+  .lab__log {
+    white-space: pre-wrap;
+    word-break: break-word;
+    border: 1px solid var(--modem-white-dim);
+    padding: var(--modem-space-sm);
+    font-size: var(--modem-type-scale-small);
+    max-height: 22rem;
+    overflow-y: auto;
+  }
+  .lab__row { display: flex; flex-wrap: wrap; gap: var(--modem-space-sm); margin: var(--modem-space-sm) 0; }
+</style>
+</head>
+<body>
+<main class="lab">
+  <h1>Acoustic lab</h1>
+  <p>Two devices in a room, driven from one place. This device registers,
+  waits for an instruction, carries it out and posts what it measured.
+  Leave it on this screen with the screen awake.</p>
+
+  <p class="lab__id" id="who">device: ...</p>
+  <p class="lab__state" id="state">Not connected. Press Join.</p>
+
+  <div class="lab__row">
+    <button type="button" class="dial-button" id="join">Join the lab</button>
+    <button type="button" class="dial-button dial-button--secondary" id="stop">Stop</button>
+  </div>
+
+  <p>Add <code>?device=phone</code> or <code>?device=laptop</code> to the URL
+  to name this device. Anything else works too - it is only a label.</p>
+
+  <pre class="lab__log" id="log"></pre>
+</main>
+<script type="module" src="lab.js"></script>
+</body>
+</html>
