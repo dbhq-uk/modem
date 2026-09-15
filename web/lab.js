@@ -60,7 +60,7 @@ if (labKey) localStorage.setItem('lab-key', labKey);
 async function post(path, body) {
   try {
     const qs = labKey ? `?key=${encodeURIComponent(labKey)}` : '';
-    const res = await fetch(`/api/lab/${path}${qs}`, {
+    const res = await fetch(`/lab/api/${path}${qs}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ device, ...body }),
@@ -291,7 +291,7 @@ async function poll() {
   if (!running) return;
   if (!busy) {
     try {
-      const res = await fetch(`/api/lab/plan?device=${encodeURIComponent(device)}`, { cache: 'no-store' });
+      const res = await fetch(`/lab/api/plan?device=${encodeURIComponent(device)}`, { cache: 'no-store' });
       const plan = await res.json();
       // One signature per (revision, step) so a step runs once when it
       // is set, not once per poll - and re-running the same step is a

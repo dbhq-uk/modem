@@ -202,3 +202,73 @@ resource "cloudflare_ruleset" "modem_code_revalidates" {
     }
   }
 }
+
+# ---------------------------------------------------------------------
+# Cloudflare Access in front of the acoustic lab.
+#
+# The lab drives two real devices in a room and collects what they hear
+# (see docs/acoustic-harness.md). Its write endpoint used to be guarded
+# only by a shared key in the URL, which is a speed bump: this repository
+# is public, and a key a browser holds is a key a browser can leak.
+#
+# Access is the actual answer. It is an identity gate at the edge, so an
+# unauthenticated request never reaches the worker at all - there is
+# nothing for the page to hold and nothing for the repository to leak.
+# One-time PIN to a named address, because that is the identity provider
+# this account already runs and it needs no IdP to be configured.
+#
+# The shared key stays in place behind this, and that is deliberate
+# rather than forgotten. Two locks whose failure modes are unrelated: a
+# mistake in this Terraform cannot silently reopen the endpoint on its
+# own, because the key check lives in the worker and does not depend on
+# it.
+#
+# # One application, which is why the API sits under /lab/
+#
+# Access matches on host and path prefix, and one application covers one
+# prefix. The obvious layout - the page at /lab and the collector at
+# /api/lab/ - therefore needs two applications, and two applications on
+# one hostname issue tokens with two different `aud` claims. A top-level
+# navigation survives that, because a redirect to the login page is
+# something a browser can follow. The page's own `fetch` to the
+# collector does not: it would be answered with a 302 to a login screen,
+# which an XHR cannot complete, and the lab would simply look broken.
+#
+# So the collector lives at /lab/api/ instead, under the page's own
+# prefix, and one application covers both. Verified against the live
+# site: the first cut of this used two applications, and moving the
+# endpoint was cheaper than discovering that failure mode in a room with
+# two devices and a stopwatch.
+#
+# The rest of modem.dbhq.uk stays public. Scoping to /lab rather than the
+# whole host is the point.
+resource "cloudflare_zero_trust_access_application" "lab" {
+  account_id = var.account_id
+  name       = "modem acoustic lab"
+  domain     = "${var.hostname}/lab"
+  type       = "self_hosted"
+
+  # Matches the rest of this account's Access applications. A device left
+  # on the lab page for a long measurement must not have its session
+  # expire underneath it: the page's own fetches would start being
+  # redirected to a login screen, and an XHR cannot log anybody in - it
+  # would simply look like the lab had stopped working.
+  session_duration = "720h"
+
+  # Off. The whole point is that a stranger who finds this endpoint is
+  # asked to prove who they are, and an app launcher entry advertises it
+  # to anybody who reaches the dashboard.
+  app_launcher_visible = false
+}
+
+resource "cloudflare_zero_trust_access_policy" "lab_operator" {
+  account_id     = var.account_id
+  application_id = cloudflare_zero_trust_access_application.lab.id
+  name           = "Allow the operator"
+  precedence     = 1
+  decision       = "allow"
+
+  include {
+    email = [var.lab_operator_email]
+  }
+}

@@ -18,7 +18,7 @@
 //
 // # Why `_worker.js` with `_routes.json` rather than a `functions/` dir
 //
-// `_routes.json` restricts this worker to `/api/lab/*`. Every other path
+// `_routes.json` restricts this worker to `/lab/api/*`. Every other path
 // on the site is served by the platform as a static asset and never
 // enters this file, so a mistake in here cannot take the site down -
 // only the lab. That property is worth more than the tidier file layout
@@ -84,7 +84,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (!url.pathname.startsWith('/api/lab/')) {
+    if (!url.pathname.startsWith('/lab/api/')) {
       // Unreachable while _routes.json is correct. Kept so that a
       // mistake there degrades to "the site still works" rather than
       // "the worker answers everything with a 404".
@@ -95,7 +95,7 @@ export default {
 
     // What the devices should be doing now. Written by the operator
     // directly into KV; this only reads it.
-    if (url.pathname === '/api/lab/plan') {
+    if (url.pathname === '/lab/api/plan') {
       const device = clean(url.searchParams.get('device'));
       const raw = await env.LAB.get('plan');
       let plan;
@@ -124,7 +124,7 @@ export default {
     const device = clean(body.device);
     const now = new Date().toISOString();
 
-    if (url.pathname === '/api/lab/hello') {
+    if (url.pathname === '/lab/api/hello') {
       await env.LAB.put(
         `device:${device}`,
         JSON.stringify({ ...body, at: now, cf: request.cf?.colo ?? null }),
@@ -133,7 +133,7 @@ export default {
       return json({ ok: true, device, at: now });
     }
 
-    if (url.pathname === '/api/lab/report') {
+    if (url.pathname === '/lab/api/report') {
       // Sortable key: the operator lists by prefix and gets them in
       // order without reading a single value.
       const key = `report:${now}:${device}:${crypto.randomUUID().slice(0, 8)}`;

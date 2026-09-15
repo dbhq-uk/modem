@@ -48,7 +48,7 @@ Neither page is in the nav or the sitemap, and both are noindexed. They are inst
 
 ## Running the lab
 
-Open `/lab` on each device with a name and the shared key, press Join, allow the microphone, and leave the screens awake:
+Open `/lab` on each device with a name and the shared key. The first time, Cloudflare Access asks for the operator's email address and then a code sent to it; after that each device holds a cookie for 720 hours. Then press Join, allow the microphone, and leave the screens awake:
 
 ```
 https://modem.dbhq.uk/lab?device=phone&key=...
@@ -127,24 +127,24 @@ The plan changes take effect on the next poll, about a second. Only step 2 costs
 web/lab.html          the device page
 web/lab.js            registers, polls, executes, reports
 web/_worker.js        the collector
-web/_routes.json      restricts the worker to /api/lab/*
+web/_routes.json      restricts the worker to /lab/api/*
 scripts/lab.py        the operator side: set the plan, read the reports
 infra/main.tf         the KV namespace and its Pages binding
 ```
 
-Three endpoints, all under `/api/lab/`:
+Three endpoints, all under `/lab/api/`:
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/lab/hello` | POST | Device registers; records user agent, sample rate and what the microphone actually granted. |
-| `/api/lab/plan` | GET | What this device should be doing now. |
-| `/api/lab/report` | POST | Measurements and timelines. |
+| `/lab/api/hello` | POST | Device registers; records user agent, sample rate and what the microphone actually granted. |
+| `/lab/api/plan` | GET | What this device should be doing now. |
+| `/lab/api/report` | POST | Measurements and timelines. |
 
 The operator writes the plan straight into KV over Cloudflare's REST API, which is why changing what the devices do takes effect on their next poll instead of on the next deploy. The worker only ever reads the plan; it never writes one.
 
 ### `_routes.json` is not optional
 
-It restricts the worker to `/api/lab/*`, so every other path on the site is served by the platform as a static asset and never enters the worker at all. A mistake in the collector can therefore only break the lab.
+It restricts the worker to `/lab/api/*`, so every other path on the site is served by the platform as a static asset and never enters the worker at all. A mistake in the collector can therefore only break the lab.
 
 A `_worker.js` at the root *without* that file puts Pages into advanced mode, where the worker handles every single request - and one bug in it takes the whole site down. Both files, or neither. `scripts/build-dist.sh` copies them together and says so in a comment.
 
@@ -159,21 +159,35 @@ Two things about that resource are worth knowing before touching it:
 - The Pages project's `ignore_changes` no longer lists `deployment_configs`. It did while there was nothing in it, and that was wrong the moment a binding was needed, because a binding is not a deployment. `build_config` and `source` are still ignored, because wrangler owns those.
 - `usage_model` is pinned to `standard` explicitly. The provider's own default is the legacy `bundled`, so leaving it out makes every future plan propose a silent downgrade of the account's usage model - a billing change, offered as drift.
 
-## What stops it being abused
+## Who can get in
 
-This repository is public, so the existence and shape of the endpoint are public too.
+This repository is public, so the existence and shape of the endpoint are public too. Everything under `/lab` is therefore behind **Cloudflare Access**, declared in `infra/main.tf`.
 
-Writes take a shared key, compared against a value held in KV that appears nowhere in this repository. On the operator's machine it lives in `~/.dbhq/modem-lab-key`, mode 600. The comparison only happens when a key has been set, so an empty namespace does not lock the operator out of their own instrument.
+Access is an identity gate at the edge: an unauthenticated request is answered with a redirect to a login screen and never reaches the worker, the KV namespace or the page. Identity is a one-time PIN sent to a named address - the identity provider this account already runs, needing no IdP to be configured. The session lasts 720 hours, matching the rest of the account, so a device left on the lab page through a long measurement does not have its session expire underneath it.
 
-**That is a speed bump, not authentication, and the code says so.** The key rides in a URL held in two address bars, and anything a browser can hold, a browser can leak. What it stops is casual abuse, which is the whole of the actual risk here.
+The first time each device opens the lab it will ask for the operator's email address and then a code from that inbox. After that, a cookie.
 
-The bounds that do not depend on the key:
+### Why the collector lives at `/lab/api/` and not `/api/lab/`
+
+Access matches on host and path prefix, and one application covers one prefix. The obvious layout - page at `/lab`, collector at `/api/lab/` - needs two applications, and two applications on one hostname issue tokens with two different `aud` claims.
+
+A top-level navigation survives that, because a browser can follow a redirect to a login page. The page's own `fetch` to the collector cannot: it would be answered with a 302 to a login screen, an XHR has no way to complete that, and the lab would simply look broken. Putting the collector under the page's own prefix means one application covers both.
+
+The first cut of this used two applications. Moving the endpoint was cheaper than discovering that failure mode in a room with two devices and a stopwatch.
+
+### The second lock, and why it stays
+
+Writes also take a shared key, compared against a value held in KV that appears nowhere in this repository. On the operator's machine it lives in `~/.dbhq/modem-lab-key`, mode 600.
+
+On its own that was only a speed bump, and the code still says so: the key rides in a URL held in two address bars, and anything a browser can hold, a browser can leak. It is kept because its failure mode is unrelated to Access's. A mistake in the Terraform above cannot silently reopen the endpoint by itself, because the key check is in the worker and does not depend on it.
+
+The bounds that depend on neither:
 
 - 64 KB a request.
 - A seven-day TTL on every key written, so nothing accumulates.
-- No endpoint anywhere in the worker that reads stored data back out. The operator reads KV directly over the REST API.
+- No endpoint anywhere in the worker that reads stored data back out. The operator reads KV directly over the REST API, which does not go through the site at all and is therefore unaffected by Access.
 
-The worst case is somebody spending a free-tier write quota. It is not a route to reading anyone's measurements.
+The worst case is somebody spending a free-tier write quota. It was never a route to reading anyone's measurements, and it is now not a route to writing either.
 
 ## Related
 

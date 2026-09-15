@@ -33,3 +33,9 @@ variable "pages_target" {
   type        = string
   default     = "modem-9e4.pages.dev"
 }
+
+variable "lab_operator_email" {
+  description = "The only identity Cloudflare Access lets into the acoustic lab. Not a secret - it is the address the one-time PIN is sent to, and it is already on this repository's commits."
+  type        = string
+  default     = "dan@dbhq.uk"
+}
