@@ -33,10 +33,13 @@
 // written into KV as `labkey` by the operator, and compared against
 // `?key=` on the request.
 //
-// This is a speed bump, not authentication: the key travels in a URL
-// that a phone and a laptop both hold in their address bars, and
-// anything a browser can hold, a browser can leak. It stops casual
-// abuse, which is all that is actually on the table here.
+// It is a bearer token, not identity, and it is the whole lock rather
+// than one of two: Cloudflare Access was put in front of this and taken
+// out again, because a login screen and a code in an inbox are the wrong
+// shape for two devices being picked up and put down in a room. Anyone
+// who has the key can write. What that stops is the actual risk, which
+// is a stranger finding a public write endpoint in a public repository
+// and spending a free-tier quota on it.
 //
 // Bounded regardless of the key: 64 KB a request, a 7-day TTL on every
 // key written, and nothing is ever read back out by this worker. The
