@@ -350,7 +350,15 @@ async function poll() {
 // operator can see which device needs a tap instead of guessing why a
 // run produced nothing.
 async function autoRejoin() {
-  if (localStorage.getItem('lab-joined') !== '1') return;
+  // Unconditional. It was gated on a flag this page had set on a
+  // previous Join, which is useless for the case that matters: a device
+  // running an older copy of this file has never set the flag, so the
+  // first reload onto a new build - the exact moment the loop needs it -
+  // was the one time it would not fire.
+  //
+  // Polling costs nothing and needs no permission. Audio is still only
+  // opened when an op that needs it arrives, so a stranger who loads
+  // this page gets a poll loop and no microphone prompt.
   running = true;
   setState('rejoined after reload, waiting for instructions');
   log('rejoined automatically');
