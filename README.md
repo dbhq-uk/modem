@@ -73,6 +73,12 @@ The FFT gets the same treatment: hand-computed vectors and an independent naive 
 
 Interop is a coarse conformance check, not a fine-grained guard on the protocol constants: our own baud rate can drift to 312 (+4%) and either tone can shift by 40 Hz before either direction even notices. The precise pins are `tx.rs`'s `tones_per_role` and `samples_for_bits_is_fractional` tests, which catch a one-baud or one-hertz change immediately.
 
+## The acoustic harness, for when two real devices will not talk
+
+Two phones on a desk are not a wire, and the two-device mode kept failing in rooms while every test in the workspace passed. `/calibrate` measures what one device hears; `/lab` drives both at once from one place, so a failing call can be watched from both ends with timestamps rather than reconstructed from what somebody saw on a screen.
+
+Full documentation, including the plan format, the operator commands and what stops the endpoint being abused: [`docs/acoustic-harness.md`](docs/acoustic-harness.md).
+
 ## Layout
 
 ```
@@ -80,6 +86,8 @@ modem-core/    the DSP and protocol. no_std, so I/O is a compile error
 modem-audio/   WAV I/O, the sound card, and the minimodem cross-validation
 modem-tui/     the terminal, the waterfall, and the `modem` binary
 modem-wasm/    browser endpoint, built for an AudioWorklet
+web/           modem.dbhq.uk, including /calibrate and /lab
+infra/         Terraform for the Pages project, DNS and the lab's KV
 brand/         the icon and the design tokens both surfaces share
 spike/         the AudioWorklet proof this architecture rests on
 ```
