@@ -66,9 +66,24 @@ rmdir dist/web
 # that page.js reads to decide which route it is. Each directory gets a
 # copy of the one index.html with <base href="/"> injected, so its
 # relative assets still resolve from the root while location.pathname
-# stays /demo/, /originate/ or /receive/. Canonical and og:url are
-# rewritten per route as well - a route is real, separately-listed
-# content, and its canonical has to say so itself.
+# stays /demo/, /originate/ or /receive/.
+#
+# The canonical is deliberately NOT rewritten: it stays pointed at the
+# root on all three. These files are byte-identical to the homepage -
+# same title, same description, same content - so a per-route canonical
+# published three duplicates of / and left Google to pick a winner
+# between them. Nothing ever listed them separately the way the comment
+# here used to claim: they are in no sitemap and no HTML link reaches
+# them (Dan, 15 Sep 2026, after GSC showed 4 of 6 pages indexed and all
+# three routes unknown to Google). The routes exist so a shared
+# /receive link opens on the right route - a runtime concern, not a
+# search one.
+#
+# og:url IS still rewritten per route, and that is not an oversight.
+# Facebook and the rest key engagement off og:url, so collapsing it to
+# / would make every shared route link dedupe to the homepage. Google
+# treats og:url as a weak hint that an explicit rel=canonical
+# overrides, so the two disagreeing costs nothing in search.
 python3 - <<'PY'
 from pathlib import Path
 
@@ -77,15 +92,14 @@ assert '<base' not in src, 'index.html already has a <base>; rework this step'
 out = src.replace('<head>', '<head>\n<base href="/">', 1)
 canonical = '<link rel="canonical" href="https://modem.dbhq.uk/">'
 og_url = '<meta property="og:url" content="https://modem.dbhq.uk/">'
-assert out.count(canonical) == 1, 'expected exactly one canonical link to rewrite per route'
+assert out.count(canonical) == 1, 'expected exactly one canonical link on the page'
 assert out.count(og_url) == 1, 'expected exactly one og:url meta to rewrite per route'
 for route in ('demo', 'originate', 'receive'):
     d = Path('dist') / route
     d.mkdir(parents=True, exist_ok=True)
-    d.joinpath('index.html').write_text(
-        out.replace(canonical, f'<link rel="canonical" href="https://modem.dbhq.uk/{route}/">')
-           .replace(og_url, f'<meta property="og:url" content="https://modem.dbhq.uk/{route}/">')
-    )
+    written = out.replace(og_url, f'<meta property="og:url" content="https://modem.dbhq.uk/{route}/">')
+    assert written.count(canonical) == 1, 'the route canonical must stay pointed at the root'
+    d.joinpath('index.html').write_text(written)
     print('wrote', d / 'index.html')
 PY
 
