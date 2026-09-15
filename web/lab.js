@@ -210,6 +210,35 @@ async function runModem(step) {
   });
   endpoint.addEventListener('error', (e) => mark('error', { detail: String(e.detail) }));
 
+  // Send and yield, exactly as the site's own data check does.
+  //
+  // Without this the lab was not reproducing the product. An end that
+  // holds the turn and never gives it up transmits full-scale mark from
+  // `tx` for ever - not the attenuated `idle_tx` - so the originating
+  // end sat deafening itself roughly twenty times harder than anything
+  // IDLE_MARK_AMPLITUDE controls, and the adaptive backoff never ran
+  // because that only applies to an end *without* the turn.
+  //
+  // That made every lab run a test of a situation the site never
+  // creates, which is worse than no test at all: it was producing real
+  // numbers about the wrong thing.
+  const CANARY = 'LAB-CHECK-OK';
+  let sentOwn = false;
+  const sendWhenHolding = (detail) => {
+    if (sentOwn || !detail || !detail.hasTurn || detail.state !== SessionState.CONNECTED) return;
+    sentOwn = true;
+    mark('sending');
+    endpoint.send(CANARY);
+    // A real gap before yielding, matching the site and modem-core's own
+    // convention - see startWiredDataCheck's note on why back-to-back
+    // does not work.
+    setTimeout(() => {
+      mark('yielding');
+      endpoint.yieldTurn();
+    }, 800);
+  };
+  endpoint.addEventListener('status', (e) => sendWhenHolding(e.detail));
+
   try {
     // Cache-busted on purpose. The site sends a four-hour Cache-Control
     // on .js and .wasm, so a device that has run once would keep using
@@ -234,6 +263,11 @@ async function runModem(step) {
       endpoint.answer();
       mark('answering');
     }
+    // Primed from the status already known rather than waiting for a
+    // change that may never come - the same bug the site had, and for
+    // the same reason: the originating end reaches CONNECTED already
+    // holding the turn.
+    if (endpoint.lastStatus) sendWhenHolding(endpoint.lastStatus);
   } catch (err) {
     mark('failed', { error: String(err && err.message ? err.message : err) });
   }
