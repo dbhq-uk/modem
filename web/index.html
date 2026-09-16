@@ -104,30 +104,32 @@
   <!-- Seven real pages (task 3n, 9 Sep 2026) - Downloads, Projects and
        About were anchors on this page; each is its own destination now,
        per the owner's own correction that the two-page structure was an
-       over-consolidation. Four of the seven now sit behind a "More"
-       disclosure rather than in the row (16 Sep 2026), because seven
-       items at the nav's type filled a phone with nothing to spare.
-       Generated - see web/_gen/pages.py, which is the single source for
-       this nav, the footer and the consent block shared by all seven
-       pages, and which carries the reasoning for both the split and the
-       order; never hand-edit between these markers. Placed ahead of
-       .hero, not overlaid on it, so the hero still renders full-bleed on
-       load - an overlay nav would eat into the image it exists to
-       show. -->
+       over-consolidation. The row holds four of them now (16 Sep 2026),
+       one being a "Behind it" disclosure over Explained, Research and
+       Debugging - seven items at the nav's type filled a phone with
+       nothing to spare, and a flat five wants 371px, which fits no
+       phone at all. /projects left the nav entirely the same day: it
+       was the only item that took you off the site, and it is reached
+       from the footer instead. Generated - see web/_gen/pages.py, which
+       is the single source for this nav, the footer and the consent
+       block shared by all seven pages, and which carries the reasoning
+       for the grouping; never hand-edit between these markers. Placed
+       ahead of .hero, not overlaid on it, so the hero still renders
+       full-bleed on load - an overlay nav would eat into the image it
+       exists to show. -->
   <!-- BEGIN generated: nav (web/_gen/pages.py - do not hand-edit) -->
 <nav class="site-nav" aria-label="Primary">
   <a class="site-nav__link" href="/" aria-current="page">Hear it</a>
-  <a class="site-nav__link" href="/explained">Explained</a>
-  <a class="site-nav__link" href="/downloads">Downloads</a>
   <details class="site-nav__more" data-nav-more>
-    <summary class="site-nav__summary">More<svg class="site-nav__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg></summary>
+    <summary class="site-nav__summary">Behind it<svg class="site-nav__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg></summary>
     <div class="site-nav__panel">
+      <a class="site-nav__link" href="/explained">Explained</a>
       <a class="site-nav__link" href="/research">Research</a>
       <a class="site-nav__link" href="/debugging">Debugging</a>
-      <a class="site-nav__link" href="/projects">Projects</a>
-      <a class="site-nav__link" href="/about">About</a>
     </div>
   </details>
+  <a class="site-nav__link" href="/downloads">Downloads</a>
+  <a class="site-nav__link" href="/about">About</a>
 </nav>
 <script type="module" src="nav.js"></script>
 <!-- END generated: nav -->
@@ -551,7 +553,7 @@
 
   <!-- BEGIN generated: footer (web/_gen/pages.py - do not hand-edit) -->
 <footer class="endorsement">
-  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed.</p>
+  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed. <a class="endorsement__projects" href="/projects">Also from DBHQ</a>.</p>
 
   <p class="endorsement__source">
     <a class="endorsement__github" href="https://github.com/dbhq-uk/modem" rel="noopener">

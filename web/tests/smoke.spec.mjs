@@ -437,12 +437,33 @@ test.describe('the shared chrome', () => {
   test('the nav reaches every page and marks the current one', async ({ page }) => {
     for (const path of PAGES) {
       await page.goto(path);
-      // All seven links are in the markup on every page, whether or not
-      // the disclosure holding four of them happens to be open. That is
+      // Six links are in the nav markup on every page, whether or not
+      // the disclosure holding three of them happens to be open. That is
       // the point of a <details> rather than a scripted menu: a crawler
-      // that never clicks anything still sees the whole site.
-      await expect(page.locator('.site-nav__link')).toHaveCount(7);
-      await expect(page.locator('.site-nav__link[aria-current="page"]')).toHaveCount(1);
+      // that never clicks anything still sees them.
+      await expect(page.locator('.site-nav__link')).toHaveCount(6);
+
+      // Exactly one thing on the page says it is the current page -
+      // but NOT always in the nav. /projects left the nav on 16 Sep
+      // 2026 and is reached from the footer, so there the footer link
+      // is the one that marks itself. Asserted across the whole
+      // document rather than inside .site-nav, because the invariant
+      // that actually matters is "every page marks itself exactly
+      // once", and scoping it to the nav is what would quietly stop
+      // being true.
+      await expect(page.locator('[aria-current="page"]')).toHaveCount(1);
+    }
+  });
+
+  // /projects is reachable, and only from the footer. A page dropped
+  // from the nav and not picked up anywhere else is a page that is
+  // still in the sitemap, still returns 200, and is reachable from no
+  // link on the site - which nothing else here would catch.
+  test('/projects is reachable from the footer on every page', async ({ page }) => {
+    for (const path of PAGES) {
+      await page.goto(path);
+      await expect(page.locator('.site-nav__link[href="/projects"]')).toHaveCount(0);
+      await expect(page.locator('footer a[href="/projects"]')).toHaveCount(1);
     }
   });
 
@@ -450,10 +471,10 @@ test.describe('the shared chrome', () => {
   // ran out of phone. Three things can break it and none of them shows
   // up as a bad status code: the panel can be clipped by an overflow
   // value on the nav (it was `auto` until this change, and would have
-  // cut the menu off at the nav's own bottom edge), the four links
-  // inside can stop being reachable, and the only sign of where you are
-  // can vanish when the current page is one of the hidden four.
-  test('the More disclosure opens, reaches its pages, and marks the current one', async ({ page }) => {
+  // cut the menu off at the nav's own bottom edge), the links inside
+  // can stop being reachable, and the only sign of where you are can
+  // vanish when the current page is one of the hidden three.
+  test('the Behind it disclosure opens, reaches its pages, and marks the current one', async ({ page }) => {
     await page.goto('/');
     await dismissConsent(page);
 
@@ -466,18 +487,18 @@ test.describe('the shared chrome', () => {
 
     // Visible, not merely present - a clipped panel is still in the DOM
     // and still has a box; it is just drawn nowhere you can click it.
-    for (const label of ['Research', 'Debugging', 'Projects', 'About']) {
+    for (const label of ['Explained', 'Research', 'Debugging']) {
       await expect(panel.getByRole('link', { name: label, exact: true })).toBeVisible();
     }
 
-    await panel.getByRole('link', { name: 'Projects', exact: true }).click();
-    await expect(page).toHaveURL(/\/projects$/);
+    await panel.getByRole('link', { name: 'Research', exact: true }).click();
+    await expect(page).toHaveURL(/\/research$/);
 
     // On a page inside the disclosure the summary carries the marker,
     // because the link that carries aria-current is shut away.
     await expect(page.locator('.site-nav__summary--current')).toHaveCount(1);
     // And on one of the three top-level pages it does not.
-    await page.goto('/explained');
+    await page.goto('/downloads');
     await expect(page.locator('.site-nav__summary--current')).toHaveCount(0);
   });
 
@@ -487,7 +508,7 @@ test.describe('the shared chrome', () => {
   // `script-src 'self'`, and the tag is relative, so a route directory
   // without its <base href="/"> would fetch the module from the wrong
   // path and fail silently.
-  test('Escape closes the More disclosure', async ({ page }) => {
+  test('Escape closes the Behind it disclosure', async ({ page }) => {
     await page.goto('/');
     await dismissConsent(page);
     await page.locator('.site-nav__summary').click();
@@ -496,12 +517,20 @@ test.describe('the shared chrome', () => {
     await expect(page.locator('.site-nav__panel')).toBeHidden();
   });
 
-  // Removed 10 Sep 2026 in favour of /projects, which is in the nav. If
-  // it ever comes back to the footer it is duplication, not a feature -
-  // the same mirror-drift rule the content plan keeps for the main site.
-  test('the footer does not repeat the sibling links /projects carries', async ({ page }) => {
+  // The footer carries ONE link to /projects and not the sibling list
+  // itself. The list was pulled out of the footer on 10 Sep 2026
+  // because repeating bbs, heliograph and the rest on all seven pages
+  // said it twice; that rule still holds, and a link to the page
+  // holding them is not a breach of it. This test is the line between
+  // the two - it would fail the moment the names came back.
+  test('the footer links /projects without repeating the sibling list', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('footer')).not.toContainText('Also from DBHQ');
+    const footer = page.locator('footer');
+    await expect(footer.locator('a[href="/projects"]')).toHaveCount(1);
+    for (const host of ['bbs.dbhq.uk', 'heliograph.dbhq.uk', 'skills.dbhq.uk',
+      'github.com/dbhq-uk/terraverdict', 'github.com/dbhq-uk/portmark']) {
+      await expect(footer.locator(`a[href*="${host}"]`)).toHaveCount(0);
+    }
     await page.goto('/projects');
     await expect(page.locator('h1')).toHaveText('Also from DBHQ');
   });

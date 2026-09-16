@@ -143,23 +143,23 @@
 
 <div class="crt-frame">
 
-  <!-- Three links and a "More" disclosure - see index.html's identical comment and
-       web/_gen/pages.py, the single source for this nav, the footer and
-       the consent block shared by all seven. -->
+  <!-- Four items, one of them a "Behind it" disclosure - see
+       index.html's identical comment and web/_gen/pages.py, the single
+       source for this nav, the footer and the consent block shared by
+       all seven pages. -->
   <!-- BEGIN generated: nav (web/_gen/pages.py - do not hand-edit) -->
 <nav class="site-nav" aria-label="Primary">
   <a class="site-nav__link" href="/">Hear it</a>
-  <a class="site-nav__link" href="/explained" aria-current="page">Explained</a>
-  <a class="site-nav__link" href="/downloads">Downloads</a>
   <details class="site-nav__more" data-nav-more>
-    <summary class="site-nav__summary">More<svg class="site-nav__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg></summary>
+    <summary class="site-nav__summary site-nav__summary--current">Behind it<svg class="site-nav__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg></summary>
     <div class="site-nav__panel">
+      <a class="site-nav__link" href="/explained" aria-current="page">Explained</a>
       <a class="site-nav__link" href="/research">Research</a>
       <a class="site-nav__link" href="/debugging">Debugging</a>
-      <a class="site-nav__link" href="/projects">Projects</a>
-      <a class="site-nav__link" href="/about">About</a>
     </div>
   </details>
+  <a class="site-nav__link" href="/downloads">Downloads</a>
+  <a class="site-nav__link" href="/about">About</a>
 </nav>
 <script type="module" src="nav.js"></script>
 <!-- END generated: nav -->
@@ -382,7 +382,7 @@
 
   <!-- BEGIN generated: footer (web/_gen/pages.py - do not hand-edit) -->
 <footer class="endorsement">
-  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed.</p>
+  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed. <a class="endorsement__projects" href="/projects">Also from DBHQ</a>.</p>
 
   <p class="endorsement__source">
     <a class="endorsement__github" href="https://github.com/dbhq-uk/modem" rel="noopener">

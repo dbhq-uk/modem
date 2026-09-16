@@ -34,12 +34,16 @@
 <link rel="stylesheet" href="style.css">
 <!-- Structured data: application/ld+json is data, not script - see
      index.html's identical comment on why this is exempt from
-     script-src under this site's strict CSP. New page on 9 Sep 2026
-     (task 3n): Projects was an anchor landing on the footer's own "Also
-     from DBHQ" group; it is a real destination now, and the footer
-     keeps its own compact copy of the same three siblings regardless -
-     see web/_gen/pages.py's own doc on why that is accepted duplication,
-     not the kind this task exists to remove. -->
+     script-src under this site's strict CSP.
+
+     THIS PAGE HAS BEEN ALL THREE THINGS. On 9 Sep 2026 it was an anchor
+     landing on the footer's own "Also from DBHQ" group. On 10 Sep the
+     group was deleted and this became a real page in the primary nav.
+     On 16 Sep it left the nav again - it was the only nav item that
+     took you off the site, which is a footer job - and the footer now
+     carries one link here inside its byline. The sibling list has only
+     ever lived in one place at a time, which is the rule; what changed
+     is which place. See web/_gen/pages.py's own doc. -->
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -75,23 +79,23 @@
 
 <div class="crt-frame">
 
-  <!-- Three links and a "More" disclosure - see index.html's identical
-       comment and web/_gen/pages.py, the single source for this nav, the
-       footer and the consent block shared by all seven pages. -->
+  <!-- Four items, one of them a "Behind it" disclosure - see
+       index.html's identical comment and web/_gen/pages.py, the single
+       source for this nav, the footer and the consent block shared by
+       all seven pages. -->
   <!-- BEGIN generated: nav (web/_gen/pages.py - do not hand-edit) -->
 <nav class="site-nav" aria-label="Primary">
   <a class="site-nav__link" href="/">Hear it</a>
-  <a class="site-nav__link" href="/explained">Explained</a>
-  <a class="site-nav__link" href="/downloads">Downloads</a>
   <details class="site-nav__more" data-nav-more>
-    <summary class="site-nav__summary site-nav__summary--current">More<svg class="site-nav__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg></summary>
+    <summary class="site-nav__summary">Behind it<svg class="site-nav__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg></summary>
     <div class="site-nav__panel">
+      <a class="site-nav__link" href="/explained">Explained</a>
       <a class="site-nav__link" href="/research">Research</a>
       <a class="site-nav__link" href="/debugging">Debugging</a>
-      <a class="site-nav__link" href="/projects" aria-current="page">Projects</a>
-      <a class="site-nav__link" href="/about">About</a>
     </div>
   </details>
+  <a class="site-nav__link" href="/downloads">Downloads</a>
+  <a class="site-nav__link" href="/about">About</a>
 </nav>
 <script type="module" src="nav.js"></script>
 <!-- END generated: nav -->
@@ -212,7 +216,7 @@
 
   <!-- BEGIN generated: footer (web/_gen/pages.py - do not hand-edit) -->
 <footer class="endorsement">
-  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed.</p>
+  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed. <a class="endorsement__projects" href="/projects" aria-current="page">Also from DBHQ</a>.</p>
 
   <p class="endorsement__source">
     <a class="endorsement__github" href="https://github.com/dbhq-uk/modem" rel="noopener">

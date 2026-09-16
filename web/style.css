@@ -376,11 +376,11 @@ body {
 }
 
 /* ---------------------------------------------------------------------
- * site-nav - the sticky primary nav: three links (Hear it, Explained,
- * Downloads) and a "More" disclosure holding the other four real pages,
- * as of 16 Sep 2026 - no item is an anchor any more (see
- * web/_gen/pages.py's own doc, which carries the reasoning for the
- * split). Placed
+ * site-nav - the sticky primary nav: Hear it, a "Behind it" disclosure
+ * holding Explained, Research and Debugging, then Downloads and About,
+ * as of 16 Sep 2026 - no item is an anchor any more, and /projects is
+ * reached from the footer rather than from here (see web/_gen/pages.py's
+ * own doc, which carries the reasoning for the grouping). Placed
  * ahead of .hero in the markup rather than overlaid on it: a nav painted
  * on top of a full-bleed hero would eat into the image it exists to
  * show, so this is a normal, non-overlapping block instead, sticky only
@@ -471,7 +471,7 @@ body {
  * A native <details>/<summary>, so it opens with no script and announces
  * its own expanded state - web/nav.js only adds Escape, click-away and
  * closing on the way out. Styled to be indistinguishable from the three
- * links beside it apart from the chevron: it is the fourth thing in a
+ * links beside it apart from the chevron: it is one of four things in a
  * row of four, and a control that looked like a button would read as an
  * action rather than as more nav.
  * ------------------------------------------------------------------- */
@@ -536,10 +536,13 @@ body {
 .site-nav__panel {
   position: absolute;
   top: 100%;
-  /* Anchored to its right edge, not its left: "More" is the last item
-     in a centred row, so a panel growing leftward stays on screen at
-     every width, where one growing rightward runs off a narrow phone. */
-  right: 0;
+  /* Anchored to its left edge. It was `right: 0` while the trigger was
+     the last item in the row, where growing leftward was the only way
+     to stay on screen. The trigger is now second of four, so its left
+     edge is about a fifth of the way across even at 320px and a panel
+     hanging under it lands well inside the viewport - which is also the
+     direction a reader expects a menu to open from its label. */
+  left: 0;
   display: flex;
   flex-direction: column;
   min-width: 9rem;
@@ -2119,9 +2122,13 @@ body.app-mode {
   max-width: 62ch;
 }
 
-/* Two labelled groups side by side where there is room, stacking on a
-   narrow viewport via the same wrap every other flex row on this page
-   already uses. */
+/* The one internal link in the byline, back on 16 Sep 2026 when
+   /projects left the primary nav. Styled as part of the sentence rather
+   than as a row of its own: the footer gains a link, not a line. */
+.endorsement__projects {
+  white-space: nowrap;
+}
+
 /* One link under the byline, with GitHub's own mark beside it.
  *
  * This replaced two labelled groups. The sibling list went to /projects,
@@ -2163,23 +2170,13 @@ body.app-mode {
   flex: none;
 }
 
-/* The "Also from DBHQ" group's own list - one sibling per line, each
-   with the one-sentence reason to click that a bare name never gave
-   (see the design spec's defect 3). A list rather than
-   .endorsement__links's single row of names: a name-plus-description no
-   longer reads as one short row, and forcing it into one anyway just
-   wraps mid-sentence on a narrow phone. */
-.endorsement__siblings {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  text-align: left;
-  max-width: 32ch;
-}
-
-.endorsement__siblings li {
-  padding: 2px 0;
-}
+/* .endorsement__siblings was here - the old "Also from DBHQ" group's
+   list of one sibling per line. The list moved to /projects on 10 Sep
+   2026 and the rules outlived it by six days, matching nothing on any
+   page. Deleted 16 Sep 2026 rather than left in place: the new byline
+   link is a different element doing a different job, and two rules
+   named after a list that no longer exists is how the next person
+   styles the wrong thing. */
 
 /* ---------------------------------------------------------------------
  * contents - explained.html's own short jump list to its sections (see

@@ -48,16 +48,43 @@ WEB = HERE.parent
 # make some rooms"). Seven links at the nav's own small type ran to the
 # full width of a phone with nothing left over, and the seventh arrived
 # the same day the sixth did - so the next page added would have been
-# the one that broke it.
+# the one that broke it. Measured rather than guessed: a flat five-item
+# bar wants 371px, which fits no phone at all; even 320px is available
+# in full only because this bar is centred chrome with no wordmark
+# beside it.
 #
-# The split is by what the visitor came to do, not by subject. Hear it,
-# Explained and Downloads are the three things somebody arrives wanting:
-# hear the thing, understand it, get it. Research, Debugging, Projects
-# and About are all secondary reading that nobody lands here looking for,
-# so they sit behind one disclosure rather than costing four slots.
+# THE FIRST ATTEMPT AT THIS GROUPED BY REMAINDER AND IT SHOWED (Dan,
+# 16 Sep 2026: "this structure is crap"). Hear it, Explained and
+# Downloads went in the row and the other four went behind a disclosure
+# labelled "More", which is not a group - it is the four that were left,
+# and no honest label exists for "the four that were left". Two things
+# fixed it:
+#
+#   - ONE RULE DRAWS THE LINE. The row is what you do with the modem -
+#     hear it, get it, see who made it. The disclosure is the reading
+#     about it, and every page inside is the same kind of thing: how it
+#     works, what already existed, and what went wrong building this
+#     one. "Behind it" is a real name for that, so the label carries
+#     meaning instead of apologising for the menu.
+#
+#   - PROJECTS LEFT THE NAV ENTIRELY. It was the only item in the row
+#     that takes you off the site - six rooms and an exit door in the
+#     same rank. It was also circular: it was pulled OUT of the footer
+#     on 10 Sep precisely because it had become a page. The page stays,
+#     the sibling list stays on it, and the footer carries one link to
+#     it (see FOOTER below) - which is not the duplication the 10 Sep
+#     rule banned, because the four sibling links still live in exactly
+#     one place.
 #
 # Each tuple is id, label, href. The id is the internal key for
 # aria-current and never changes with the label.
+#
+# MORE_ID marks where in the row the disclosure sits. It is a position in
+# this tuple rather than a separate "insert at index 1", so the order of
+# the bar reads off one list in the order it renders.
+MORE_ID = "__more__"
+MORE_LABEL = "Behind it"
+
 NAV_ITEMS = (
     # "Hear it", not "Try" (Dan, 9 Sep 2026). Try names an effort the
     # visitor has to make; this names what they get, and it says the same
@@ -66,46 +93,46 @@ NAV_ITEMS = (
     # renaming it would move every aria-current mapping below for
     # nothing.
     ("try", "Hear it", "/"),
-    ("explained", "Explained", "/explained"),
+    (MORE_ID, MORE_LABEL, None),
     ("downloads", "Downloads", "/downloads"),
-)
-
-# What sits behind "More". Order runs from the pages about this project
-# outward to the pages about who made it: what was found out (Research,
-# Debugging), then the rest of the estate (Projects), then the colophon
-# (About).
-NAV_MORE = (
-    ("research", "Research", "/research"),
-    # Added 16 Sep 2026: the account of fixing the acoustic mode, after
-    # three confident wrong answers. It sits next to Research because it
-    # is the same kind of page - what was found out, rather than what the
-    # thing does.
-    ("debugging", "Debugging", "/debugging"),
-    # "Projects", not "DBHQ" (Dan, 16 Sep 2026), reversing the 10 Sep
-    # call. "DBHQ" named the thing rather than describing the list, which
-    # was the right instinct for a top-level item sat between Downloads
-    # and About - but inside a disclosure the label's job changes. The
-    # four items under "More" are read as a list, and three of them are
-    # page names while the fourth was an organisation name; it read as
-    # the odd one out rather than as the specific one. The id and the URL
-    # stay `projects` regardless: the id is the internal key for
-    # aria-current, and changing the URL would break every link already
-    # pointing at /projects, including the sitemap and the sibling sites'
-    # own footers.
-    ("projects", "Projects", "/projects"),
+    # About keeps a slot of its own rather than joining the disclosure,
+    # which is where the first draft of this put it. It is the one page
+    # carrying the licence and the crate list, and Explained moving
+    # inside freed the room, so there was no longer anything to buy by
+    # hiding it.
     ("about", "About", "/about"),
 )
 
-# The label on the disclosure itself. Not a page, so it has no id and
-# never takes aria-current - but it does get a marker class when the
-# current page is one of the four behind it, or there would be no sign
-# anywhere in the chrome of where you are.
-MORE_LABEL = "More"
+# What sits behind "Behind it". One kind of page, three depths: how this
+# thing works (Explained), what already existed before it (Research),
+# and what went wrong building it (Debugging). Read in that order they
+# go from the subject outward to the process, which is also the order
+# somebody actually gets curious in.
+#
+# EXPLAINED IS IN HERE RATHER THAN IN THE ROW, and it is the highest
+# traffic page on the site, so this is a real trade. What it costs is
+# visibility to a human scanning the bar. What it does NOT cost is
+# anything to search: <details> is a disclosure, not a lazy-loaded
+# panel, so all three links are in the served HTML of every page whether
+# it is open or shut. Internal linking, crawl reach and the sitemap are
+# byte-for-byte what they were.
+NAV_MORE = (
+    ("explained", "Explained", "/explained"),
+    ("research", "Research", "/research"),
+    # Added 16 Sep 2026: the account of fixing the acoustic mode, after
+    # three confident wrong answers.
+    ("debugging", "Debugging", "/debugging"),
+)
 
 # Which page each file is, for aria-current="page" - and which of the
 # three regions each file actually carries. 404.html gets a nav and a
 # footer (so it is not a dead end) but no consent dialog: it is
 # noindexed and carries no analytics of its own to gate.
+#
+# projects.html's nav_id is "projects" and no nav item claims it, which
+# is deliberate: the page is reached from the footer now, and it is the
+# footer link that takes aria-current there. Every page still marks
+# itself exactly once, just not always in the same region.
 PAGES = {
     "index.html": {"nav_id": "try", "regions": ("nav", "footer", "consent")},
     "explained.html": {"nav_id": "explained", "regions": ("nav", "footer", "consent")},
@@ -132,9 +159,11 @@ CHEVRON = (
 
 
 def render_nav(current_id: str | None) -> str:
-    """The sticky primary nav: three links and a "More" disclosure holding
-    four more. `current_id` is None on 404.html, where none of the seven
-    is "the current page" - a 404 is not one of them.
+    """The sticky primary nav: three links and a "Behind it" disclosure
+    holding three more. `current_id` is None on 404.html, where none of
+    them is "the current page" - a 404 is not one of them - and it is
+    "projects" on projects.html, which no nav item claims, so the nav
+    marks nothing and the footer link marks itself instead.
 
     The disclosure is a native `<details>`/`<summary>`, so it opens, takes
     keyboard focus and announces its state with no JavaScript at all -
@@ -147,25 +176,27 @@ def render_nav(current_id: str | None) -> str:
         current = ' aria-current="page"' if item_id == current_id else ""
         return f'{indent}<a class="site-nav__link" href="{href}"{current}>{label}</a>'
 
-    rows = [link(*item, "  ") for item in NAV_ITEMS]
-
-    # The marker on the summary when the open page is one of the four
-    # inside. It is a class rather than aria-current: only one element in
-    # a nav may be the current page, and that is the link itself, which
+    # The marker on the summary when the open page is one of the three
+    # inside. It is a class rather than aria-current: only one element on
+    # a page may be the current one, and that is the link itself, which
     # is in the markup whether the disclosure is open or shut.
     inside = any(item_id == current_id for item_id, _, _ in NAV_MORE)
     summary_class = "site-nav__summary"
     if inside:
         summary_class += " site-nav__summary--current"
 
-    more = [link(*item, "      ") for item in NAV_MORE]
-    body = "\n".join(more)
-    rows.append(
+    panel = "\n".join(link(*item, "      ") for item in NAV_MORE)
+    disclosure = (
         f'  <details class="site-nav__more" data-nav-more>\n'
         f'    <summary class="{summary_class}">{MORE_LABEL}{CHEVRON}</summary>\n'
-        f'    <div class="site-nav__panel">\n{body}\n    </div>\n'
+        f'    <div class="site-nav__panel">\n{panel}\n    </div>\n'
         f'  </details>'
     )
+
+    rows = [
+        disclosure if item_id == MORE_ID else link(item_id, label, href, "  ")
+        for item_id, label, href in NAV_ITEMS
+    ]
 
     links = "\n".join(rows)
     return (
@@ -195,19 +226,31 @@ def render_nav(current_id: str | None) -> str:
 # is no rag to balance.
 #
 # It carried two labelled groups until 10 Sep 2026. "Also from DBHQ" went
-# first: /projects carries the same three links and is in the primary
-# nav, so repeating them in the footer of all seven pages said it twice
-# and made the footer the longest thing on the short pages. Crawling is
-# unaffected - /projects is in the nav and the sitemap - though internal
-# weight to the siblings drops from sitewide to one page, which is the
-# deliberate trade.
+# first: /projects carried the same links and was in the primary nav, so
+# repeating them in the footer of all seven pages said it twice and made
+# the footer the longest thing on the short pages.
 #
 # That left "This project" as a label over a single GitHub link whose URL
 # the byline directly above already carried: a heading, a lot of vertical
 # space, and one orphaned word (Dan: "foot looks crap still"). Now one
 # marked link, said once.
-FOOTER = """<footer class="endorsement">
-  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed.</p>
+#
+# ONE LINK TO /projects CAME BACK ON 16 Sep 2026, and it is not a repeal
+# of the rule above. The rule bans repeating the *sibling list* - bbs,
+# heliograph, skills, terraverdict, portmark - in the footer of every
+# page, and that list still lives in exactly one place. What comes back
+# is a single internal link to the page holding it, because /projects
+# left the primary nav that day and a page reachable from nowhere is a
+# page that is not on the site. It is inside the byline sentence rather
+# than as a row of its own, so the footer gains no new line.
+#
+# It takes aria-current on /projects itself, which is why the footer is
+# rendered per page rather than being one constant. Without it /projects
+# would be the one page on the site that marks itself nowhere.
+def render_footer(current_id: str | None) -> str:
+    current = ' aria-current="page"' if current_id == "projects" else ""
+    return f"""<footer class="endorsement">
+  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed. <a class="endorsement__projects" href="/projects"{current}>Also from DBHQ</a>.</p>
 
   <p class="endorsement__source">
     <a class="endorsement__github" href="https://github.com/dbhq-uk/modem" rel="noopener">
@@ -253,7 +296,7 @@ def render_region(region: str, nav_id: str | None) -> str:
     if region == "nav":
         return render_nav(nav_id)
     if region == "footer":
-        return FOOTER
+        return render_footer(nav_id)
     if region == "consent":
         return CONSENT
     raise ValueError(f"unknown region {region!r}")

@@ -1,4 +1,4 @@
-// Manners for the nav's "More" disclosure.
+// Manners for the nav's "Behind it" disclosure.
 //
 // The menu itself is a native `<details>`/`<summary>` (see
 // web/_gen/pages.py), so it already opens, closes, takes keyboard focus
