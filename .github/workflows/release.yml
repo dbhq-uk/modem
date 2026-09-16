@@ -30,8 +30,22 @@ jobs:
             os: macos-latest
             target: aarch64-apple-darwin
             binary: modem
+          # Cross-compiled on the Apple Silicon runner rather than built
+          # natively on macos-13.
+          #
+          # GitHub is retiring its Intel macOS runners, and on 16 Sep
+          # 2026 this job sat queued for the better part of fifteen
+          # minutes while the other three finished in under five. A
+          # release that cannot be cut because one scarce runner never
+          # arrives is not a release process.
+          #
+          # Xcode ships both SDKs, so the ARM runner builds this target
+          # directly. The binary is still smoke-tested below: GitHub's
+          # macOS ARM images carry Rosetta 2, so an x86_64 binary runs
+          # there. If that ever stops being true this job fails loudly at
+          # the run check rather than shipping something untested.
           - label: macos-x86_64
-            os: macos-13
+            os: macos-latest
             target: x86_64-apple-darwin
             binary: modem
           - label: windows-x86_64
@@ -42,8 +56,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: dtolnay/rust-toolchain@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/git/refs#get-a-reference","status":"404"} # 1.98.1
+      - uses: dtolnay/rust-toolchain@ce678459e9fc7500d337468f904b95f1b5c10b5e # 1.98.1
         with:
+          toolchain: 1.98.1
           targets: ${{ matrix.target }}
 
       # cpal opens the sound card through ALSA on Linux, so the headers

@@ -31,8 +31,9 @@ jobs:
       # with our Cloudflare credentials in scope.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: dtolnay/rust-toolchain@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/git/refs#get-a-reference","status":"404"} # 1.98.1
+      - uses: dtolnay/rust-toolchain@ce678459e9fc7500d337468f904b95f1b5c10b5e # 1.98.1
         with:
+          toolchain: 1.98.1
           targets: wasm32-unknown-unknown
 
       # The worklet artifact is BUILT here, not compared against a
@@ -113,7 +114,7 @@ jobs:
           echo "modem.dbhq.uk -> $CODE"
           [ "$CODE" = "200" ]
 
-      # Six real pages as of task 3n (9 Sep 2026) - the single page this
+      # Six real pages as of 16 Sep 2026 (/debugging joined, /projects went) - the single page this
       # site used to be is gone, so every one of these has to actually
       # serve, not just the root. Same polling pattern as the edge-wait
       # step above: a freshly purged edge does not serve everywhere the
@@ -121,7 +122,7 @@ jobs:
       - name: The six pages must be serving
         run: |
           set -euo pipefail
-          for path in "" explained research downloads projects about; do
+          for path in "" explained research debugging downloads about; do
             CODE=""
             for i in $(seq 1 10); do
               CODE=$(curl -sL -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/${path}?cb=${GITHUB_SHA}-$i")
@@ -131,6 +132,17 @@ jobs:
             echo "/${path} -> $CODE"
             [ "$CODE" = "200" ]
           done
+
+      # Only once every page above has been confirmed serving. IndexNow
+      # fetches the key file to verify the submission, and telling Bing
+      # about URLs that are not up yet is worse than saying nothing.
+      #
+      # Not allowed to fail the deploy: the site is already live and
+      # correct by this point, and a search engine's endpoint having a
+      # bad minute is not a reason to go red on a good deploy.
+      - name: Tell IndexNow
+        continue-on-error: true
+        run: ./scripts/indexnow-submit.sh
 
       # explained.html absorbed links.html entirely on 9 Sep 2026 - the old
       # file is gone from the repo, so the only thing standing between an
@@ -144,6 +156,21 @@ jobs:
           case "$FINAL" in
             *"/explained"*) ;;
             *) echo "landed at $FINAL, not /explained"; exit 1 ;;
+          esac
+
+      # /projects was deleted on 16 Sep 2026 and its file is gone from the
+      # repo, so the only thing standing between an old /projects link and
+      # a 404 is this _redirects rule actually shipping - the same reason
+      # the /links check above exists.
+      - name: /projects must redirect to the root
+        run: |
+          set -euo pipefail
+          REDIRECT_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://modem.dbhq.uk/projects?cb=${GITHUB_SHA}")
+          FINAL=$(curl -sL -o /dev/null -w "%{url_effective}" "https://modem.dbhq.uk/projects?cb=${GITHUB_SHA}")
+          echo "/projects -> $REDIRECT_CODE, final $FINAL"
+          case "$FINAL" in
+            *"modem.dbhq.uk/?"*|*"modem.dbhq.uk/") ;;
+            *) echo "landed at $FINAL, not the root"; exit 1 ;;
           esac
 
       # The demo is the entire point of the page, and it cannot run without
