@@ -32,10 +32,10 @@ Each page's own `<head>` (title, description, canonical, OG/Twitter,
 JSON-LD), hero, and main content stay hand-authored per file - that is
 the actual content of each of the seven pages, and templating it away
 would be the opposite of "seven real pages, each with its own title and
-h1". Only the chrome every page shares - the nav (three links, a "More"
-disclosure holding four, and the script that makes the disclosure
-well-mannered), the footer's byline/groups, and the consent dialog plus
-its two script tags - is generated.
+h1". Only the chrome every page shares - the nav (three links, a "Read"
+disclosure holding three, and the script that makes the disclosure
+well-mannered), the footer's byline and its one internal link, and the
+consent dialog plus its two script tags - is generated.
 """
 
 from pathlib import Path
@@ -54,18 +54,18 @@ WEB = HERE.parent
 # beside it.
 #
 # THE FIRST ATTEMPT AT THIS GROUPED BY REMAINDER AND IT SHOWED (Dan,
-# 16 Sep 2026: "this structure is crap"). Hear it, Explained and
+# 16 Sep 2026: "this structure is crap"). Try, Explained and
 # Downloads went in the row and the other four went behind a disclosure
 # labelled "More", which is not a group - it is the four that were left,
 # and no honest label exists for "the four that were left". Two things
 # fixed it:
 #
 #   - ONE RULE DRAWS THE LINE. The row is what you do with the modem -
-#     hear it, get it, see who made it. The disclosure is the reading
+#     try it, get it, see who made it. The disclosure is the reading
 #     about it, and every page inside is the same kind of thing: how it
 #     works, what already existed, and what went wrong building this
-#     one. "Behind it" is a real name for that, so the label carries
-#     meaning instead of apologising for the menu.
+#     one. "Read" is a real name for that, so the label carries meaning
+#     instead of apologising for the menu.
 #
 #   - PROJECTS LEFT THE NAV ENTIRELY. It was the only item in the row
 #     that takes you off the site - six rooms and an exit door in the
@@ -83,16 +83,23 @@ WEB = HERE.parent
 # this tuple rather than a separate "insert at index 1", so the order of
 # the bar reads off one list in the order it renders.
 MORE_ID = "__more__"
-MORE_LABEL = "Behind it"
+
+# "Read", not "Behind it" (Dan, 16 Sep 2026). Both name the same group
+# honestly; this one is a verb, and it pairs with "Try" beside it. The
+# bar now offers two things to do and two places to go, which is a
+# shape a reader takes in without reading it.
+MORE_LABEL = "Read"
 
 NAV_ITEMS = (
-    # "Hear it", not "Try" (Dan, 9 Sep 2026). Try names an effort the
-    # visitor has to make; this names what they get, and it says the same
-    # thing the page's own h1 does - "Hear the dial-up sound, live". The
-    # id stays `try` because it is the internal key, not the label, and
-    # renaming it would move every aria-current mapping below for
-    # nothing.
-    ("try", "Hear it", "/"),
+    # "Try", restored 16 Sep 2026 (Dan), reversing the 9 Sep rename to
+    # "Hear it". The 9 Sep reasoning was that Try names an effort the
+    # visitor has to make where "Hear it" names what they get - true on
+    # its own, and beside "Read" it stops mattering: the pair is what
+    # carries the meaning now, and two verbs read as a choice where a
+    # verb and a phrase read as a list. The id never moved through
+    # either rename - it has been `try` since the beginning, because it
+    # is the internal key for aria-current and not the label.
+    ("try", "Try", "/"),
     (MORE_ID, MORE_LABEL, None),
     ("downloads", "Downloads", "/downloads"),
     # About keeps a slot of its own rather than joining the disclosure,
@@ -103,7 +110,7 @@ NAV_ITEMS = (
     ("about", "About", "/about"),
 )
 
-# What sits behind "Behind it". One kind of page, three depths: how this
+# What sits behind "Read". One kind of page, three depths: how this
 # thing works (Explained), what already existed before it (Research),
 # and what went wrong building it (Debugging). Read in that order they
 # go from the subject outward to the process, which is also the order
@@ -159,7 +166,7 @@ CHEVRON = (
 
 
 def render_nav(current_id: str | None) -> str:
-    """The sticky primary nav: three links and a "Behind it" disclosure
+    """The sticky primary nav: three links and a "Read" disclosure
     holding three more. `current_id` is None on 404.html, where none of
     them is "the current page" - a 404 is not one of them - and it is
     "projects" on projects.html, which no nav item claims, so the nav

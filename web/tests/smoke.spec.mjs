@@ -474,7 +474,7 @@ test.describe('the shared chrome', () => {
   // cut the menu off at the nav's own bottom edge), the links inside
   // can stop being reachable, and the only sign of where you are can
   // vanish when the current page is one of the hidden three.
-  test('the Behind it disclosure opens, reaches its pages, and marks the current one', async ({ page }) => {
+  test('the Read disclosure opens, reaches its pages, and marks the current one', async ({ page }) => {
     await page.goto('/');
     await dismissConsent(page);
 
@@ -508,7 +508,7 @@ test.describe('the shared chrome', () => {
   // `script-src 'self'`, and the tag is relative, so a route directory
   // without its <base href="/"> would fetch the module from the wrong
   // path and fail silently.
-  test('Escape closes the Behind it disclosure', async ({ page }) => {
+  test('Escape closes the Read disclosure', async ({ page }) => {
     await page.goto('/');
     await dismissConsent(page);
     await page.locator('.site-nav__summary').click();
