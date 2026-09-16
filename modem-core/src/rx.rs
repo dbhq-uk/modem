@@ -243,7 +243,13 @@ impl Rx {
 
             // Mark only, not the pair: see `carrier.rs`'s module doc,
             // "Why the mark tone alone, and not mark plus space".
-            dominance: ToneDominance::new(mark, DSP_RATE),
+            // The far end's mark is what this listens for; this end's own
+            // pair is what it must not mistake for noise - see
+            // ToneDominance::feed.
+            dominance: {
+                let (own_mark, own_space) = tones(cfg.role);
+                ToneDominance::new(mark, own_mark, own_space, DSP_RATE)
+            },
             // Closed until the first block completes - see push_sample's
             // own doc. A default of `true` would let this end's very
             // first ~32 ms of audio straight through ungated, which is

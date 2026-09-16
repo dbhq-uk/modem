@@ -381,6 +381,11 @@ const DOMINANCE_BLOCK: usize = 256;
 /// with margin on both sides for the first time.
 const DOMINANCE_RATIO: f64 = 40.0;
 
+/// Floor on the wideband figure after this end's own transmission has
+/// been taken out of it, as a fraction of that own-band energy. See
+/// `ToneDominance::feed` for the measurement behind the number.
+const OWN_LEAK_GUARD: f64 = 0.005;
+
 /// Fractional frequency offsets probed either side of each nominal tone.
 ///
 /// A single Goertzel at the exact nominal frequency is unusable here,
@@ -425,15 +430,29 @@ fn best(probes: &[crate::nco::Goertzel]) -> f64 {
 /// [`Rx::new`]: crate::rx::Rx::new
 pub struct ToneDominance {
     mark: [crate::nco::Goertzel; PROBE_OFFSETS.len()],
+    /// This end's *own* transmit tones, so their energy can be taken out
+    /// of the wideband figure below. One probe each rather than the
+    /// five the far end's mark gets: the drift probes exist because two
+    /// sound cards never agree on a clock, and this tone came out of
+    /// this device's own loudspeaker on this device's own clock.
+    own: [crate::nco::Goertzel; 2],
     wideband: f64,
     count: usize,
 }
 
 impl ToneDominance {
-    pub fn new(mark_hz: f64, sample_rate: f64) -> Self {
+    /// `mark_hz` is the far end's mark - the tone being listened for.
+    /// `own_mark_hz` and `own_space_hz` are this end's own transmit pair,
+    /// which is not noise and must not be counted as though it were: see
+    /// `feed`.
+    pub fn new(mark_hz: f64, own_mark_hz: f64, own_space_hz: f64, sample_rate: f64) -> Self {
         Self {
             mark: PROBE_OFFSETS
                 .map(|o| crate::nco::Goertzel::new(mark_hz * (1.0 + o), sample_rate)),
+            own: [
+                crate::nco::Goertzel::new(own_mark_hz, sample_rate),
+                crate::nco::Goertzel::new(own_space_hz, sample_rate),
+            ],
             wideband: 0.0,
             count: 0,
         }
@@ -448,12 +467,18 @@ impl ToneDominance {
         for g in self.mark.iter_mut() {
             g.reset();
         }
+        for g in self.own.iter_mut() {
+            g.reset();
+        }
         self.wideband = 0.0;
         self.count = 0;
     }
 
     pub fn feed(&mut self, x: f64) -> Option<bool> {
         for g in self.mark.iter_mut() {
+            g.feed(x);
+        }
+        for g in self.own.iter_mut() {
             g.feed(x);
         }
         self.wideband += x * x;
@@ -471,12 +496,59 @@ impl ToneDominance {
         // white-noise draw over 50,000 blocks is 16.7 against the single
         // probe's 17.7.
         let narrow = best(&self.mark);
+
+        // Take this end's own transmission out of the wideband figure
+        // before comparing against it.
+        //
+        // Over a wire this changes nothing: your own transmit never
+        // comes back into your own receiver. Over a room it is the
+        // difference between working and not. Measured on two real
+        // devices (see docs/acoustic-harness.md): a laptop's own
+        // loudspeaker arrives at its own microphone six to nine times
+        // louder than the far device does. That energy went straight
+        // into `wideband`, so the test below asked whether the far end's
+        // tone was forty times louder than this end's own voice - which
+        // it never is, at any volume, because the ratio is set by where
+        // the two devices are sitting and not by any level either of
+        // them chooses.
+        //
+        // The result was a link that could hear the far end perfectly
+        // while it was transmitting data at full scale and went deaf the
+        // instant it dropped to idle, which is exactly what two devices
+        // on a desk did on 16 September 2026.
+        //
+        // This end's own tones are *known*, not noise, so they are
+        // measured and subtracted. Parseval gives the conversion: a tone
+        // of amplitude A over n samples contributes n*A^2/2 to a sum of
+        // squares and (n*A/2)^2 to a single-bin power, so the energy to
+        // remove is 2/n times the power.
+        let own_power = self.own.iter().map(|g| g.power()).sum::<f64>();
+        let own_energy = own_power * 2.0 / DOMINANCE_BLOCK as f64;
+        // Floored, not merely clamped at zero.
+        //
+        // Clamping at zero was the first attempt and it inverts the bug:
+        // on a block containing nothing *but* this end's own tone the
+        // subtraction removes everything, the denominator goes to zero,
+        // and the small leakage of that tone into the wanted probe reads
+        // as an infinitely dominant far-end carrier. A receiver that
+        // reports carrier because it can hear itself is worse than one
+        // that reports none.
+        //
+        // The floor is a fraction of the own-band energy, because that
+        // is what the leakage is proportional to. Measured directly: a
+        // pure own-band tone puts 1.9% of its power into the wanted
+        // probe at worst, across both bands and all five drift probes.
+        // Against a DOMINANCE_RATIO of 40 the floor only has to exceed
+        // 0.019/40, about 0.0005, so 0.005 leaves an order of magnitude
+        // of margin against a false positive while sitting far below the
+        // far end's own energy whenever it is genuinely transmitting.
+        let others = (self.wideband - own_energy).max(own_energy * OWN_LEAK_GUARD);
         // No epsilon needed: on true silence every sample is exactly
         // zero, so `narrow` is exactly zero too and this correctly reads
         // as not dominant (0 > 40*0 is false) rather than needing a
         // guard against dividing by a wideband of zero - there is no
         // division here at all.
-        let dominant = narrow > DOMINANCE_RATIO * self.wideband;
+        let dominant = narrow > DOMINANCE_RATIO * others;
 
         self.reset();
         Some(dominant)
@@ -726,6 +798,23 @@ mod tests {
     const MARK: f64 = 1270.0;
     const SPACE: f64 = 1070.0;
 
+    /// A detector listening for `listen_hz`, with this end's own pair
+    /// taken from the opposite Bell 103 band.
+    ///
+    /// That is how a real `Session` is always wired - the two ends never
+    /// share a band - and it matters to these tests because the own-band
+    /// energy is now subtracted from the wideband figure. Passing tones
+    /// that overlapped what is being fed would subtract the signal under
+    /// test from its own denominator.
+    fn td(listen_hz: f64) -> ToneDominance {
+        let (own_mark, own_space) = if listen_hz < 1700.0 {
+            (2225.0, 2025.0)
+        } else {
+            (1270.0, 1070.0)
+        };
+        ToneDominance::new(listen_hz, own_mark, own_space, FS)
+    }
+
     /// The property this whole gate exists for: a real Bell 103 tone in
     /// the listened-for band is judged dominant. Two full blocks so the
     /// verdict is read from a genuinely steady state, not the first one
@@ -733,7 +822,7 @@ mod tests {
     /// transient - see `Goertzel::feed`'s own doc).
     #[test]
     fn a_real_tone_in_the_listened_for_band_is_dominant() {
-        let mut td = ToneDominance::new(MARK, FS);
+        let mut td = td(MARK);
         let block = sine_block(MARK, 1.0, 2 * DOMINANCE_BLOCK, FS);
 
         // No verdict until exactly one full block has been fed.
@@ -770,7 +859,7 @@ mod tests {
     #[test]
     fn dominance_is_scale_invariant_for_a_real_tone() {
         let block = sine_block(MARK, 0.0075, 2 * DOMINANCE_BLOCK, FS);
-        let mut td = ToneDominance::new(MARK, FS);
+        let mut td = td(MARK);
         let mut verdict = None;
         for &x in &block {
             verdict = td.feed(x);
@@ -785,9 +874,66 @@ mod tests {
     /// A full-amplitude tone in the *other* Bell 103 band must not be
     /// judged dominant against this filter's own band - the property the
     /// whole split exists to prove (see `lib.rs`'s `Role` doc).
+    /// The case the whole own-band discount exists for.
+    ///
+    /// Two devices on a desk: this end hears its own loudspeaker six to
+    /// nine times louder than it hears the far one (measured on real
+    /// hardware, 16 September 2026 - see docs/acoustic-harness.md). Both
+    /// tones are on the wire at once and the far end's must still be
+    /// found.
+    ///
+    /// Before the discount this was impossible at any volume, because
+    /// the test asked whether the far tone was forty times louder than
+    /// the total - and the total was mostly this end's own voice. The
+    /// ratio is set by where the two devices are sitting, so no choice
+    /// of transmit level could ever have fixed it.
+    #[test]
+    fn the_far_end_is_heard_through_this_end_s_own_louder_tone() {
+        for own_louder_by in [1.0f64, 3.0, 6.0, 9.0, 12.0] {
+            let mut td = td(MARK);
+            let n = 4 * DOMINANCE_BLOCK;
+            let far = sine_block(MARK, 1.0, n, FS);
+            // This end's own mark, from the opposite band, louder.
+            let own = sine_block(2225.0, own_louder_by, n, FS);
+            let mut verdict = None;
+            for i in 0..n {
+                verdict = td.feed(far[i] + own[i]);
+            }
+            assert_eq!(
+                verdict,
+                Some(true),
+                "the far end's mark was not found with this end's own tone {own_louder_by}x louder \
+                 - which is the ordinary case for two devices on a desk, not an extreme one"
+            );
+        }
+    }
+
+    /// And the guard against the inverse: this end must never mistake
+    /// its own tone for the far end's, at any level, with nothing else
+    /// on the wire.
+    #[test]
+    fn this_end_s_own_tone_alone_is_never_read_as_the_far_end() {
+        for own_hz in [2225.0f64, 2025.0] {
+            for amplitude in [0.01f64, 0.2, 1.0, 4.0] {
+                let mut td = td(MARK);
+                let mut verdict = None;
+                for &x in &sine_block(own_hz, amplitude, 4 * DOMINANCE_BLOCK, FS) {
+                    verdict = td.feed(x);
+                }
+                assert_eq!(
+                    verdict,
+                    Some(false),
+                    "this end read its own {own_hz} Hz tone at amplitude {amplitude} as the far \
+                     end's carrier - a receiver that hears itself and calls it a carrier is worse \
+                     than one that hears nothing"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_tone_in_the_other_band_is_not_dominant() {
-        let mut td = ToneDominance::new(MARK, FS);
+        let mut td = td(MARK);
         let block = sine_block(2225.0, 1.0, 2 * DOMINANCE_BLOCK, FS);
         let mut verdict = None;
         for &x in &block {
@@ -829,7 +975,7 @@ mod tests {
             })
             .collect();
 
-        let mut td = ToneDominance::new(MARK, FS);
+        let mut td = td(MARK);
         for chunk in click.chunks(DOMINANCE_BLOCK) {
             if chunk.len() < DOMINANCE_BLOCK {
                 break;
@@ -852,7 +998,7 @@ mod tests {
     /// stands in for any louder noise.
     #[test]
     fn broadband_noise_as_loud_as_a_real_carrier_is_not_dominant() {
-        let mut td = ToneDominance::new(MARK, FS);
+        let mut td = td(MARK);
         let noise = noise_block(1.0, 20 * DOMINANCE_BLOCK, 0xF00D_F00D_F00D_F00D);
         for x in noise {
             if let Some(dominant) = td.feed(x) {
@@ -873,7 +1019,7 @@ mod tests {
     /// standing in for the band as a whole.
     #[test]
     fn the_probe_frequency_is_the_mark_tone_not_the_space_tone() {
-        let mut td = ToneDominance::new(SPACE, FS);
+        let mut td = td(SPACE);
         let block = sine_block(MARK, 1.0, 2 * DOMINANCE_BLOCK, FS);
         let mut verdict = None;
         for &x in &block {
@@ -896,7 +1042,7 @@ mod tests {
     /// whole tone.
     #[test]
     fn a_tone_at_this_bands_own_space_frequency_is_not_dominant() {
-        let mut td = ToneDominance::new(MARK, FS);
+        let mut td = td(MARK);
         let block = sine_block(SPACE, 1.0, 2 * DOMINANCE_BLOCK, FS);
         let mut verdict = None;
         for &x in &block {
@@ -926,7 +1072,7 @@ mod tests {
     /// the real receiver.
     #[test]
     fn the_v21_low_channel_centre_tone_is_not_dominant() {
-        let mut td = ToneDominance::new(MARK, FS);
+        let mut td = td(MARK);
         let block = sine_block(1080.0, 1.0, 2 * DOMINANCE_BLOCK, FS);
         let mut verdict = None;
         for &x in &block {
@@ -951,7 +1097,7 @@ mod tests {
             for drift in [
                 -0.02f64, -0.015, -0.01, -0.005, 0.0, 0.005, 0.01, 0.015, 0.02,
             ] {
-                let mut td = ToneDominance::new(band_mark, FS);
+                let mut td = td(band_mark);
                 let block = sine_block(band_mark * (1.0 + drift), 1.0, 4 * DOMINANCE_BLOCK, FS);
                 let mut verdict = None;
                 for &x in &block {
