@@ -114,9 +114,9 @@ jobs:
           echo "modem.dbhq.uk -> $CODE"
           [ "$CODE" = "200" ]
 
-      # Six real pages as of 16 Sep 2026 (/debugging joined, /projects went) - the single page this
-      # site used to be is gone, so every one of these has to actually
-      # serve, not just the root. Same polling pattern as the edge-wait
+      # Six real pages as of 16 Sep 2026 (/debugging joined, /projects
+      # went) - the single page this site used to be is gone, so every
+      # one of these has to actually serve, not just the root. Same polling pattern as the edge-wait
       # step above: a freshly purged edge does not serve everywhere the
       # instant the purge returns.
       - name: The six pages must be serving

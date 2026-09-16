@@ -107,30 +107,49 @@ NAV_ITEMS = (
     # sitemap, in the deploy workflow's page list and in every link
     # already pointing at it.
     ("downloads", "Download", "/downloads"),
-    # About keeps a slot of its own rather than joining the disclosure,
-    # which is where the first draft of this put it. It is the one page
-    # carrying the licence and the crate list, and Explained moving
-    # inside freed the room, so there was no longer anything to buy by
-    # hiding it.
-    ("about", "About", "/about"),
     # bbs, added 16 Sep 2026 in the same pass that deleted /projects,
     # and for the reason Dan gave: "because its related". The two go
     # together. A page listing every DBHQ sibling was a list of things
-    # that happen to share an owner; bbs is the one that shares a
+    # that happen to share an owner; this is the one that shares a
     # subject - the web as a 1992 bulletin board, next to a modem you
     # would have dialled one with. Related earns a nav slot where
     # "also ours" did not.
     #
+    # It sits before About (Dan), so the row runs try it, read about it,
+    # get it, go and play with the related one - then the colophon,
+    # which is the only thing here that is about the author rather than
+    # the thing. About last is About in the right place.
+    #
     # It is the ONLY item in the nav that leaves the site, which is the
     # thing the /projects page got wrong - but a named destination is
-    # not the same as an unnamed exit. "bbs" says where it goes; the
+    # not the same as an unnamed exit. The label says where it goes; the
     # outbound glyph beside it says that it goes, and the screen-reader
     # text says so in words. A nav link that quietly changes hostname is
     # the version of this that would be wrong.
     #
-    # Lowercase, per the DBHQ naming rule - the project is `bbs`
-    # everywhere: repository, site, and dbhq.uk's own /experiments.
-    ("bbs", "bbs", "https://bbs.dbhq.uk/"),
+    # UPPERCASE HERE, AND LOWERCASE EVERYWHERE ELSE. This is a
+    # deliberate exception to the DBHQ naming rule, settled by Dan on
+    # 16 Sep 2026 after going round it twice.
+    #
+    # The rule makes every DBHQ project name lowercase, and `bbs` is
+    # lowercase in its repository, on its own site and on dbhq.uk's
+    # /experiments - so prose anywhere on this site should still say
+    # `bbs`, and /research does. What makes the nav different is the
+    # job the label is doing there. In a five-item bar beside Try, Read
+    # and Download, it is read as the category a visitor recognises - a
+    # bulletin board system - and BBS is how that category has been
+    # written since the 1970s. Lowercase in that slot looks like a typo
+    # rather than like a house style.
+    #
+    # If this ever gets "corrected" back, check here first: it is not a
+    # sweep that was missed.
+    ("bbs", "BBS", "https://bbs.dbhq.uk/"),
+    # About keeps a slot of its own rather than joining the disclosure,
+    # which is where the first draft of this put it. It is the one page
+    # carrying the licence and the crate list, and Explained moving
+    # inside freed the room, so there was no longer anything to buy by
+    # hiding it. Last in the row, after the four things you can do.
+    ("about", "About", "/about"),
 )
 
 # What sits behind "Read". One kind of page, three depths: how this
