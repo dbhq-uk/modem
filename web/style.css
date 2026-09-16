@@ -377,7 +377,7 @@ body {
 
 /* ---------------------------------------------------------------------
  * site-nav - the sticky primary nav: Try, a "Read" disclosure
- * holding Explained, Research and Debugging, then Downloads and About,
+ * holding Explained, Research and Debugging, then Download and About,
  * as of 16 Sep 2026 - no item is an anchor any more, and /projects is
  * reached from the footer rather than from here (see web/_gen/pages.py's
  * own doc, which carries the reasoning for the grouping). Placed

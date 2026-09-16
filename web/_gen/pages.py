@@ -55,7 +55,7 @@ WEB = HERE.parent
 #
 # THE FIRST ATTEMPT AT THIS GROUPED BY REMAINDER AND IT SHOWED (Dan,
 # 16 Sep 2026: "this structure is crap"). Try, Explained and
-# Downloads went in the row and the other four went behind a disclosure
+# Download went in the row and the other four went behind a disclosure
 # labelled "More", which is not a group - it is the four that were left,
 # and no honest label exists for "the four that were left". Two things
 # fixed it:
@@ -101,7 +101,15 @@ NAV_ITEMS = (
     # is the internal key for aria-current and not the label.
     ("try", "Try", "/"),
     (MORE_ID, MORE_LABEL, None),
-    ("downloads", "Downloads", "/downloads"),
+    # "Download", not "Downloads" (Dan, 16 Sep 2026). Singular makes it a
+    # verb, so the row reads Try, Read, Download - three things to do,
+    # then About. It also matches the page's own title, which has said
+    # "Download the Bell 103 modem for Linux, macOS and Windows" since
+    # before the nav did. The id and the URL stay plural: `downloads` is
+    # the internal key for aria-current, and /downloads is in the
+    # sitemap, in the deploy workflow's page list and in every link
+    # already pointing at it.
+    ("downloads", "Download", "/downloads"),
     # About keeps a slot of its own rather than joining the disclosure,
     # which is where the first draft of this put it. It is the one page
     # carrying the licence and the crate list, and Explained moving
