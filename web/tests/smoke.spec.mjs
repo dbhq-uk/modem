@@ -84,6 +84,60 @@ async function audioWorkletStarts(page) {
   });
 }
 
+/** Makes every microphone request reject, the way a refusal does.
+ *
+ * Runs inside the page via `addInitScript`, so it must be
+ * self-contained.
+ *
+ * Patches `MediaDevices.prototype`, not `navigator.mediaDevices`.
+ * Assigning to the instance is the obvious way and it is not reliable:
+ * it passed locally and silently did nothing on CI, where three tests
+ * then waited out their whole timeout for an error caption that was
+ * never going to appear, because the microphone had simply been granted.
+ * `--use-fake-device-for-media-stream` means a granted request succeeds,
+ * so a failed injection does not look like a failed injection - it looks
+ * like the product not reporting an error.
+ *
+ * The prototype exists from the moment the document does, whatever
+ * `navigator.mediaDevices` is doing, and it is what the call resolves
+ * through either way. The instance is patched too, for any browser
+ * carrying an own property that would shadow the prototype. */
+function denyTheMicrophone() {
+  const reject = () => {
+    const e = new Error('Permission denied');
+    e.name = 'NotAllowedError';
+    return Promise.reject(e);
+  };
+  if (typeof MediaDevices !== 'undefined' && MediaDevices.prototype) {
+    MediaDevices.prototype.getUserMedia = reject;
+  }
+  if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = reject;
+  // The long-deprecated aliases, in case anything falls back to one.
+  navigator.getUserMedia = reject;
+}
+
+/** Fails loudly if `denyTheMicrophone` did not take.
+ *
+ * This exists because the opposite happened. When the injection silently
+ * missed, the microphone was granted by
+ * `--use-fake-device-for-media-stream`, the endpoint started perfectly,
+ * and the tests waiting for an error caption waited out their whole
+ * timeout. The symptom was "the product does not report failures" and
+ * the cause was "there was no failure to report", which is a long way to
+ * travel in the wrong direction.
+ *
+ * A test that depends on injected failure has to check the injection. */
+async function assertMicrophoneDenied(page) {
+  const outcome = await page.evaluate(() =>
+    navigator.mediaDevices
+      .getUserMedia({ audio: true })
+      .then(() => 'granted', (e) => e.name));
+  expect(
+    outcome,
+    'the microphone denial did not take effect, so this test would be measuring a call that worked',
+  ).toBe('NotAllowedError');
+}
+
 test.describe('every page', () => {
   for (const path of PAGES) {
     test(`${path} loads with no console errors`, async ({ page }) => {
@@ -262,27 +316,28 @@ test.describe('when starting the modem fails', () => {
   // then checks the panel is still there, still saying something, still
   // on its own URL.
   test('the panel stays up, says why, and does not bounce home', async ({ page }) => {
-    await page.addInitScript(() => {
-      navigator.mediaDevices.getUserMedia = () => {
-        const e = new Error('Permission denied');
-        e.name = 'NotAllowedError';
-        return Promise.reject(e);
-      };
-    });
+    // The function itself, not a call to it. `addInitScript` serialises
+    // what it is given and runs it in the page, so a closure calling a
+    // helper defined out here throws ReferenceError in the browser -
+    // silently, patching nothing. Caught immediately by
+    // `assertMicrophoneDenied`, which is what that guard is for.
+    await page.addInitScript(denyTheMicrophone);
     await page.goto('/receive/');
+    await assertMicrophoneDenied(page);
     await dismissConsent(page);
     await page.locator('#route-start-btn').click();
 
     const caption = page.locator('#endpoint-caption');
-    // 45s, and the number is derived rather than picked. The failure
-    // this waits for can arrive by two routes: getUserMedia rejecting
-    // immediately, or - when the worklet is slow - modem.js's own
-    // WORKLET_READY_TIMEOUT_MS of 10s plus RESUME_TIMEOUT_MS of 4s plus
-    // a WASM fetch, before the catch that writes this caption is even
-    // reached. 20s left almost no headroom over that and failed on CI
-    // from Playwright 1.63 onward, which starts an AudioWorklet where
-    // 1.55 could not and so put four more audio tests on the same
-    // contended runner. Locally this takes about 5s.
+    // 45s, derived rather than picked. This caption can arrive by two
+    // routes: getUserMedia rejecting at once, or - when the worklet is
+    // slow - modem.js's own WORKLET_READY_TIMEOUT_MS of 10s plus
+    // RESUME_TIMEOUT_MS of 4s plus a WASM fetch, before the catch that
+    // writes it is even reached. 20s left almost no headroom over that.
+    //
+    // Raising it did not fix the CI failure and was never going to: the
+    // injection was not taking effect there, so the caption was not
+    // late, it was never coming. See `denyTheMicrophone`. The larger
+    // allowance is kept because the arithmetic above is still right.
     await expect(caption).not.toBeEmpty({ timeout: 45000 });
     await expect(caption).toHaveClass(/diagnostic--warning/);
     // Still the receiving modem, still on its own URL - not bounced home.
@@ -326,17 +381,12 @@ test.describe('leaving a live panel', () => {
   // test is the click handler, not the audio.
   for (const [label, selector] of [['Stop', '#endpoint-stop'], ['Back', '#endpoint-back-btn']]) {
     test(`${label} on a live panel restores the landing page`, async ({ page }) => {
-      await page.addInitScript(() => {
-        navigator.mediaDevices.getUserMedia = () => {
-          const e = new Error('Permission denied');
-          e.name = 'NotAllowedError';
-          return Promise.reject(e);
-        };
-      });
+      await page.addInitScript(denyTheMicrophone);
       await page.goto('/receive/');
+      await assertMicrophoneDenied(page);
       await dismissConsent(page);
       await page.locator('#route-start-btn').click();
-      await expect(page.locator('#endpoint-caption')).not.toBeEmpty({ timeout: 20000 });
+      await expect(page.locator('#endpoint-caption')).not.toBeEmpty({ timeout: 45000 });
 
       await page.locator(selector).click();
 

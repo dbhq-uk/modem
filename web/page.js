@@ -1310,9 +1310,26 @@ async function startEndpointRoute(role) {
   let dataCheckStarted = false;
   try {
     endpoint = new ModemEndpoint();
+    // Captured so every handler below can tell whether it is still the
+    // live endpoint. A worklet message already in flight is delivered
+    // after `stop()`, and `teardownEndpoint` has by then set `endpoint`
+    // to null - so a late status event would otherwise keep writing to
+    // a panel that has moved on.
+    //
+    // That is not hypothetical. When a start failed after the worklet
+    // had genuinely come up, the catch wrote "Microphone permission was
+    // denied" and a queued status arrived immediately afterwards and
+    // replaced it with the empty caption for IDLE. The panel sat there
+    // saying nothing at all, which is precisely the silent failure the
+    // catch exists to prevent. It only ever happened where the worklet
+    // really started, so it stayed invisible until CI gained an audio
+    // device.
+    const thisEndpoint = endpoint;
+    const isCurrent = () => endpoint === thisEndpoint;
     await endpoint.init({ role, duplex: Duplex.HALF_PING_PONG });
 
     endpoint.addEventListener('status', (e) => {
+      if (!isCurrent()) return;
       const { state, stage, carrier } = e.detail;
       lastEndpointState = state;
       lastEndpointCarrier = carrier;
@@ -1334,12 +1351,14 @@ async function startEndpointRoute(role) {
     });
 
     endpoint.addEventListener('data', (e) => {
+      if (!isCurrent()) return;
       const text = new TextDecoder().decode(e.detail);
       if (text.includes(CANARY)) return;
       appendTerminalLine(chatLog, text);
     });
 
     endpoint.addEventListener('error', (e) => {
+      if (!isCurrent()) return;
       appendTerminalLine(chatLog, `error: ${e.detail}`);
     });
 
