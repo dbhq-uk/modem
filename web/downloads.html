@@ -113,7 +113,8 @@
          "why this exists" history it describes moved there the same day. -->
     <section class="downloads" aria-labelledby="downloads-heading">
       <h2 id="downloads-heading">Get modem</h2>
-      <p>Native binaries for Linux, macOS and Windows are built by the project's release workflow.</p>
+      <p>modem is a terminal program. It runs a real Bell 103 connection at 300 baud between two machines over their sound cards, performs the full dial-up modem handshake out loud before connecting, and draws a live waterfall of the tones while it happens. The same Hayes commands a real modem took - <code>ATDT</code> to dial, <code>ATA</code> to answer - still work.</p>
+      <p>Native binaries for Linux, macOS and Windows are built by the project's own release workflow, and each one is run before it is published rather than merely compiled.</p>
       <ul class="download-list">
         <li class="download-row">
           <span class="download-row__platform">Linux</span>
@@ -128,7 +129,7 @@
           <a class="download-row__link" href="https://github.com/dbhq-uk/modem/releases" rel="noopener">Releases</a>
         </li>
       </ul>
-      <p class="downloads__note">No release has been tagged yet - the releases page will list binaries once one has.</p>
+      <p class="downloads__note">Or build it yourself: <code>cargo run --release -p modem-tui</code>. Linux needs <code>libasound2-dev</code> for the sound card.</p>
       <p><a href="https://github.com/dbhq-uk/modem" rel="noopener">View the source on GitHub</a></p>
       <p><a href="/research">The technical record, the research, and why this exists</a></p>
     </section>

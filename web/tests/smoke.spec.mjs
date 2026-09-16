@@ -400,6 +400,39 @@ test.describe('leaving a live panel', () => {
   }
 });
 
+test.describe('structured data', () => {
+  // Every FAQ question in the JSON-LD must be on the page where a reader
+  // can see it.
+  //
+  // /explained carried seven questions in its FAQPage data and showed
+  // none of them. Google requires FAQ markup to match visible content:
+  // invisible answers earn nothing and risk being read as
+  // structured-data spam, so the markup was pure downside. Worse, it was
+  // invisible in both directions - nothing on the page and nothing in
+  // CI said so.
+  test('every FAQ question in the markup is visible on the page', async ({ page, request }) => {
+    const html = await (await request.get('/explained')).text();
+    const blocks = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)];
+    const questions = [];
+    for (const [, raw] of blocks) {
+      for (const node of JSON.parse(raw)['@graph'] || []) {
+        if (node['@type'] === 'FAQPage') {
+          for (const q of node.mainEntity) questions.push(q.name);
+        }
+      }
+    }
+    expect(questions.length, 'no FAQ questions found to check').toBeGreaterThan(0);
+
+    await page.goto('/explained');
+    for (const q of questions) {
+      await expect(
+        page.getByRole('heading', { name: q, exact: true }),
+        `FAQ question is in the structured data but not on the page: ${q}`,
+      ).toBeVisible();
+    }
+  });
+});
+
 test.describe('the shared chrome', () => {
   test('the nav reaches every page and marks the current one', async ({ page }) => {
     for (const path of PAGES) {

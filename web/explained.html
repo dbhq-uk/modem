@@ -178,8 +178,55 @@
   <main id="main">
 
     <section class="intro">
-      <p>modem performs a piece of telecoms history, then runs a real connection underneath it. Below: what you are hearing, phase by phase, and the standards implemented once CONNECT appears.</p>
-      <p><a class="dial-button" href="/"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="4" width="20" height="16" rx="1"/><path d="M12 4v16"/></svg><span>Try the demo</span></a></p>
+      <p>The dial-up sound was never one noise. It was a sequence, and every part of it was doing a job. Below: the whole dial-up modem handshake, phase by phase, what each sound was for, and the standards this project implements once CONNECT appears.</p>
+      <p>Why did dial-up make that noise at all? Because two modems meeting over a voice line had to find each other, agree how to speak, and measure what the line could carry - out loud, because sound was the only channel they had.</p>
+      <!-- The questions people actually type, answered.
+         
+         These seven existed only in this page's FAQPage structured data
+         and appeared nowhere a reader could see them. Google requires
+         FAQ markup to match content visible on the page: invisible
+         answers are ignored at best and treated as structured-data spam
+         at worst, so the markup was earning nothing and risking
+         something.
+         
+         The wording is the schema's own, unchanged - it was already
+         accurate, and the fix was to show it rather than to write it
+         again. If one is edited, edit both: they have to agree. -->
+    <section class="faq section-anchor" id="faq" aria-labelledby="faq-heading">
+      <h2 id="faq-heading">Common questions about the dial-up sound</h2>
+      <div class="faq__list">
+        <div class="faq__item">
+          <h3 id="faq-0">What is the dial-up sound?</h3>
+          <p>It&#x27;s the performed overture a modem plays before a call connects: the click of the line being seized, a dial tone, DTMF digits, a ringback tone, then the answer tone and its phase reversals. modem renders this live in the browser with the same code that runs its real connection, then completes a genuine 300 baud Bell 103 connection underneath it.</p>
+        </div>
+        <div class="faq__item">
+          <h3 id="faq-1">Why did dial-up make that noise?</h3>
+          <p>Each sound had a job. The dial tone said the line was ready; DTMF sent the digits; ringback meant the far end&#x27;s phone was ringing; the 2100 Hz answer tone, with its phase reversed every 450 milliseconds, told the phone network&#x27;s echo suppressors to switch off so two modems could talk over each other without being muted.</p>
+        </div>
+        <div class="faq__item">
+          <h3 id="faq-2">What is that screeching noise at the start of a dial-up call?</h3>
+          <p>On a real 33.6k or 56k modem it was V.34-style probing: two modems measuring the line&#x27;s own noise and frequency response before agreeing a speed. modem performs an impression of that stage for texture - there is no physical phone line here to measure, so it is the one stage on this page that is not a faithful reconstruction of a real signal.</p>
+        </div>
+        <div class="faq__item">
+          <h3 id="faq-3">Is the dial-up sound on this page a recording?</h3>
+          <p>No. The overture is a reconstruction rendered live by the same code that drives the real connection, not a recording - and the connection itself is a genuine 300 baud Bell 103 link, not simulated.</p>
+        </div>
+        <div class="faq__item">
+          <h3 id="faq-4">What is a Bell 103 modem?</h3>
+          <p>AT&amp;T&#x27;s 1963 300 baud modem standard - the connection this project actually implements once CONNECT appears, with the same originate and answer tone pairs, 1270/1070 Hz and 2225/2025 Hz.</p>
+        </div>
+        <div class="faq__item">
+          <h3 id="faq-5">What is FSK modulation?</h3>
+          <p>Frequency-shift keying: a bit is a shift between two frequencies. It&#x27;s the modulation underneath the connection itself, once the overture ends and CONNECT appears.</p>
+        </div>
+        <div class="faq__item">
+          <h3 id="faq-6">What is a modem handshake?</h3>
+          <p>The sequence two modems perform before data flows: seizing the line, exchanging tones to prove they are both modems, agreeing capabilities, then settling into a stable connection. modem&#x27;s own explainer plays each phase of that handshake individually.</p>
+        </div>
+      </div>
+    </section>
+
+    <p><a class="dial-button" href="/"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="4" width="20" height="16" rx="1"/><path d="M12 4v16"/></svg><span>Try the demo</span></a></p>
     </section>
 
     <!-- A short contents list, per the design spec. Three items now, not
@@ -189,8 +236,8 @@
          and the overture playback that plays them. -->
     <nav class="contents" aria-label="On this page">
       <ul class="contents__list">
-        <li><a href="#hearing">What you're hearing</a></li>
-        <li><a href="#phases">The nine phases</a></li>
+        <li><a href="#hearing">What the dial-up sound actually is</a></li>
+        <li><a href="#phases">The nine phases of the handshake</a></li>
         <li><a href="#bell103-fsk">Bell 103 and FSK after CONNECT</a></li>
       </ul>
     </nav>
@@ -203,8 +250,8 @@
          behind it, so the far end always answers regardless of what is
          dialled. -->
     <section class="explainer section-anchor" id="hearing" aria-labelledby="hearing-heading">
-      <h2 id="hearing-heading">What you're hearing</h2>
-      <p>Play the whole overture at once, rendered live by the same code that runs the connection - not a recording - or preview any stage on its own in the phase list below.</p>
+      <h2 id="hearing-heading">What the dial-up sound actually is</h2>
+      <p>Play the whole dial-up sound at once, generated live by the same code that runs the connection - these are not recordings or sound effects - or hear any single stage on its own in the phase list below.</p>
 
       <div class="demo__controls">
         <button class="dial-button" id="overture-btn" type="button"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 4l14 8-14 8V4Z"/></svg><span>Play the whole overture</span></button>
@@ -234,7 +281,7 @@
          this markup by explained.js; the text itself needs no script to
          be present or readable. -->
     <section class="explainer section-anchor" id="phases" aria-labelledby="phases-heading">
-      <h2 id="phases-heading">The nine phases</h2>
+      <h2 id="phases-heading">The nine phases of the handshake</h2>
       <ol class="phase-list" id="phase-list">
         <li class="phase-row" id="phase-off-hook" data-stage="0">
           <div class="phase-row__header">
