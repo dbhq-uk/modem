@@ -274,7 +274,16 @@ test.describe('when starting the modem fails', () => {
     await page.locator('#route-start-btn').click();
 
     const caption = page.locator('#endpoint-caption');
-    await expect(caption).not.toBeEmpty({ timeout: 20000 });
+    // 45s, and the number is derived rather than picked. The failure
+    // this waits for can arrive by two routes: getUserMedia rejecting
+    // immediately, or - when the worklet is slow - modem.js's own
+    // WORKLET_READY_TIMEOUT_MS of 10s plus RESUME_TIMEOUT_MS of 4s plus
+    // a WASM fetch, before the catch that writes this caption is even
+    // reached. 20s left almost no headroom over that and failed on CI
+    // from Playwright 1.63 onward, which starts an AudioWorklet where
+    // 1.55 could not and so put four more audio tests on the same
+    // contended runner. Locally this takes about 5s.
+    await expect(caption).not.toBeEmpty({ timeout: 45000 });
     await expect(caption).toHaveClass(/diagnostic--warning/);
     // Still the receiving modem, still on its own URL - not bounced home.
     await expect(page.locator('#endpoint-panel')).toBeVisible();
