@@ -1,0 +1,45 @@
+# Keeps the pinned dependencies moving.
+#
+# This file is not optional housekeeping here: every action in
+# .github/workflows/ is pinned to a commit SHA rather than a tag (#4), so
+# nothing updates on its own. A SHA pin without an updater is a pin that
+# rots - the repo would sit on whatever was current on 16 Sep 2026 for
+# ever, including through security releases, which is strictly worse than
+# floating on tags. Pinning and Dependabot are two halves of one decision.
+#
+# `github-actions` understands SHA pins and rewrites both the SHA and the
+# `# vX.Y.Z` comment beside it, so the comments stay honest too.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      # One PR for the lot rather than six. These move together and
+      # reviewing them together is how you notice when one does not.
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      rust:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Playwright only - it is the whole of package.json, and a major bump
+  # brings new browser builds, which is exactly the kind of change that
+  # should arrive as its own PR with the smoke suite run against it.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"

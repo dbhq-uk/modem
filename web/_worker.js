@@ -41,11 +41,18 @@
 // is a stranger finding a public write endpoint in a public repository
 // and spending a free-tier quota on it.
 //
-// Bounded regardless of the key: 64 KB a request, a 7-day TTL on every
-// key written, and nothing is ever read back out by this worker. The
-// operator reads KV directly over the REST API. There is no endpoint
-// here that returns stored data, so the worst anyone can do is write
-// rubbish into a namespace nobody serves.
+// Bounded regardless of the key: 64 KB a request and a 7-day TTL on
+// every key written. No *report* is ever read back out - the operator
+// reads those from KV directly over the REST API - so the worst anyone
+// with the key can do is write rubbish into a namespace nobody serves.
+//
+// One thing IS read back out, and an earlier version of this comment
+// wrongly said nothing was: `/lab/api/plan` is an unauthenticated GET
+// that reads the `plan` key on every request. That is deliberate, and
+// what it discloses is the instruction the devices are already
+// following - `{revision, note, device, step}` - which is not a secret.
+// What it does cost is a free-tier KV read per request from anyone who
+// cares to poll it. See issue #14.
 
 const MAX_BODY = 64 * 1024;
 /// Reports expire on their own. A calibration run is interesting for
@@ -114,11 +121,19 @@ export default {
 
     if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405);
 
-    // Compared only if one has been set, so the lab still works the
-    // moment the namespace is empty - a missing key locks nobody out of
-    // their own instrument.
+    // FAILS CLOSED. This used to skip the comparison entirely when no key
+    // was set, on the reasoning that a missing key should not lock an
+    // operator out of their own instrument. That had the trade the wrong
+    // way round: being locked out costs one API call to put the key back,
+    // and being open costs a public write endpoint on a public repo. The
+    // window was real rather than theoretical - `terraform apply` creates
+    // the namespace and does not populate `labkey`, so a fresh
+    // environment was unauthenticated until somebody remembered.
     const expected = await env.LAB.get('labkey');
-    if (expected && url.searchParams.get('key') !== expected) {
+    if (!expected) {
+      return json({ error: 'no key is configured; writes are closed' }, 503);
+    }
+    if (url.searchParams.get('key') !== expected) {
       return json({ error: 'bad or missing key' }, 403);
     }
 
