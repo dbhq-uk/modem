@@ -32,9 +32,10 @@ Each page's own `<head>` (title, description, canonical, OG/Twitter,
 JSON-LD), hero, and main content stay hand-authored per file - that is
 the actual content of each of the seven pages, and templating it away
 would be the opposite of "seven real pages, each with its own title and
-h1". Only the chrome every page shares - the seven-item nav, the footer's
-byline/groups, and the consent dialog plus its two script tags - is
-generated.
+h1". Only the chrome every page shares - the nav (three links, a "More"
+disclosure holding four, and the script that makes the disclosure
+well-mannered), the footer's byline/groups, and the consent dialog plus
+its two script tags - is generated.
 """
 
 from pathlib import Path
@@ -42,8 +43,21 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 WEB = HERE.parent
 
-# One nav item per real page - id, label, href. Order is the order the
-# brief's own table gives, and the order every page's nav renders in.
+# THE NAV IS THREE ITEMS AND A DISCLOSURE, not seven items in a row
+# (Dan, 16 Sep 2026: "i feel we probaby need to dropodwn on the nav to
+# make some rooms"). Seven links at the nav's own small type ran to the
+# full width of a phone with nothing left over, and the seventh arrived
+# the same day the sixth did - so the next page added would have been
+# the one that broke it.
+#
+# The split is by what the visitor came to do, not by subject. Hear it,
+# Explained and Downloads are the three things somebody arrives wanting:
+# hear the thing, understand it, get it. Research, Debugging, Projects
+# and About are all secondary reading that nobody lands here looking for,
+# so they sit behind one disclosure rather than costing four slots.
+#
+# Each tuple is id, label, href. The id is the internal key for
+# aria-current and never changes with the label.
 NAV_ITEMS = (
     # "Hear it", not "Try" (Dan, 9 Sep 2026). Try names an effort the
     # visitor has to make; this names what they get, and it says the same
@@ -53,23 +67,40 @@ NAV_ITEMS = (
     # nothing.
     ("try", "Hear it", "/"),
     ("explained", "Explained", "/explained"),
+    ("downloads", "Downloads", "/downloads"),
+)
+
+# What sits behind "More". Order runs from the pages about this project
+# outward to the pages about who made it: what was found out (Research,
+# Debugging), then the rest of the estate (Projects), then the colophon
+# (About).
+NAV_MORE = (
     ("research", "Research", "/research"),
-    # New on 16 Sep 2026: the account of fixing the acoustic mode, after
+    # Added 16 Sep 2026: the account of fixing the acoustic mode, after
     # three confident wrong answers. It sits next to Research because it
     # is the same kind of page - what was found out, rather than what the
     # thing does.
     ("debugging", "Debugging", "/debugging"),
-    ("downloads", "Downloads", "/downloads"),
-    # "DBHQ", not "Projects" (Dan, 10 Sep 2026). The page is titled "Also
-    # from DBHQ" and lists the practice and its two sibling experiments,
-    # so the nav item names the thing rather than describing the shape of
-    # the list. The id and the URL stay `projects`: the id is the internal
-    # key for aria-current, and changing the URL would break every link
-    # already pointing at /projects, including the sitemap and the
-    # sibling sites' own footers.
-    ("projects", "DBHQ", "/projects"),
+    # "Projects", not "DBHQ" (Dan, 16 Sep 2026), reversing the 10 Sep
+    # call. "DBHQ" named the thing rather than describing the list, which
+    # was the right instinct for a top-level item sat between Downloads
+    # and About - but inside a disclosure the label's job changes. The
+    # four items under "More" are read as a list, and three of them are
+    # page names while the fourth was an organisation name; it read as
+    # the odd one out rather than as the specific one. The id and the URL
+    # stay `projects` regardless: the id is the internal key for
+    # aria-current, and changing the URL would break every link already
+    # pointing at /projects, including the sitemap and the sibling sites'
+    # own footers.
+    ("projects", "Projects", "/projects"),
     ("about", "About", "/about"),
 )
+
+# The label on the disclosure itself. Not a page, so it has no id and
+# never takes aria-current - but it does get a marker class when the
+# current page is one of the four behind it, or there would be no sign
+# anywhere in the chrome of where you are.
+MORE_LABEL = "More"
 
 # Which page each file is, for aria-current="page" - and which of the
 # three regions each file actually carries. 404.html gets a nav and a
@@ -87,16 +118,60 @@ PAGES = {
 }
 
 
+# A chevron, so the disclosure looks like one before it is touched. Same
+# 24-unit stroked grid as every other icon on the site (see
+# web/_gen/icons.py), drawn here rather than fetched because this is the
+# only place it appears and a request for eleven bytes of path is not
+# worth a file.
+CHEVRON = (
+    '<svg class="site-nav__chevron" viewBox="0 0 24 24" fill="none" '
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+    'stroke-linejoin="round" aria-hidden="true" focusable="false">'
+    '<path d="m6 9 6 6 6-6"/></svg>'
+)
+
+
 def render_nav(current_id: str | None) -> str:
-    """The seven-item sticky primary nav. `current_id` is None on 404.html,
-    where none of the seven is "the current page" - a 404 is not one of
-    them."""
-    links = []
-    for item_id, label, href in NAV_ITEMS:
+    """The sticky primary nav: three links and a "More" disclosure holding
+    four more. `current_id` is None on 404.html, where none of the seven
+    is "the current page" - a 404 is not one of them.
+
+    The disclosure is a native `<details>`/`<summary>`, so it opens, takes
+    keyboard focus and announces its state with no JavaScript at all -
+    web/nav.js only adds the three conveniences the element has no
+    opinion about (Escape, click-away, and closing after a link is
+    followed). With the script blocked or still loading the menu is fully
+    usable; without the element it would not be."""
+
+    def link(item_id: str, label: str, href: str, indent: str) -> str:
         current = ' aria-current="page"' if item_id == current_id else ""
-        links.append(f'  <a class="site-nav__link" href="{href}"{current}>{label}</a>')
-    body = "\n".join(links)
-    return f'<nav class="site-nav" aria-label="Primary">\n{body}\n</nav>'
+        return f'{indent}<a class="site-nav__link" href="{href}"{current}>{label}</a>'
+
+    rows = [link(*item, "  ") for item in NAV_ITEMS]
+
+    # The marker on the summary when the open page is one of the four
+    # inside. It is a class rather than aria-current: only one element in
+    # a nav may be the current page, and that is the link itself, which
+    # is in the markup whether the disclosure is open or shut.
+    inside = any(item_id == current_id for item_id, _, _ in NAV_MORE)
+    summary_class = "site-nav__summary"
+    if inside:
+        summary_class += " site-nav__summary--current"
+
+    more = [link(*item, "      ") for item in NAV_MORE]
+    body = "\n".join(more)
+    rows.append(
+        f'  <details class="site-nav__more" data-nav-more>\n'
+        f'    <summary class="{summary_class}">{MORE_LABEL}{CHEVRON}</summary>\n'
+        f'    <div class="site-nav__panel">\n{body}\n    </div>\n'
+        f'  </details>'
+    )
+
+    links = "\n".join(rows)
+    return (
+        f'<nav class="site-nav" aria-label="Primary">\n{links}\n</nav>\n'
+        f'<script type="module" src="nav.js"></script>'
+    )
 
 
 # The footer: the required "a DBHQ experiment by..." byline, then one

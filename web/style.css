@@ -376,9 +376,11 @@ body {
 }
 
 /* ---------------------------------------------------------------------
- * site-nav - the sticky primary nav: six real pages (Try, Explained,
- * Prior art, Downloads, Projects, About) as of task 3n, 9 Sep 2026 - no
- * item is an anchor any more (see web/_gen/pages.py's own doc). Placed
+ * site-nav - the sticky primary nav: three links (Hear it, Explained,
+ * Downloads) and a "More" disclosure holding the other four real pages,
+ * as of 16 Sep 2026 - no item is an anchor any more (see
+ * web/_gen/pages.py's own doc, which carries the reasoning for the
+ * split). Placed
  * ahead of .hero in the markup rather than overlaid on it: a nav painted
  * on top of a full-bleed hero would eat into the image it exists to
  * show, so this is a normal, non-overlapping block instead, sticky only
@@ -409,29 +411,33 @@ body {
   z-index: 60;
   display: flex;
   align-items: center;
-  /* safe center, not plain center: once six items genuinely overflow a
+  /* safe center, not plain center: if the row ever does overflow a
      narrow viewport, plain `center` is "unsafe" per the CSS Box
      Alignment spec, and some engines resolve an overflowing unsafe
      center to a start-anchored scroll position - visually
      indistinguishable from left-aligned chrome, which is the exact
      complaint this replaces (Dan, 9 Sep 2026: "not left-aligned against
      the wordmark"). `safe` only ever falls back to start alignment once
-     centering would itself overflow, so this centers for real up to
-     the point six items stop fitting. */
+     centering would itself overflow. */
   justify-content: safe center;
   /* Tighter than the space-sm gap most rows on this page use - measured
      directly with a real browser at 390 and 1440px (see the design
-     spec's own "sticky nav behaviour"); space-xs leaves six items room
-     to spare at the smaller nav-only type scale below. overflow-x: auto
-     stays as a defensive fallback regardless, for anything narrower
-     still - a hamburger was explicitly rejected for a handful of links
-     (see the spec's "Out of scope"). */
+     spec's own "sticky nav behaviour"). */
   gap: var(--modem-space-xs);
   height: var(--site-nav-height);
   padding: 0 var(--modem-space-xs);
   background: var(--modem-ground);
   border-bottom: 1px solid var(--modem-white-dim);
-  overflow-x: auto;
+  /* NO overflow-x HERE, and it is not an oversight - it was `auto` until
+     16 Sep 2026, as a defensive fallback for a seven-item row on a very
+     narrow phone. An overflow value other than `visible` establishes a
+     clipping box, which would cut the "More" panel off at the nav's own
+     bottom edge and leave a menu that opens into nothing. The row it
+     was protecting is now three links and a disclosure, which measures
+     comfortably inside 320px at the nav-only type scale below, so the
+     fallback is protecting against a case that no longer exists. If a
+     fourth top-level item is ever added, check that width again rather
+     than putting this line back. */
 }
 
 .site-nav__link {
@@ -457,6 +463,117 @@ body {
 .site-nav__link[aria-current="page"] {
   color: var(--modem-white-bright);
   border-bottom: 2px solid var(--modem-green-bright);
+}
+
+/* ---------------------------------------------------------------------
+ * The "More" disclosure.
+ *
+ * A native <details>/<summary>, so it opens with no script and announces
+ * its own expanded state - web/nav.js only adds Escape, click-away and
+ * closing on the way out. Styled to be indistinguishable from the three
+ * links beside it apart from the chevron: it is the fourth thing in a
+ * row of four, and a control that looked like a button would read as an
+ * action rather than as more nav.
+ * ------------------------------------------------------------------- */
+.site-nav__more {
+  position: relative;
+  /* Full nav height, so the panel's `top: 100%` lands on the nav's own
+     bottom edge rather than on the bottom of the word "More" - which
+     would leave the menu floating in the middle of the bar. */
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.site-nav__summary {
+  font-family: var(--modem-type-face-ui);
+  color: var(--modem-white-dim);
+  white-space: nowrap;
+  font-size: 0.75rem;
+  letter-spacing: 0.01em;
+  padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  /* Both lines are needed to suppress the default disclosure triangle:
+     `list-style` covers Firefox and Chrome, the pseudo-element covers
+     Safari, which still ships the WebKit-prefixed marker. The chevron
+     below replaces it because the triangle is drawn in the platform's
+     own weight and colour, which is the one thing in this bar that is
+     not ours. */
+  list-style: none;
+}
+
+.site-nav__summary::-webkit-details-marker {
+  display: none;
+}
+
+.site-nav__summary:hover,
+.site-nav__summary:focus-visible {
+  color: var(--modem-white-bright);
+}
+
+/* The current page is one of the four inside. Same underline the links
+   use, so the chrome says where you are wherever the page happens to
+   sit - but no aria-current, because the link itself carries that and
+   only one element in a nav can. */
+.site-nav__summary--current {
+  color: var(--modem-white-bright);
+  border-bottom: 2px solid var(--modem-green-bright);
+}
+
+.site-nav__chevron {
+  width: 0.85em;
+  height: 0.85em;
+  transition: transform 150ms ease;
+}
+
+.site-nav__more[open] .site-nav__chevron {
+  transform: rotate(180deg);
+}
+
+.site-nav__panel {
+  position: absolute;
+  top: 100%;
+  /* Anchored to its right edge, not its left: "More" is the last item
+     in a centred row, so a panel growing leftward stays on screen at
+     every width, where one growing rightward runs off a narrow phone. */
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 9rem;
+  padding: var(--modem-space-xs) 0;
+  background: var(--modem-ground);
+  border: 1px solid var(--modem-white-dim);
+  /* The nav already draws a line here; two would be a double rule. */
+  border-top: 0;
+}
+
+.site-nav__panel .site-nav__link {
+  padding: 8px var(--modem-space-sm);
+}
+
+/* A vertical list, so the current-page marker turns ninety degrees with
+   it: an underline under one row of a stack reads as a divider between
+   two rows rather than as a state. The 2px is taken back out of the
+   padding so the label does not shift when the marker appears. */
+.site-nav__panel .site-nav__link[aria-current="page"] {
+  border-bottom: 0;
+  border-left: 2px solid var(--modem-green-bright);
+  padding-left: calc(var(--modem-space-sm) - 2px);
+}
+
+.site-nav__panel .site-nav__link:hover,
+.site-nav__panel .site-nav__link:focus-visible {
+  background: var(--modem-white-dim);
+  color: var(--modem-ground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-nav__chevron {
+    transition: none;
+  }
 }
 
 /* Every fragment-navigation target on the site needs this, or the
@@ -2189,10 +2306,19 @@ body.app-mode {
      nav link also needs to stay vertically centred within it rather
      than just growing taller - the row above's own elements are all
      already block/table-ish enough not to need that. */
-  .site-nav__link {
+  .site-nav__link,
+  .site-nav__summary {
     display: inline-flex;
     align-items: center;
     min-height: 44px;
+  }
+
+  /* The summary is centred in a 3rem bar, so it cannot actually grow to
+     44px without pushing the nav taller. It gets the target sideways
+     instead - the disclosure is the one control in this bar a thumb has
+     to find, and a 4-letter word at 0.75rem is about 30px wide. */
+  .site-nav__summary {
+    padding: 0 var(--modem-space-xs);
   }
 
   .endpoint input[type="text"],

@@ -437,9 +437,63 @@ test.describe('the shared chrome', () => {
   test('the nav reaches every page and marks the current one', async ({ page }) => {
     for (const path of PAGES) {
       await page.goto(path);
+      // All seven links are in the markup on every page, whether or not
+      // the disclosure holding four of them happens to be open. That is
+      // the point of a <details> rather than a scripted menu: a crawler
+      // that never clicks anything still sees the whole site.
       await expect(page.locator('.site-nav__link')).toHaveCount(7);
       await expect(page.locator('.site-nav__link[aria-current="page"]')).toHaveCount(1);
     }
+  });
+
+  // The disclosure went in on 16 Sep 2026, when seven items in one row
+  // ran out of phone. Three things can break it and none of them shows
+  // up as a bad status code: the panel can be clipped by an overflow
+  // value on the nav (it was `auto` until this change, and would have
+  // cut the menu off at the nav's own bottom edge), the four links
+  // inside can stop being reachable, and the only sign of where you are
+  // can vanish when the current page is one of the hidden four.
+  test('the More disclosure opens, reaches its pages, and marks the current one', async ({ page }) => {
+    await page.goto('/');
+    await dismissConsent(page);
+
+    const summary = page.locator('.site-nav__summary');
+    const panel = page.locator('.site-nav__panel');
+
+    await expect(panel).toBeHidden();
+    await summary.click();
+    await expect(panel).toBeVisible();
+
+    // Visible, not merely present - a clipped panel is still in the DOM
+    // and still has a box; it is just drawn nowhere you can click it.
+    for (const label of ['Research', 'Debugging', 'Projects', 'About']) {
+      await expect(panel.getByRole('link', { name: label, exact: true })).toBeVisible();
+    }
+
+    await panel.getByRole('link', { name: 'Projects', exact: true }).click();
+    await expect(page).toHaveURL(/\/projects$/);
+
+    // On a page inside the disclosure the summary carries the marker,
+    // because the link that carries aria-current is shut away.
+    await expect(page.locator('.site-nav__summary--current')).toHaveCount(1);
+    // And on one of the three top-level pages it does not.
+    await page.goto('/explained');
+    await expect(page.locator('.site-nav__summary--current')).toHaveCount(0);
+  });
+
+  // web/nav.js adds the three manners <details> has no opinion about.
+  // Escape is the one a keyboard user reaches for first, and it is also
+  // the one that proves the script loaded at all - the CSP is
+  // `script-src 'self'`, and the tag is relative, so a route directory
+  // without its <base href="/"> would fetch the module from the wrong
+  // path and fail silently.
+  test('Escape closes the More disclosure', async ({ page }) => {
+    await page.goto('/');
+    await dismissConsent(page);
+    await page.locator('.site-nav__summary').click();
+    await expect(page.locator('.site-nav__panel')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.site-nav__panel')).toBeHidden();
   });
 
   // Removed 10 Sep 2026 in favour of /projects, which is in the nav. If

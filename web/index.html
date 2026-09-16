@@ -101,25 +101,35 @@
 
 <div class="crt-frame">
 
-  <!-- Six real pages now (task 3n, 9 Sep 2026) - Downloads, Projects and
+  <!-- Seven real pages (task 3n, 9 Sep 2026) - Downloads, Projects and
        About were anchors on this page; each is its own destination now,
        per the owner's own correction that the two-page structure was an
-       over-consolidation. Generated - see web/_gen/pages.py, which is
-       the single source for this nav, the footer and the consent block
-       shared by all seven pages; never hand-edit between these markers.
-       Placed ahead of .hero, not overlaid on it, so the hero still
-       renders full-bleed on load - an overlay nav would eat into the
-       image it exists to show. -->
+       over-consolidation. Four of the seven now sit behind a "More"
+       disclosure rather than in the row (16 Sep 2026), because seven
+       items at the nav's type filled a phone with nothing to spare.
+       Generated - see web/_gen/pages.py, which is the single source for
+       this nav, the footer and the consent block shared by all seven
+       pages, and which carries the reasoning for both the split and the
+       order; never hand-edit between these markers. Placed ahead of
+       .hero, not overlaid on it, so the hero still renders full-bleed on
+       load - an overlay nav would eat into the image it exists to
+       show. -->
   <!-- BEGIN generated: nav (web/_gen/pages.py - do not hand-edit) -->
 <nav class="site-nav" aria-label="Primary">
   <a class="site-nav__link" href="/" aria-current="page">Hear it</a>
   <a class="site-nav__link" href="/explained">Explained</a>
-  <a class="site-nav__link" href="/research">Research</a>
-  <a class="site-nav__link" href="/debugging">Debugging</a>
   <a class="site-nav__link" href="/downloads">Downloads</a>
-  <a class="site-nav__link" href="/projects">DBHQ</a>
-  <a class="site-nav__link" href="/about">About</a>
+  <details class="site-nav__more" data-nav-more>
+    <summary class="site-nav__summary">More<svg class="site-nav__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg></summary>
+    <div class="site-nav__panel">
+      <a class="site-nav__link" href="/research">Research</a>
+      <a class="site-nav__link" href="/debugging">Debugging</a>
+      <a class="site-nav__link" href="/projects">Projects</a>
+      <a class="site-nav__link" href="/about">About</a>
+    </div>
+  </details>
 </nav>
+<script type="module" src="nav.js"></script>
 <!-- END generated: nav -->
 
   <header class="hero">

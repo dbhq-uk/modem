@@ -143,19 +143,25 @@
 
 <div class="crt-frame">
 
-  <!-- Six real pages now - see index.html's identical comment and
+  <!-- Three links and a "More" disclosure - see index.html's identical comment and
        web/_gen/pages.py, the single source for this nav, the footer and
        the consent block shared by all seven. -->
   <!-- BEGIN generated: nav (web/_gen/pages.py - do not hand-edit) -->
 <nav class="site-nav" aria-label="Primary">
   <a class="site-nav__link" href="/">Hear it</a>
   <a class="site-nav__link" href="/explained" aria-current="page">Explained</a>
-  <a class="site-nav__link" href="/research">Research</a>
-  <a class="site-nav__link" href="/debugging">Debugging</a>
   <a class="site-nav__link" href="/downloads">Downloads</a>
-  <a class="site-nav__link" href="/projects">DBHQ</a>
-  <a class="site-nav__link" href="/about">About</a>
+  <details class="site-nav__more" data-nav-more>
+    <summary class="site-nav__summary">More<svg class="site-nav__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg></summary>
+    <div class="site-nav__panel">
+      <a class="site-nav__link" href="/research">Research</a>
+      <a class="site-nav__link" href="/debugging">Debugging</a>
+      <a class="site-nav__link" href="/projects">Projects</a>
+      <a class="site-nav__link" href="/about">About</a>
+    </div>
+  </details>
 </nav>
+<script type="module" src="nav.js"></script>
 <!-- END generated: nav -->
 
   <header class="hero">

@@ -24,20 +24,32 @@
 <div class="crt-frame">
   <!-- Nav and footer added 9 Sep 2026 (task 3n) so a 404 is not a dead
        end - noindexed, so this is about a lost visitor finding their way
-       back, not search. Absolute paths throughout (the nav's own hrefs,
-       the footer's GitHub/sibling links), so <base href="/"> above has
-       nothing to do here: only this file's own relative asset links
-       (style.css, brand/icon*) needed it. -->
+       back, not search. Every href here is absolute (the nav's own
+       links, the footer's GitHub/sibling links), but the nav's script
+       tag is not - <base href="/"> above is what makes `nav.js` resolve
+       to /nav.js from a 404 served at any depth, which is the whole
+       reason that tag exists on this page. Without it a 404 at
+       /foo/bar would fetch /foo/nav.js, get this page back as HTML and
+       have the module rejected on MIME type - a nav that opens, because
+       <details> needs no script, but does not close on Escape. -->
+  <!-- Same file, same reasoning as the six real pages: see
+       web/_gen/pages.py, which owns everything between the markers. -->
   <!-- BEGIN generated: nav (web/_gen/pages.py - do not hand-edit) -->
 <nav class="site-nav" aria-label="Primary">
   <a class="site-nav__link" href="/">Hear it</a>
   <a class="site-nav__link" href="/explained">Explained</a>
-  <a class="site-nav__link" href="/research">Research</a>
-  <a class="site-nav__link" href="/debugging">Debugging</a>
   <a class="site-nav__link" href="/downloads">Downloads</a>
-  <a class="site-nav__link" href="/projects">DBHQ</a>
-  <a class="site-nav__link" href="/about">About</a>
+  <details class="site-nav__more" data-nav-more>
+    <summary class="site-nav__summary">More<svg class="site-nav__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg></summary>
+    <div class="site-nav__panel">
+      <a class="site-nav__link" href="/research">Research</a>
+      <a class="site-nav__link" href="/debugging">Debugging</a>
+      <a class="site-nav__link" href="/projects">Projects</a>
+      <a class="site-nav__link" href="/about">About</a>
+    </div>
+  </details>
 </nav>
+<script type="module" src="nav.js"></script>
 <!-- END generated: nav -->
   <main id="main" class="not-found">
     <h1 class="wordmark">NO CARRIER</h1>
