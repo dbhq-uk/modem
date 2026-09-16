@@ -30,9 +30,9 @@ there, only the diff check itself extended to the new page files (see
 
 Each page's own `<head>` (title, description, canonical, OG/Twitter,
 JSON-LD), hero, and main content stay hand-authored per file - that is
-the actual content of each of the six pages, and templating it away
-would be the opposite of "six real pages, each with its own title and
-h1". Only the chrome every page shares - the six-item nav, the footer's
+the actual content of each of the seven pages, and templating it away
+would be the opposite of "seven real pages, each with its own title and
+h1". Only the chrome every page shares - the seven-item nav, the footer's
 byline/groups, and the consent dialog plus its two script tags - is
 generated.
 """
@@ -88,8 +88,8 @@ PAGES = {
 
 
 def render_nav(current_id: str | None) -> str:
-    """The six-item sticky primary nav. `current_id` is None on 404.html,
-    where none of the six is "the current page" - a 404 is not one of
+    """The seven-item sticky primary nav. `current_id` is None on 404.html,
+    where none of the seven is "the current page" - a 404 is not one of
     them."""
     links = []
     for item_id, label, href in NAV_ITEMS:
@@ -101,7 +101,7 @@ def render_nav(current_id: str | None) -> str:
 
 # The footer: the required "a DBHQ experiment by..." byline, then one
 # link to the source with GitHub's own mark beside it. Identical, word
-# for word, on all six pages and on 404.html.
+# for word, on all seven pages and on 404.html.
 #
 # The byline is short on purpose. It used to carry the crate list and
 # "lives on GitHub" as well, which at the footer's type ran to three
