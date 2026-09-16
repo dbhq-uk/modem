@@ -25,3 +25,10 @@
 # under the old URL (GSC showed 0 of 6 pages indexed at the time), so this
 # is mostly for anyone holding a link.
 /prior-art   /research   301
+
+# /projects was deleted on 16 Sep 2026 (Dan: "get rid of the project page
+# on modem"). It listed the DBHQ siblings; the one that is actually
+# related to this project, bbs, is a primary nav item now instead. The
+# page was two days old and GSC had never indexed it, so this is for
+# anyone holding a link rather than for search.
+/projects   /   301

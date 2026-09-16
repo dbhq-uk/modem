@@ -21,10 +21,11 @@
 // `http://localhost` is a secure context, so AudioWorklet, WASM
 // instantiation and the whole demo genuinely run here - this is the real
 // thing, not a mock.
+import { readFileSync } from 'node:fs';
 import { test, expect } from '@playwright/test';
 
 const PAGES = ['/', '/explained', '/research',
-  '/debugging', '/downloads', '/projects', '/about'];
+  '/debugging', '/downloads', '/about'];
 
 /** Dismisses the consent dialog if it is showing.
  *
@@ -441,30 +442,49 @@ test.describe('the shared chrome', () => {
       // the disclosure holding three of them happens to be open. That is
       // the point of a <details> rather than a scripted menu: a crawler
       // that never clicks anything still sees them.
-      await expect(page.locator('.site-nav__link')).toHaveCount(6);
+      // Seven: six real pages, plus the one outbound link to bbs.
+      await expect(page.locator('.site-nav__link')).toHaveCount(7);
 
-      // Exactly one thing on the page says it is the current page -
-      // but NOT always in the nav. /projects left the nav on 16 Sep
-      // 2026 and is reached from the footer, so there the footer link
-      // is the one that marks itself. Asserted across the whole
-      // document rather than inside .site-nav, because the invariant
-      // that actually matters is "every page marks itself exactly
-      // once", and scoping it to the nav is what would quietly stop
-      // being true.
+      // Exactly one thing on the page says it is the current page.
+      // Asserted across the whole document rather than inside
+      // .site-nav, because the invariant that actually matters is
+      // "every page marks itself exactly once" wherever the marker
+      // lives.
       await expect(page.locator('[aria-current="page"]')).toHaveCount(1);
     }
   });
 
-  // /projects is reachable, and only from the footer. A page dropped
-  // from the nav and not picked up anywhere else is a page that is
-  // still in the sitemap, still returns 200, and is reachable from no
-  // link on the site - which nothing else here would catch.
-  test('/projects is reachable from the footer on every page', async ({ page }) => {
-    for (const path of PAGES) {
-      await page.goto(path);
-      await expect(page.locator('.site-nav__link[href="/projects"]')).toHaveCount(0);
-      await expect(page.locator('footer a[href="/projects"]')).toHaveCount(1);
-    }
+  // The one nav item that leaves the site. It is easy to add an
+  // external link and forget what an external link owes a reader: a
+  // visible sign that it leaves, and the same fact in words for
+  // anyone who cannot see the glyph. rel="noopener" is the other half.
+  test('the bbs link goes off-site and says so', async ({ page }) => {
+    await page.goto('/');
+    const bbs = page.locator('.site-nav__link--external');
+    await expect(bbs).toHaveAttribute('href', 'https://bbs.dbhq.uk/');
+    await expect(bbs).toHaveAttribute('rel', /noopener/);
+    await expect(bbs.locator('.site-nav__external')).toHaveCount(1);
+    await expect(bbs).toContainText('external site');
+  });
+
+  // /projects was deleted on 16 Sep 2026. Its URL was live for two
+  // days, so it redirects rather than 404s.
+  //
+  // Asserted against the built file rather than by following the
+  // redirect, because `_redirects` is a Cloudflare Pages control file
+  // and scripts/serve-dist.py does not implement it - a browser test
+  // here would be testing the test server. The live behaviour is
+  // checked after deploy instead (.github/workflows/deploy.yml,
+  // "/projects must redirect to the root"), which is the same split
+  // the older /links rule already uses.
+  //
+  // What this catches is the half that can break silently: the rule
+  // being tidied out of web/_redirects, or build-dist.sh ceasing to
+  // copy the file into the upload at all. Either leaves a 404 that
+  // nothing notices until a visitor hits it.
+  test('the /projects redirect rule is in the built upload', () => {
+    const redirects = readFileSync(new URL('../../dist/_redirects', import.meta.url), 'utf8');
+    expect(redirects).toMatch(/^\/projects\s+\/\s+301$/m);
   });
 
   // The disclosure went in on 16 Sep 2026, when seven items in one row
@@ -517,21 +537,23 @@ test.describe('the shared chrome', () => {
     await expect(page.locator('.site-nav__panel')).toBeHidden();
   });
 
-  // The footer carries ONE link to /projects and not the sibling list
-  // itself. The list was pulled out of the footer on 10 Sep 2026
-  // because repeating bbs, heliograph and the rest on all seven pages
-  // said it twice; that rule still holds, and a link to the page
-  // holding them is not a breach of it. This test is the line between
-  // the two - it would fail the moment the names came back.
-  test('the footer links /projects without repeating the sibling list', async ({ page }) => {
+  // The sibling list was pulled out of the footer on 10 Sep 2026
+  // because repeating heliograph, skills and the rest on every page
+  // said it twice. /projects, which then held the list, is gone as of
+  // 16 Sep. Neither is a reason for the names to drift back into the
+  // footer, which is what this guards.
+  //
+  // bbs is deliberately NOT in this list: it is one related project in
+  // the nav, which is a different thing from a roll-call of everything
+  // DBHQ has published. The footer is still checked for it, because
+  // the nav is where it belongs and twice is still twice.
+  test('the footer does not carry the sibling list', async ({ page }) => {
     await page.goto('/');
     const footer = page.locator('footer');
-    await expect(footer.locator('a[href="/projects"]')).toHaveCount(1);
     for (const host of ['bbs.dbhq.uk', 'heliograph.dbhq.uk', 'skills.dbhq.uk',
       'github.com/dbhq-uk/terraverdict', 'github.com/dbhq-uk/portmark']) {
       await expect(footer.locator(`a[href*="${host}"]`)).toHaveCount(0);
     }
-    await page.goto('/projects');
-    await expect(page.locator('h1')).toHaveText('Also from DBHQ');
+    await expect(footer).not.toContainText('Also from DBHQ');
   });
 });

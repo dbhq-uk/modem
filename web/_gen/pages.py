@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Generates the three shared-chrome regions repeated across modem's seven
+"""Generates the three shared-chrome regions repeated across modem's six
 pages: the primary nav, the footer, and the consent/analytics block.
 
 Edit this, then regenerate - never hand-edit the three marked regions in
 web/index.html, web/explained.html, web/research.html, web/debugging.html,
-web/downloads.html,
-web/projects.html, web/about.html or web/404.html. Same rule
+web/downloads.html, web/about.html or web/404.html. Same rule
 web/_gen/frames.py already follows for the two rendered terminal frames.
 
     python3 web/_gen/pages.py
@@ -30,12 +29,12 @@ there, only the diff check itself extended to the new page files (see
 
 Each page's own `<head>` (title, description, canonical, OG/Twitter,
 JSON-LD), hero, and main content stay hand-authored per file - that is
-the actual content of each of the seven pages, and templating it away
-would be the opposite of "seven real pages, each with its own title and
-h1". Only the chrome every page shares - the nav (three links, a "Read"
-disclosure holding three, and the script that makes the disclosure
-well-mannered), the footer's byline and its one internal link, and the
-consent dialog plus its two script tags - is generated.
+the actual content of each of the six pages, and templating it away
+would be the opposite of "six real pages, each with its own title and
+h1". Only the chrome every page shares - the nav (four items, one of
+them a "Read" disclosure holding three more, plus the script that makes
+the disclosure well-mannered), the footer's byline and source link, and
+the consent dialog plus its two script tags - is generated.
 """
 
 from pathlib import Path
@@ -43,7 +42,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 WEB = HERE.parent
 
-# THE NAV IS THREE ITEMS AND A DISCLOSURE, not seven items in a row
+# THE NAV IS FOUR ITEMS AND A DISCLOSURE, not seven links in a row
 # (Dan, 16 Sep 2026: "i feel we probaby need to dropodwn on the nav to
 # make some rooms"). Seven links at the nav's own small type ran to the
 # full width of a phone with nothing left over, and the seventh arrived
@@ -54,27 +53,25 @@ WEB = HERE.parent
 # beside it.
 #
 # THE FIRST ATTEMPT AT THIS GROUPED BY REMAINDER AND IT SHOWED (Dan,
-# 16 Sep 2026: "this structure is crap"). Try, Explained and
-# Download went in the row and the other four went behind a disclosure
+# 16 Sep 2026: "this structure is crap"). Hear it, Explained and
+# Downloads went in the row and the other four went behind a disclosure
 # labelled "More", which is not a group - it is the four that were left,
-# and no honest label exists for "the four that were left". Two things
-# fixed it:
+# and no honest label exists for "the four that were left". What fixed
+# it was ONE RULE DRAWING THE LINE: the row is what you do with the
+# modem - try it, get it, see who made it, and go and play with the
+# related one. The disclosure is the reading about it, and every page
+# inside is the same kind of thing: how it works, what already existed,
+# and what went wrong building this one. "Read" is a real name for that,
+# so the label carries meaning instead of apologising for the menu.
 #
-#   - ONE RULE DRAWS THE LINE. The row is what you do with the modem -
-#     try it, get it, see who made it. The disclosure is the reading
-#     about it, and every page inside is the same kind of thing: how it
-#     works, what already existed, and what went wrong building this
-#     one. "Read" is a real name for that, so the label carries meaning
-#     instead of apologising for the menu.
-#
-#   - PROJECTS LEFT THE NAV ENTIRELY. It was the only item in the row
-#     that takes you off the site - six rooms and an exit door in the
-#     same rank. It was also circular: it was pulled OUT of the footer
-#     on 10 Sep precisely because it had become a page. The page stays,
-#     the sibling list stays on it, and the footer carries one link to
-#     it (see FOOTER below) - which is not the duplication the 10 Sep
-#     rule banned, because the four sibling links still live in exactly
-#     one place.
+# /projects IS GONE, deleted later the same day (Dan: "get rid of the
+# project page on modem"). It had left the nav a few hours earlier as
+# the only item that took you off the site, and the honest reading of
+# that is not "demote it" but "nobody came here for a list of things
+# that happen to share an owner". What replaced it is one link to the
+# one sibling that shares a subject rather than an owner - see the bbs
+# entry below. The URL 301s to / (web/_redirects); it was two days old
+# and had never been indexed.
 #
 # Each tuple is id, label, href. The id is the internal key for
 # aria-current and never changes with the label.
@@ -116,6 +113,24 @@ NAV_ITEMS = (
     # inside freed the room, so there was no longer anything to buy by
     # hiding it.
     ("about", "About", "/about"),
+    # bbs, added 16 Sep 2026 in the same pass that deleted /projects,
+    # and for the reason Dan gave: "because its related". The two go
+    # together. A page listing every DBHQ sibling was a list of things
+    # that happen to share an owner; bbs is the one that shares a
+    # subject - the web as a 1992 bulletin board, next to a modem you
+    # would have dialled one with. Related earns a nav slot where
+    # "also ours" did not.
+    #
+    # It is the ONLY item in the nav that leaves the site, which is the
+    # thing the /projects page got wrong - but a named destination is
+    # not the same as an unnamed exit. "bbs" says where it goes; the
+    # outbound glyph beside it says that it goes, and the screen-reader
+    # text says so in words. A nav link that quietly changes hostname is
+    # the version of this that would be wrong.
+    #
+    # Lowercase, per the DBHQ naming rule - the project is `bbs`
+    # everywhere: repository, site, and dbhq.uk's own /experiments.
+    ("bbs", "bbs", "https://bbs.dbhq.uk/"),
 )
 
 # What sits behind "Read". One kind of page, three depths: how this
@@ -143,18 +158,12 @@ NAV_MORE = (
 # three regions each file actually carries. 404.html gets a nav and a
 # footer (so it is not a dead end) but no consent dialog: it is
 # noindexed and carries no analytics of its own to gate.
-#
-# projects.html's nav_id is "projects" and no nav item claims it, which
-# is deliberate: the page is reached from the footer now, and it is the
-# footer link that takes aria-current there. Every page still marks
-# itself exactly once, just not always in the same region.
 PAGES = {
     "index.html": {"nav_id": "try", "regions": ("nav", "footer", "consent")},
     "explained.html": {"nav_id": "explained", "regions": ("nav", "footer", "consent")},
     "research.html": {"nav_id": "research", "regions": ("nav", "footer", "consent")},
     "debugging.html": {"nav_id": "debugging", "regions": ("nav", "footer", "consent")},
     "downloads.html": {"nav_id": "downloads", "regions": ("nav", "footer", "consent")},
-    "projects.html": {"nav_id": "projects", "regions": ("nav", "footer", "consent")},
     "about.html": {"nav_id": "about", "regions": ("nav", "footer", "consent")},
     "404.html": {"nav_id": None, "regions": ("nav", "footer")},
 }
@@ -174,11 +183,10 @@ CHEVRON = (
 
 
 def render_nav(current_id: str | None) -> str:
-    """The sticky primary nav: three links and a "Read" disclosure
-    holding three more. `current_id` is None on 404.html, where none of
-    them is "the current page" - a 404 is not one of them - and it is
-    "projects" on projects.html, which no nav item claims, so the nav
-    marks nothing and the footer link marks itself instead.
+    """The sticky primary nav: Try, a "Read" disclosure holding three
+    pages, Download, About, and one external link to bbs. `current_id`
+    is None on 404.html, where none of them is "the current page" - a
+    404 is not one of them.
 
     The disclosure is a native `<details>`/`<summary>`, so it opens, takes
     keyboard focus and announces its state with no JavaScript at all -
@@ -188,7 +196,21 @@ def render_nav(current_id: str | None) -> str:
     usable; without the element it would not be."""
 
     def link(item_id: str, label: str, href: str, indent: str) -> str:
+        # An external item can never be the current page, so the
+        # aria-current branch simply never fires for it - no special
+        # case needed, the ids just do not collide.
         current = ' aria-current="page"' if item_id == current_id else ""
+        if href.startswith("https://"):
+            # rel="noopener" and a visible marker. The glyph is
+            # aria-hidden and the fact is carried in words instead, so a
+            # screen reader hears "bbs, external site" rather than
+            # "bbs, north east arrow".
+            return (
+                f'{indent}<a class="site-nav__link site-nav__link--external" '
+                f'href="{href}" rel="noopener"{current}>{label}'
+                f'<span class="site-nav__external" aria-hidden="true">&#8599;</span>'
+                f'<span class="sr-only"> (external site)</span></a>'
+            )
         return f'{indent}<a class="site-nav__link" href="{href}"{current}>{label}</a>'
 
     # The marker on the summary when the open page is one of the three
@@ -242,30 +264,23 @@ def render_nav(current_id: str | None) -> str:
 #
 # It carried two labelled groups until 10 Sep 2026. "Also from DBHQ" went
 # first: /projects carried the same links and was in the primary nav, so
-# repeating them in the footer of all seven pages said it twice and made
-# the footer the longest thing on the short pages.
+# repeating them in the footer of every page said it twice and made the
+# footer the longest thing on the short pages. /projects itself is gone
+# as of 16 Sep 2026 - see below.
 #
 # That left "This project" as a label over a single GitHub link whose URL
 # the byline directly above already carried: a heading, a lot of vertical
 # space, and one orphaned word (Dan: "foot looks crap still"). Now one
 # marked link, said once.
 #
-# ONE LINK TO /projects CAME BACK ON 16 Sep 2026, and it is not a repeal
-# of the rule above. The rule bans repeating the *sibling list* - bbs,
-# heliograph, skills, terraverdict, portmark - in the footer of every
-# page, and that list still lives in exactly one place. What comes back
-# is a single internal link to the page holding it, because /projects
-# left the primary nav that day and a page reachable from nowhere is a
-# page that is not on the site. It is inside the byline sentence rather
-# than as a row of its own, so the footer gains no new line.
-#
-# It takes aria-current on /projects itself, which is why the footer is
-# rendered per page rather than being one constant. Without it /projects
-# would be the one page on the site that marks itself nowhere.
-def render_footer(current_id: str | None) -> str:
-    current = ' aria-current="page"' if current_id == "projects" else ""
-    return f"""<footer class="endorsement">
-  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed. <a class="endorsement__projects" href="/projects"{current}>Also from DBHQ</a>.</p>
+# A LINK TO /projects LIVED HERE FOR A FEW HOURS ON 16 Sep 2026 and is
+# gone with the page. /projects listed the DBHQ siblings; it was deleted
+# the same day (Dan: "get rid of the project page on modem") and the one
+# sibling that is actually related to this project - bbs - is a nav item
+# now instead. Nothing in the footer needs to change with it, which is
+# why this is a constant again rather than a per-page render.
+FOOTER = """<footer class="endorsement">
+  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed.</p>
 
   <p class="endorsement__source">
     <a class="endorsement__github" href="https://github.com/dbhq-uk/modem" rel="noopener">
@@ -311,7 +326,7 @@ def render_region(region: str, nav_id: str | None) -> str:
     if region == "nav":
         return render_nav(nav_id)
     if region == "footer":
-        return render_footer(nav_id)
+        return FOOTER
     if region == "consent":
         return CONSENT
     raise ValueError(f"unknown region {region!r}")

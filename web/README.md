@@ -12,14 +12,16 @@ as of task 3n (9 Sep 2026), not one long page. What is here:
   all six pages plus `404.html`.
 - `explained.html` (`/explained`) - what you are hearing, phase by
   phase, and Bell 103/FSK after CONNECT.
-- `prior-art.html` (`/prior-art`) - the standards this project actually
-  implements, the prior art worth trying if speed rather than ceremony
-  is the point, and the history behind it - split out of
-  `explained.html`, which used to carry all of this too.
-- `downloads.html` (`/downloads`), `projects.html` (`/projects`),
-  `about.html` (`/about`) - the platform table; the sibling DBHQ
-  experiments; and what this is, the performed-versus-real seam, and who
-  built it and why.
+- `research.html` (`/research`) - the standards this project actually
+  implements, the related work worth trying if speed rather than
+  ceremony is the point, and the history behind it - split out of
+  `explained.html`, which used to carry all of this too. It was
+  `prior-art.html` until 10 Sep 2026; `/prior-art` still redirects.
+- `downloads.html` (`/downloads`), `about.html` (`/about`) - the
+  platform table; and what this is, the performed-versus-real seam, and
+  who built it and why. `projects.html` listed the sibling DBHQ
+  experiments and was deleted on 16 Sep 2026; `/projects` 301s to `/`,
+  and the one related sibling, bbs, is a primary nav item.
 - `_gen/frames.py` - regenerates the two rendered terminal frames inside
   `index.html`'s "Two ways to try this" section - see that script's own
   doc and "The generated frames" below.

@@ -40,7 +40,6 @@ PAGES = (
     "research.html",
     "debugging.html",
     "downloads.html",
-    "projects.html",
     "about.html",
     "404.html",
 )

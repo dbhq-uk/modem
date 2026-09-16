@@ -376,11 +376,12 @@ body {
 }
 
 /* ---------------------------------------------------------------------
- * site-nav - the sticky primary nav: Try, a "Read" disclosure
- * holding Explained, Research and Debugging, then Download and About,
- * as of 16 Sep 2026 - no item is an anchor any more, and /projects is
- * reached from the footer rather than from here (see web/_gen/pages.py's
- * own doc, which carries the reasoning for the grouping). Placed
+ * site-nav - the sticky primary nav: Try, a "Read" disclosure holding
+ * Explained, Research and Debugging, then Download, About and one
+ * outbound link to bbs, as of 16 Sep 2026 - no item is an anchor any
+ * more, and /projects is deleted rather than demoted (see
+ * web/_gen/pages.py's own doc, which carries the reasoning for the
+ * grouping). Placed
  * ahead of .hero in the markup rather than overlaid on it: a nav painted
  * on top of a full-bleed hero would eat into the image it exists to
  * show, so this is a normal, non-overlapping block instead, sticky only
@@ -463,6 +464,27 @@ body {
 .site-nav__link[aria-current="page"] {
   color: var(--modem-white-bright);
   border-bottom: 2px solid var(--modem-green-bright);
+}
+
+/* The one nav item that leaves the site (bbs). It reads as a peer of
+   the others because it is one - a related project, not an advert - so
+   the only difference is the glyph, which is the part a reader needs
+   before they click rather than after. The fact is also in the link's
+   accessible name as words; the glyph itself is aria-hidden, because a
+   screen reader announcing "north east arrow" tells nobody anything. */
+.site-nav__link--external {
+  display: inline-flex;
+  align-items: center;
+}
+
+.site-nav__external {
+  margin-left: 2px;
+  /* Smaller than the label and lifted slightly: at the nav's 0.75rem
+     the arrow otherwise sits on the baseline looking like a character
+     in the word. */
+  font-size: 0.8em;
+  line-height: 1;
+  transform: translateY(-0.15em);
 }
 
 /* ---------------------------------------------------------------------
@@ -2122,17 +2144,11 @@ body.app-mode {
   max-width: 62ch;
 }
 
-/* The one internal link in the byline, back on 16 Sep 2026 when
-   /projects left the primary nav. Styled as part of the sentence rather
-   than as a row of its own: the footer gains a link, not a line. */
-.endorsement__projects {
-  white-space: nowrap;
-}
-
 /* One link under the byline, with GitHub's own mark beside it.
  *
- * This replaced two labelled groups. The sibling list went to /projects,
- * which left "This project" as a heading over a single GitHub link whose
+ * This replaced two labelled groups. The sibling list went to /projects
+ * (itself deleted on 16 Sep 2026), which left "This project" as a
+ * heading over a single GitHub link whose
  * URL the byline directly above already carried - a label, a lot of
  * vertical space and one orphaned word (Dan, 10 Sep 2026: "foot looks
  * crap still"). Saying it once, with a mark that makes it findable at a
@@ -2172,11 +2188,10 @@ body.app-mode {
 
 /* .endorsement__siblings was here - the old "Also from DBHQ" group's
    list of one sibling per line. The list moved to /projects on 10 Sep
-   2026 and the rules outlived it by six days, matching nothing on any
-   page. Deleted 16 Sep 2026 rather than left in place: the new byline
-   link is a different element doing a different job, and two rules
-   named after a list that no longer exists is how the next person
-   styles the wrong thing. */
+   2026, the rules outlived it by six days matching nothing on any page,
+   and /projects itself was deleted on 16 Sep. Deleted rather than left
+   in place: rules named after a list that no longer exists are how the
+   next person styles the wrong thing. */
 
 /* ---------------------------------------------------------------------
  * contents - explained.html's own short jump list to its sections (see
