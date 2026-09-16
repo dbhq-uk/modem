@@ -19,6 +19,12 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://modem.dbhq.uk/debugging</loc>
+    <lastmod>2026-09-09</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://modem.dbhq.uk/downloads</loc>
     <lastmod>2026-09-09</lastmod>
     <changefreq>monthly</changefreq>

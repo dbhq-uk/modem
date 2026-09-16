@@ -38,6 +38,7 @@ PAGES = (
     "index.html",
     "explained.html",
     "research.html",
+    "debugging.html",
     "downloads.html",
     "projects.html",
     "about.html",

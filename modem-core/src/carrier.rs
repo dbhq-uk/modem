@@ -535,13 +535,26 @@ impl ToneDominance {
         // that reports none.
         //
         // The floor is a fraction of the own-band energy, because that
-        // is what the leakage is proportional to. Measured directly: a
-        // pure own-band tone puts 1.9% of its power into the wanted
-        // probe at worst, across both bands and all five drift probes.
-        // Against a DOMINANCE_RATIO of 40 the floor only has to exceed
-        // 0.019/40, about 0.0005, so 0.005 leaves an order of magnitude
-        // of margin against a false positive while sitting far below the
-        // far end's own energy whenever it is genuinely transmitting.
+        // is what the leakage is proportional to.
+        //
+        // Measured directly, and note carefully which two quantities are
+        // being compared, because the obvious misreading changes the
+        // answer by two orders of magnitude. With a pure own-band tone
+        // and nothing else present, the *power* landing in the wanted
+        // probe is at worst 1.9% of `own_energy` - the subtracted
+        // quantity computed just above, not `own_power`. Worst case over
+        // both bands and all five drift probes.
+        //
+        // The false positive to rule out is `narrow > DOMINANCE_RATIO *
+        // others` firing on that leakage alone. With `others` floored at
+        // `g * own_energy` that needs `0.019 * own_energy <= 40 * g *
+        // own_energy`, so `g >= 0.019/40`, about 0.0005. 0.005 is ten
+        // times that, and still far below the far end's own energy
+        // whenever it is genuinely transmitting.
+        //
+        // `this_end_s_own_tone_alone_is_never_read_as_the_far_end` is
+        // the empirical check on all of the above, at four amplitudes
+        // across both of this end's tones.
         let others = (self.wideband - own_energy).max(own_energy * OWN_LEAK_GUARD);
         // No epsilon needed: on true silence every sample is exactly
         // zero, so `narrow` is exactly zero too and this correctly reads

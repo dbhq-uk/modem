@@ -23,7 +23,8 @@
 // thing, not a mock.
 import { test, expect } from '@playwright/test';
 
-const PAGES = ['/', '/explained', '/research', '/downloads', '/projects', '/about'];
+const PAGES = ['/', '/explained', '/research',
+  '/debugging', '/downloads', '/projects', '/about'];
 
 /** Dismisses the consent dialog if it is showing.
  *
@@ -344,7 +345,7 @@ test.describe('the shared chrome', () => {
   test('the nav reaches every page and marks the current one', async ({ page }) => {
     for (const path of PAGES) {
       await page.goto(path);
-      await expect(page.locator('.site-nav__link')).toHaveCount(6);
+      await expect(page.locator('.site-nav__link')).toHaveCount(7);
       await expect(page.locator('.site-nav__link[aria-current="page"]')).toHaveCount(1);
     }
   });

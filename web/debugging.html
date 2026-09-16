@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Debugging a modem that only failed in a room | modem</title>
+<meta name="description" content="Every test passed and two devices on a desk would not talk. How the acoustic link was fixed: a simulated channel, a remote lab driving two real devices, three confident wrong answers, and the one line that caused it.">
+<link rel="canonical" href="https://modem.dbhq.uk/debugging">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://modem.dbhq.uk/debugging">
+<meta property="og:title" content="Debugging a modem that only failed in a room | modem">
+<meta property="og:description" content="Every test passed and two devices on a desk would not talk. How the acoustic link was fixed: a simulated channel, a remote lab driving two real devices, three confident wrong answers, and the one line that caused it.">
+<meta property="og:image" content="https://modem.dbhq.uk/hero.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1536">
+<meta property="og:image:height" content="1024">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Debugging a modem that only failed in a room | modem">
+<meta name="twitter:description" content="Every test passed and two devices on a desk would not talk. How the acoustic link was fixed: a simulated channel, a remote lab driving two real devices, three confident wrong answers, and the one line that caused it.">
+<meta name="twitter:image" content="https://modem.dbhq.uk/hero.png">
+<link rel="icon" href="../brand/icon.svg" type="image/svg+xml">
+<link rel="icon" href="../brand/icon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="../brand/icon-180.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0A0A0A">
+<!-- See index.html's identical comment: an explicit <link> fetches in
+     parallel with style.css; style.css's own @import made this a serial
+     fetch instead. -->
+<link rel="preload" as="image" type="image/avif" fetchpriority="high"
+      imagesrcset="hero-480.avif 480w, hero-768.avif 768w, hero-1080.avif 1080w, hero-1536.avif 1536w"
+      imagesizes="100vw">
+<link rel="preload" href="fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../brand/tokens.css">
+<link rel="stylesheet" href="style.css">
+<!-- Structured data: application/ld+json is data, not script - see
+     index.html's identical comment on why this is exempt from
+     script-src under this site's strict CSP. New page on 16 Sep 2026:
+     the acoustic mode was fixed that day after three wrong answers, and
+     the account of how is worth more than the fix. No FAQPage node -
+     /explained's FAQ answers describe the overture, none of them this
+     page's own content. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://modem.dbhq.uk/#website",
+      "url": "https://modem.dbhq.uk/",
+      "name": "modem",
+      "publisher": { "@id": "https://dbhq.uk/#organization" },
+      "inLanguage": "en-GB"
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://modem.dbhq.uk/debugging#webpage",
+      "url": "https://modem.dbhq.uk/debugging",
+      "name": "Debugging a modem that only failed in a room | modem",
+      "description": "Every test passed and two devices on a desk would not talk. How the acoustic link was fixed: a simulated channel, a remote lab driving two real devices, three confident wrong answers, and the one line that caused it.",
+      "isPartOf": { "@id": "https://modem.dbhq.uk/#website" },
+      "inLanguage": "en-GB"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<!-- Same cosmetic CRT power-on overlay as index.html - see that file's
+     own comment. Purely decorative, never intercepts a click, hidden
+     outright under prefers-reduced-motion. -->
+<div class="crt-warmup" aria-hidden="true"></div>
+
+<div class="crt-frame">
+
+  <!-- BEGIN generated: nav (web/_gen/pages.py - do not hand-edit) -->
+<nav class="site-nav" aria-label="Primary">
+  <a class="site-nav__link" href="/">Hear it</a>
+  <a class="site-nav__link" href="/explained">Explained</a>
+  <a class="site-nav__link" href="/research">Research</a>
+  <a class="site-nav__link" href="/debugging" aria-current="page">Debugging</a>
+  <a class="site-nav__link" href="/downloads">Downloads</a>
+  <a class="site-nav__link" href="/projects">DBHQ</a>
+  <a class="site-nav__link" href="/about">About</a>
+</nav>
+<!-- END generated: nav -->
+
+  <header class="hero">
+    <!-- See index.html's identical comment on why this is a <picture>
+         with pre-generated WebP/AVIF variants rather than the bare PNG. -->
+    <picture>
+      <source type="image/avif" srcset="hero-480.avif 480w, hero-768.avif 768w, hero-1080.avif 1080w, hero-1536.avif 1536w" sizes="100vw">
+      <source type="image/webp" srcset="hero-480.webp 480w, hero-768.webp 768w, hero-1080.webp 1080w, hero-1536.webp 1536w" sizes="100vw">
+      <img class="hero__image" src="hero.png" width="1536" height="1024" decoding="sync" fetchpriority="high" alt="" aria-hidden="true">
+    </picture>
+    <div class="hero__overlay">
+      <div class="hero__content">
+        <p class="wordmark">modem</p>
+        <h1 class="hero__heading">Debugging a modem that only failed in a room</h1>
+        <p class="hero__tagline">Every test passed. Two devices on a desk would not talk</p>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <section class="intro">
+      <p>The two-device mode puts a real Bell 103 connection across a room, speaker to microphone. It worked on one machine, it worked between two processes, and it passed every test in the repository. Put a laptop and a phone on a desk and it connected, sat there looking healthy, and moved no data at all.</p>
+      <p>What follows is how that was found, including the three answers that were confident and wrong. The wrong answers are the useful part: each one was plausible, each one produced a real code change, and none of them was the bug.</p>
+    </section>
+
+    <nav class="contents" aria-label="On this page">
+      <ul class="contents__list">
+        <li><a href="#wire">A wire is not a room</a></li>
+        <li><a href="#wrong">Three wrong answers</a></li>
+        <li><a href="#lab">Building the lab</a></li>
+        <li><a href="#bug">The bug</a></li>
+        <li><a href="#lessons">What it cost, and what it taught</a></li>
+      </ul>
+    </nav>
+
+    <section class="explainer section-anchor" id="wire" aria-labelledby="wire-heading">
+      <h2 id="wire-heading">A wire is not a room</h2>
+      <p>Every test in this project fed one end's output straight into the other end's input. That proves the protocol agrees with itself, which is worth proving, and it quietly assumes something no room provides: that a device hears only the far end.</p>
+      <p class="terminal-line">Cross-wired in software, your own transmission never reaches your own receiver. Over a room, it is the loudest thing there.</p>
+      <p>A device's own loudspeaker is a few centimetres from its own microphone. The other device is across the desk. Measured on real hardware, that puts a device's own tone six to nine times louder in its own microphone than the far device's. Nothing in the test suite had ever contained that fact, so nothing in the test suite could fail because of it.</p>
+    </section>
+
+    <section class="explainer section-anchor" id="wrong" aria-labelledby="wrong-heading">
+      <h2 id="wrong-heading">Three wrong answers</h2>
+
+      <h3>Browser noise suppression</h3>
+      <p>The first theory was the most attractive one. Noise suppressors work by learning a steady noise floor and subtracting it, a Bell 103 mark tone is about as steady as a signal gets, and this modem holds one continuously whenever an end is listening rather than talking. A suppressor gets seconds of training on precisely the signal it then has to carry.</p>
+      <p>It was modelled, measured, and it is false at desk levels. Noise suppression and automatic gain control both left the link at zero errors. The page still asks browsers to switch them off and still reports a device that refuses, because failing to measure harm in one model is not proof there is none - but it was not the fault, and believing it cost a day.</p>
+
+      <h3>The idle tone is too loud</h3>
+      <p>The second theory was right about the mechanism and wrong about the cure. An end that is listening holds a continuous tone, and that tone is what deafens it. Turning it down is the obvious lever, so it was turned down - and turn handover broke at every level tried.</p>
+      <p>That turned out to be a second, real defect standing behind the first. A burst does not end at its last data bit: the far end's deframer needs to see the tone held past the final stop bit, and the window deciding that bit spans about a symbol either side. Dropping the level immediately afterwards landed inside the last byte of the handover packet, corrupted it, failed its checksum, and the turn never changed hands. Both fixes were needed, and neither works without the other.</p>
+
+      <h3>Pick a better number</h3>
+      <p>The third answer was the worst, because it looked like progress. The idle level was measured and set three times - 0.2, then 0.07, then 0.05 - each from a fresh reading of one pair of devices, each an improvement on the last, and all three beside the point.</p>
+      <p class="terminal-line">Both ends run the same constant, so turning it down turns the far end down by exactly as much. The ratio between them never moves.</p>
+      <p>That ratio is set by where the two devices are sitting. No constant chosen on one desk can know it about another, and a fourth attempt would have been the same mistake with a fourth number.</p>
+    </section>
+
+    <section class="explainer section-anchor" id="lab" aria-labelledby="lab-heading">
+      <h2 id="lab-heading">Building the lab</h2>
+      <p>The common thread in all three wrong answers is that they were reasoning against a model. The model's central figure - how much louder a device's own speaker is in its own microphone - had been calculated from the inverse square law and never once measured.</p>
+      <p>So two things got built. The first is a simulated channel in the test suite that composes the whole path a desk-to-desk call goes through: band limiting, a desk reflection, room noise, a device's own loudspeaker leaking back in, and the browser's own audio processing. It reports a byte error rate, so "does it work" became a number.</p>
+      <p>The second is a lab that drives two real devices. Both load a page, register, poll for an instruction and post back what they measured. One holds a tone while the other listens; then they swap; then both run the actual modem and stream every status change and decoded byte back with timestamps. A failing call can be read from both ends at once against a common clock, rather than reconstructed afterwards from what somebody saw on a screen.</p>
+      <p>The first run of the simulated channel reported total failure for every condition, including the unimpaired control. That was the harness, not the modem: a receiver tunes to the <em>far</em> end's band, so configuring both sides identically listens to the wrong pair of tones entirely. It would have read as proof that the acoustic path was hopeless. The control existed, ran first, and caught it.</p>
+      <p class="terminal-line">A measurement with no control is a number with no meaning.</p>
+    </section>
+
+    <section class="explainer section-anchor" id="bug" aria-labelledby="bug-heading">
+      <h2 id="bug-heading">The bug</h2>
+      <p>With two real devices reporting, the failure appeared in a single run. The laptop dialled, performed the whole overture, reached a connected state - and reported no carrier for the entire call. The phone, answering, reported carrier immediately. One direction worked and the other never had.</p>
+      <p>Carrier detection asks whether the far end's tone is forty times louder than the total energy on the line. Over a wire that is exactly the right question. Over a room, the total includes the device's own loudspeaker.</p>
+      <p class="terminal-line">The receiver was asking whether the far end was forty times louder than its own voice.</p>
+      <p>It never is. At six to nine times the other way round, the answer is always no, at any volume, because that ratio is geometry rather than a setting. Every earlier fix had been adjusting levels on both sides of a comparison that could not come out right.</p>
+      <p>The correction is that a device's own tones are <em>known</em>, not noise. They are measured and subtracted before the comparison is made.</p>
+      <p>The first attempt at that inverted the bug. Subtract everything and a moment containing nothing but your own tone leaves nothing to compare against, so that tone's own faint leakage reads as an overwhelmingly strong far end. A receiver that hears itself and calls it a carrier is worse than one that hears nothing. An existing test caught it on the first run, and the fix is a floor on the comparison, set from a measurement of how much a tone actually leaks into a neighbouring band.</p>
+      <p>Then both devices decoded each other, twice, across a desk.</p>
+    </section>
+
+    <section class="explainer section-anchor" id="lessons" aria-labelledby="lessons-heading">
+      <h2 id="lessons-heading">What it cost, and what it taught</h2>
+      <p>Four rounds of changes to fix one fault. Two of them turned out to be necessary - the handover defect found along the way was real, and the link needs that fix too - and two were pure detour. The useful ratio is not four to one but the shape of it: most of the effort went into answers that were plausible, testable-sounding and wrong.</p>
+      <p>Three things are worth taking from it.</p>
+      <p><strong>A test that passes on a wire says nothing about a room.</strong> It still proves plenty - the protocol agreed with itself throughout - but the suite was thorough about the wrong thing. Every assumption a test makes silently is an assumption nothing will ever check.</p>
+      <p><strong>A plausible theory is not evidence.</strong> Noise suppression explained the symptom, matched the mechanism, and was wrong. It survived as long as it did because it was never measured, only agreed with.</p>
+      <p><strong>Build the instrument.</strong> The bug was found in one run of a lab that took an afternoon to build, after several days of reasoning had produced three wrong answers. The instrument is still there, and the numbers it produced are now tests.</p>
+      <p><a class="dial-button" href="https://github.com/dbhq-uk/modem/blob/main/docs/acoustic-harness.md" rel="noopener"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 5a2 2 0 0 1 2-2h6v18H6a2 2 0 0 1-2-2V5Z"/><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/></svg><span>The harness, in full</span></a></p>
+    </section>
+
+    <p><a class="dial-button" href="/"><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="4" width="20" height="16" rx="1"/><path d="M12 4v16"/></svg><span>Try the demo</span></a></p>
+
+  </main>
+
+  <!-- BEGIN generated: footer (web/_gen/pages.py - do not hand-edit) -->
+<footer class="endorsement">
+  <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed.</p>
+
+  <p class="endorsement__source">
+    <a class="endorsement__github" href="https://github.com/dbhq-uk/modem" rel="noopener">
+      <svg class="endorsement__github-mark" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      <span>Source on GitHub</span>
+    </a>
+  </p>
+</footer>
+<!-- END generated: footer -->
+
+</div>
+
+<!-- BEGIN generated: consent (web/_gen/pages.py - do not hand-edit) -->
+<script type="module" src="boot.js"></script>
+<script type="module" src="analytics.js"></script>
+<script type="module" src="consent.js"></script>
+<dialog class="consent" data-consent aria-labelledby="consent-title">
+  <h2 id="consent-title">CARRIER DETECT</h2>
+  <p>
+    We would like to count how many people come here to listen, using Google
+    Analytics. Cookies are only set if you accept, and the modem answers
+    exactly the same either way.
+  </p>
+  <div class="consent-actions">
+    <button type="button" class="dial-button" data-consent-decline><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg><span>Decline</span></button>
+    <button type="button" class="dial-button" data-consent-accept autofocus><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"/></svg><span>Accept</span></button>
+  </div>
+</dialog>
+<!-- END generated: consent -->
+</body>
+</html>

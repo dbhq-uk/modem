@@ -193,7 +193,7 @@ const TRAINING_PREAMBLE: [u8; 2] = [0x55, 0x55];
 /// | Originate     | 2025 / 2225 Hz | 1270 Hz  | 755 Hz | 4x        |
 /// | Answer        | 1070 / 1270 Hz | 2225 Hz  | 955 Hz | 1.5x      |
 ///
-/// 0.05 is -26 dB, and it is a measured number rather than a modelled
+/// 0.02 is -34 dB, and it is a measured number rather than a modelled
 /// one. Two real devices - a Windows laptop and an iPhone, 10-20 cm
 /// apart - were driven through `/lab` on 15 September 2026 while the
 /// levels at each microphone were recorded. In the configuration that
@@ -209,23 +209,28 @@ const TRAINING_PREAMBLE: [u8; 2] = [0x55, 0x55];
 /// weak: it arrived 390x above that microphone's own noise floor. The
 /// link was not short of signal, it was buried under this tone.
 ///
-/// 0.07 was the level that brought that 22x just under the threshold,
-/// and "just" is the problem: it left the weaker band sitting exactly on
-/// the measured figure with nothing spare. 0.05 puts real margin there.
-/// Before any of this it was 0.2, chosen from inverse-square arithmetic,
-/// which was not enough on real hardware.
+/// This constant was set three times from three measurements - 0.2, then
+/// 0.07, then 0.05 - and all three were beside the point, because
+/// lowering this end's tone lowers the far end's by exactly as much and
+/// the ratio between them never moved. The actual fault was in
+/// `carrier.rs`, which counted this end's own loudspeaker as evidence
+/// against hearing the far one.
 ///
-/// The floor is carrier detection at the far end, and it is not close:
-/// `carrier_survives_a_quiet_idle_tone` holds down to 0.02 against room
-/// noise at the same level as the tone, because `ToneDominance` is a
-/// ratio test and scaling the tone scales both sides of it.
+/// With that fixed the level is free, and the only thing left deciding
+/// it is what a person sitting next to two devices has to listen to for
+/// the length of a call. So it is set as quietly as the measurement
+/// allows: carrier detection holds to 0.01 against a quiet room and
+/// fails at 0.005, and - the part that shows the fix is real - the far
+/// end's own tone being six or nine times louder makes no difference to
+/// that at all. 0.02 is twice the lowest level measured working.
 ///
-/// The value is bounded below by carrier detection, and that turned out
-/// not to bind here at all. `carrier_survives_a_quiet_idle_tone` holds
-/// against fixed room noise all the way to 0.1 - including noise at the
-/// same level as the tone - because `ToneDominance` is a ratio test and
-/// scaling the tone scales both sides of it. 0.2 keeps a factor of two
-/// over the lowest level measured working.
+/// Stale paragraph removed here on 16 Sep 2026: it justified a value of
+/// 0.2 and claimed detection was untroubled because "scaling the tone
+/// scales both sides of it", which is wrong about fixed room noise -
+/// noise does not scale with the tone, so lowering the tone genuinely
+/// does change that ratio. `carrier_survives_a_quiet_idle_tone` is the
+/// measurement that decides it, and the paragraph above carries what it
+/// actually says.
 ///
 /// Idle mark's only job is keeping the far end's carrier up between
 /// bursts. Data is transmitted from `tx` at full scale and is not
@@ -240,27 +245,7 @@ const TRAINING_PREAMBLE: [u8; 2] = [0x55, 0x55];
 /// turn handover at every level from 0.8 down, because the level step
 /// landed inside the tail of the `Turn` packet. The tail gap is what
 /// makes this safe; neither change is much use without the other.
-pub const IDLE_MARK_AMPLITUDE: f32 = 0.05;
-
-/// How long to sit connected and deaf before turning this end's own idle
-/// tone down a step. Long enough that a brief dropout does not trigger
-/// it, short enough that a call adapts well inside the site's own 10
-/// second data-check window.
-const IDLE_BACKOFF_SECONDS: f64 = 1.5;
-
-/// How far down each step goes. Six steps from IDLE_MARK_AMPLITUDE to
-/// the floor, which is nine seconds - a call that needs the floor gets
-/// there while somebody is still watching it.
-const IDLE_BACKOFF_STEP: f32 = 0.6;
-
-/// As far down as the backoff goes.
-///
-/// `carrier_survives_a_quiet_idle_tone` measures detection still working
-/// at 0.02 against room noise at the same level as the tone, so this is
-/// the lowest level with evidence behind it. Below here the far end
-/// stops hearing this one, which trades one broken direction for the
-/// other.
-const IDLE_BACKOFF_FLOOR: f32 = 0.02;
+pub const IDLE_MARK_AMPLITUDE: f32 = 0.02;
 
 /// Bit periods of idle mark queued behind the `Turn` packet by
 /// `yield_turn`, closing a burst the way [`GRANT_IDLE_GAP_BITS`] opens
@@ -350,12 +335,6 @@ pub struct Session {
     /// cannot be reused for that without risking whatever a caller
     /// queued into it before actually holding the turn.
     idle_tx: Option<Tx>,
-    /// Current scale of `idle_tx`, which backs off on its own while this
-    /// end is connected and hearing nothing. See IDLE_BACKOFF_STEP.
-    idle_amplitude: f32,
-    /// Samples spent connected, not holding the turn, hearing no
-    /// carrier. Reset whenever carrier appears or the turn arrives.
-    deaf_samples: usize,
     rx: Option<Rx>,
     reader: PacketReader,
     /// Payload bytes drained from completed `PacketKind::Data` packets,
@@ -388,8 +367,6 @@ impl Session {
             overture_stage: None,
             tx: None,
             idle_tx: None,
-            idle_amplitude: IDLE_MARK_AMPLITUDE,
-            deaf_samples: 0,
             rx: None,
             reader: PacketReader::new(),
             inbox: Vec::new(),
@@ -425,9 +402,7 @@ impl Session {
         self.overture_stage = None;
         self.tx = Some(Tx::new(self.cfg));
         let mut idle = Tx::new(self.cfg);
-        self.idle_amplitude = IDLE_MARK_AMPLITUDE;
-        self.deaf_samples = 0;
-        idle.set_amplitude(self.idle_amplitude);
+        idle.set_amplitude(IDLE_MARK_AMPLITUDE);
         self.idle_tx = Some(idle);
         self.rx = Some(Rx::new(self.cfg));
         self.reader = PacketReader::new();
@@ -458,9 +433,7 @@ impl Session {
         self.overture_stage = None;
         self.tx = Some(Tx::new(self.cfg));
         let mut idle = Tx::new(self.cfg);
-        self.idle_amplitude = IDLE_MARK_AMPLITUDE;
-        self.deaf_samples = 0;
-        idle.set_amplitude(self.idle_amplitude);
+        idle.set_amplitude(IDLE_MARK_AMPLITUDE);
         self.idle_tx = Some(idle);
         self.rx = Some(Rx::new(self.cfg));
         self.reader = PacketReader::new();
@@ -553,9 +526,6 @@ impl Session {
                     // of whatever a caller may have incorrectly queued
                     // into the real `tx` before actually holding the
                     // turn.
-                    // Back this end's own tone off while it cannot hear
-                    // the far end - see `back_off_idle_if_deaf`.
-                    self.back_off_idle_if_deaf(out.len());
                     self.idle_tx
                         .as_mut()
                         .expect("Connected state without an idle Tx")
@@ -717,68 +687,6 @@ impl Session {
     /// the same claim as the timing loop being locked.
     pub fn carrier_detected(&self) -> bool {
         self.rx.as_ref().is_some_and(Rx::carrier_detected)
-    }
-
-    /// Turns this end's own idle tone down, a step at a time, while it is
-    /// connected and hearing nothing.
-    ///
-    /// # Why a fixed amplitude cannot be right
-    ///
-    /// [`IDLE_MARK_AMPLITUDE`] is a good starting guess and it cannot be
-    /// more than that, because the number it needs to beat is a property
-    /// of somebody else's hardware. Measured on 15 September 2026: a
-    /// laptop's own loudspeaker coupled into its own microphone about
-    /// **ten times more strongly at 1270 Hz than at 2225 Hz**. No
-    /// constant chosen on one machine knows that about another, and the
-    /// same room with the volume moved changes it again.
-    ///
-    /// # What this does instead
-    ///
-    /// The condition being detected is simply "deaf": connected, not
-    /// holding the turn, and no carrier. In half duplex an end that does
-    /// not hold the turn should be *hearing* the end that does, so going
-    /// this long without carrier means something is stopping it - and the
-    /// loudest candidate, by a wide margin, is this end's own idle tone
-    /// arriving back in its own microphone.
-    ///
-    /// So it steps its own tone down and listens again. That is a search
-    /// rather than a measurement, and a search is the right tool here
-    /// because the thing being searched for is a property of a room.
-    ///
-    /// Bounded in both directions. It never rises on its own, so it
-    /// cannot oscillate against a far end doing the same thing; and it
-    /// stops at [`IDLE_BACKOFF_FLOOR`], which is where the far end's own
-    /// carrier detection was measured still working. Reaching the floor
-    /// and still hearing nothing means the problem was never this.
-    fn back_off_idle_if_deaf(&mut self, samples: usize) {
-        if self.carrier_detected() {
-            // Heard them. Hold wherever this ended up rather than
-            // creeping back up: the level that worked is the level that
-            // works, and raising it again is how a link that just
-            // recovered breaks itself a second time.
-            self.deaf_samples = 0;
-            return;
-        }
-        if self.idle_amplitude <= IDLE_BACKOFF_FLOOR {
-            return;
-        }
-        self.deaf_samples += samples;
-        let interval = (IDLE_BACKOFF_SECONDS * self.cfg.sample_rate as f64) as usize;
-        if self.deaf_samples < interval {
-            return;
-        }
-        self.deaf_samples = 0;
-        self.idle_amplitude = (self.idle_amplitude * IDLE_BACKOFF_STEP).max(IDLE_BACKOFF_FLOOR);
-        if let Some(idle) = self.idle_tx.as_mut() {
-            idle.set_amplitude(self.idle_amplitude);
-        }
-    }
-
-    /// This end's current idle level, after any backoff. Exposed so a
-    /// caller can report it - a link that only worked once its own tone
-    /// was four steps down is telling you something about the room.
-    pub fn idle_amplitude(&self) -> f32 {
-        self.idle_amplitude
     }
 
     /// Grants this end the turn and queues a fresh acquisition preamble -
@@ -1469,92 +1377,6 @@ mod tests {
         panic!(
             "answer to originate never arrived at {rate} Hz: originate received {:?}",
             core::str::from_utf8(&originate_got)
-        );
-    }
-
-    /// The backoff must actually move, and must stop where it is told.
-    ///
-    /// A connected end that hears nothing is the condition this exists
-    /// for. Left alone it should walk its own idle tone down and then
-    /// stop at the floor rather than going quiet altogether, because
-    /// below the floor the far end stops hearing *this* one and the link
-    /// has simply broken in the other direction instead.
-    #[test]
-    fn a_deaf_end_turns_its_own_idle_tone_down_and_stops_at_the_floor() {
-        let mut answer = Session::new(cfg(Role::Answer));
-        answer.answer();
-        // Connected, holding no turn, with nothing ever arriving: the
-        // far end is silent, so carrier never rises.
-        answer.state = SessionState::Connected;
-        answer.tx = Some(Tx::new(answer.cfg));
-        let mut idle = Tx::new(answer.cfg);
-        idle.set_amplitude(IDLE_MARK_AMPLITUDE);
-        answer.idle_tx = Some(idle);
-        answer.rx = Some(Rx::new(answer.cfg));
-
-        assert_eq!(
-            answer.idle_amplitude(),
-            IDLE_MARK_AMPLITUDE,
-            "should start at the configured level"
-        );
-
-        let mut out = vec![0.0f32; BLOCK];
-        let mut seen = vec![answer.idle_amplitude()];
-        // Sixty seconds is far past the six steps the floor is nine
-        // seconds away at, so this also proves it stops rather than
-        // merely that it moves.
-        let blocks = (60.0 * answer.cfg.sample_rate as f64 / BLOCK as f64) as usize;
-        for _ in 0..blocks {
-            answer.process_out(&mut out);
-            let a = answer.idle_amplitude();
-            if *seen.last().expect("seeded above") != a {
-                seen.push(a);
-            }
-        }
-
-        assert!(
-            seen.len() > 2,
-            "the idle tone never backed off at all: {seen:?}"
-        );
-        assert!(
-            seen.windows(2).all(|w| w[1] < w[0]),
-            "the idle tone must only ever go down, never up: {seen:?}"
-        );
-        assert_eq!(
-            *seen.last().expect("checked non-empty"),
-            IDLE_BACKOFF_FLOOR,
-            "the backoff must stop at the floor, not run to silence: {seen:?}"
-        );
-    }
-
-    /// And it must not move when the link is working.
-    ///
-    /// Without this the test above passes on a session that turns itself
-    /// down regardless of whether it can hear anything, which would walk
-    /// every healthy call to the floor for no reason.
-    #[test]
-    fn an_end_that_can_hear_the_far_side_leaves_its_idle_tone_alone() {
-        let mut originate = Session::new(cfg(Role::Originate));
-        let mut answer = Session::new(cfg(Role::Answer));
-        originate.dial("1");
-        answer.answer();
-        connect(&mut originate, &mut answer);
-
-        // answer does not hold the turn, so it is the end running the
-        // backoff - and originate is transmitting, so it can hear it.
-        assert!(!answer.has_turn());
-        let before = answer.idle_amplitude();
-        for _ in 0..(60.0 * 8000.0 / BLOCK as f64) as usize {
-            pump(&mut originate, &mut answer);
-        }
-        assert!(
-            answer.carrier_detected(),
-            "the fixture is wrong: answer should be hearing originate here"
-        );
-        assert_eq!(
-            answer.idle_amplitude(),
-            before,
-            "a session that can hear the far end must not turn itself down"
         );
     }
 
