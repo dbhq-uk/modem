@@ -132,6 +132,17 @@ jobs:
             [ "$CODE" = "200" ]
           done
 
+      # Only once every page above has been confirmed serving. IndexNow
+      # fetches the key file to verify the submission, and telling Bing
+      # about URLs that are not up yet is worse than saying nothing.
+      #
+      # Not allowed to fail the deploy: the site is already live and
+      # correct by this point, and a search engine's endpoint having a
+      # bad minute is not a reason to go red on a good deploy.
+      - name: Tell IndexNow
+        continue-on-error: true
+        run: ./scripts/indexnow-submit.sh
+
       # explained.html absorbed links.html entirely on 9 Sep 2026 - the old
       # file is gone from the repo, so the only thing standing between an
       # old /links link and a 404 is this _redirects rule actually shipping.

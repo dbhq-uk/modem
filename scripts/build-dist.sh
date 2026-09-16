@@ -33,7 +33,17 @@ cp target/wasm32-unknown-unknown/release/modem_wasm.wasm dist/web/modem.wasm
 # _headers, _redirects and manifest.json need naming explicitly: none has
 # a glob-friendly extension. _headers carries the CSP that permits WASM
 # instantiation - without it the demo is blocked at the edge.
-cp web/_headers web/_redirects web/manifest.json web/robots.txt web/sitemap.xml dist/web/
+cp web/_headers web/_redirects web/manifest.json web/sitemap.xml dist/web/
+
+# robots.txt and the IndexNow key.
+#
+# The key is public by design - an ownership proof served at
+# https://modem.dbhq.uk/<key>.txt, which IndexNow fetches to check that
+# whoever submitted the URLs can put a file on this host. Copied by glob
+# rather than by name because the filename *is* the key, so naming it
+# would mean editing this line to rotate it. robots.txt rides the same
+# glob rather than being listed twice.
+cp web/*.txt dist/web/
 
 # The acoustic lab's collector, and the routes file that fences it in.
 #
