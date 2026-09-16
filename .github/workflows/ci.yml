@@ -186,16 +186,41 @@ jobs:
   # invisible until somebody tagged a release, which is the worst possible
   # moment to find it. This builds and runs the binary on the other two.
   cross_platform:
-    name: build on ${{ matrix.os }}
+    name: build on ${{ matrix.os }} ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        include:
+          - os: macos-latest
+            target: ""
+          - os: windows-latest
+            target: ""
+          # Intel macOS, cross-compiled on the Apple Silicon runner the
+          # same way the release builds it.
+          #
+          # This was the one target the release shipped that CI never
+          # touched, and on 16 Sep 2026 it was the one that broke the
+          # release: GitHub is retiring its Intel runners, the macos-13
+          # job never started, and the whole thing stalled. Covering it
+          # here means a change that breaks this target fails on the
+          # commit that causes it rather than at a tag.
+          - os: macos-latest
+            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.1
-      - run: cargo build --release --locked -p modem-tui
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ matrix.target }}" ]; then
+            cargo build --release --locked -p modem-tui --target "${{ matrix.target }}"
+          else
+            cargo build --release --locked -p modem-tui
+          fi
       # Compiling is not passing - this project's own rule for the device
       # matrix, applied to CI. The binary starts, exits cleanly and prints
       # what it should. It cannot open a sound card on a runner and does
@@ -204,15 +229,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BIN=target/release/modem
-          [ "${{ runner.os }}" = "Windows" ] && BIN=target/release/modem.exe
+          DIR=target/release
+          [ -n "${{ matrix.target }}" ] && DIR="target/${{ matrix.target }}/release"
+          BIN="$DIR/modem"
+          [ "${{ runner.os }}" = "Windows" ] && BIN="$DIR/modem.exe"
           OUT=$("$BIN" --help)
           grep -q "Bell 103" <<<"$OUT"
           grep -q -- "--answer" <<<"$OUT"
       # The unit tests are platform-independent in principle. "In
       # principle" is exactly the kind of claim that turns out to be false
       # on Windows line endings or macOS float behaviour.
-      - run: cargo test --workspace --exclude modem-audio
+      # Skipped for the cross-compiled target: these tests run on the
+      # host, and a host cannot run another architecture's test binaries
+      # without help. The build and the --help run above are what this
+      # entry is for.
+      - if: matrix.target == ''
+        run: cargo test --workspace --exclude modem-audio
 
   # Everything under brand/ except _gen/ is generated, and so is the pair
   # of terminal frames inside web/index.html's "Two ways to try this"
