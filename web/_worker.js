@@ -60,12 +60,12 @@ const MAX_BODY = 64 * 1024;
 /// accumulate anything permanently.
 const TTL_SECONDS = 7 * 24 * 60 * 60;
 
-const json = (obj, status = 200) =>
+const json = (obj, status = 200, cacheControl = 'no-store') =>
   new Response(JSON.stringify(obj), {
     status,
     headers: {
       'content-type': 'application/json',
-      'cache-control': 'no-store',
+      'cache-control': cacheControl,
       // The lab page is same-origin, so this is not needed for it to
       // work. It is here so the page can also be opened from a local
       // file or a different host while iterating.
@@ -105,6 +105,21 @@ export default {
 
     // What the devices should be doing now. Written by the operator
     // directly into KV; this only reads it.
+    //
+    // DELIBERATELY UNAUTHENTICATED, and cached at the edge for it
+    // (issue #14). Requiring the key here was the other option and it
+    // buys nothing: the devices poll this once a second and already hold
+    // the key, so it would only move the same secret into more request
+    // logs. What it discloses is the instruction the devices are already
+    // carrying out - no secret, and the whole point of the lab is that
+    // the operator can read the same thing.
+    //
+    // What it did cost was a KV read per request from anyone who cared
+    // to poll a public endpoint in a public repo. `s-maxage` lets the
+    // edge answer most of those instead. Two seconds because the devices
+    // poll every second and a plan change should reach them on the next
+    // poll or the one after - a longer window would make the operator
+    // wait, which is the thing this lab exists to avoid.
     if (url.pathname === '/lab/api/plan') {
       const device = clean(url.searchParams.get('device'));
       const raw = await env.LAB.get('plan');
@@ -116,7 +131,14 @@ export default {
       }
       if (!plan) plan = { revision: 0, note: 'no plan set', devices: {}, default: { op: 'idle' } };
       const step = (plan.devices && plan.devices[device]) || plan.default || { op: 'idle' };
-      return json({ revision: plan.revision ?? 0, note: plan.note ?? '', device, step });
+      return json(
+        { revision: plan.revision ?? 0, note: plan.note ?? '', device, step },
+        200,
+        // Private caches still must not hold it - a device that has been
+        // handed a new step should not be able to re-read the old one
+        // from its own disk. `s-maxage` is the shared edge cache only.
+        'no-cache, s-maxage=2',
+      );
     }
 
     if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405);
