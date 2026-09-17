@@ -177,10 +177,32 @@ fn an_unimpaired_link_is_perfect() {
 ///
 /// So the threshold is the field measurement instead, which is a better
 /// anchor than a comparison between the two. On 15 September 2026 a
-/// Windows laptop and an iPhone 10-20 cm apart measured a **22x**
-/// self-jam at the laptop's microphone in the configuration that was
-/// failing: its own idle mark at 0.117 against 0.00525 for the phone's
-/// data tone. See docs/acoustic-harness.md.
+/// Windows laptop and an iPhone 10-20 cm apart measured the laptop's own
+/// idle mark at 0.117 against 0.00525 for the phone's data tone - a
+/// **22x** advantage for its own loudspeaker. See
+/// docs/acoustic-harness.md.
+///
+/// # 22x IS THE ACOUSTIC PATH GAIN, NOT WHAT THE MICROPHONE HEARS NOW
+///
+/// This distinction is worth stating because the review of 16 September
+/// 2026 read the constant the other way, and either reading is plausible
+/// from the number alone (issue #9).
+///
+/// 0.117 was measured with the idle mark at full amplitude, before
+/// `IDLE_MARK_AMPLITUDE` existed. So 22x is what geometry contributes:
+/// how much louder this device's own loudspeaker is at its own
+/// microphone than the far device is, for the same amplitude at source.
+///
+/// `own_speaker` below emits at `IDLE_MARK_AMPLITUDE`, so the sweep's
+/// gain is that path gain and the ratio actually presented to the
+/// demodulator is `gain * IDLE_MARK_AMPLITUDE`. At 22 that is **0.44x** -
+/// which is the correct number, because the same room today attenuates
+/// its own idle mark by the same 0.02: (0.117 x 0.02) / 0.00525 = 0.446.
+///
+/// The test below is therefore modelling the room as it is now, and the
+/// constant is the right value. What it does *not* show is that a raw
+/// 22x at the microphone is survivable - it is not, and
+/// `the_idle_attenuation_is_what_makes_this_work` pins that.
 const FIELD_SELF_JAM: f32 = 22.0;
 
 #[test]
@@ -204,6 +226,49 @@ fn both_bands_clear_the_self_jam_measured_in_the_field() {
              measured on real hardware. Two devices on a desk would fail in this direction - \
              which is exactly what was happening before IDLE_MARK_AMPLITUDE was measured rather \
              than modelled"
+        );
+    }
+}
+
+/// The idle attenuation is load-bearing, not cosmetic.
+///
+/// Added 17 September 2026 (issue #9). The review that prompted it ran
+/// the sweep above against an idle mark at *full* amplitude - the raw
+/// 22x the field measured before `IDLE_MARK_AMPLITUDE` existed - and got
+/// 98% byte errors. That is a fact worth owning a test, because nothing
+/// else here would notice if the attenuation were removed: the sweep
+/// above scales by `IDLE_MARK_AMPLITUDE` itself, so deleting it would
+/// change what that test models without changing whether it passes.
+///
+/// `ToneDominance` discounting the receiver's own band is what made
+/// two-device calls work at all, and it is easy to remember that as the
+/// whole fix. It is half of it. At the level the idle mark ran at
+/// before, the link does not decode in either band, however well carrier
+/// detect behaves.
+#[test]
+fn the_idle_attenuation_is_what_makes_this_work() {
+    for role in [Role::Originate, Role::Answer] {
+        let base = transmit(role, PAYLOAD);
+
+        // The same own-speaker tone, at the amplitude it ran at before
+        // IDLE_MARK_AMPLITUDE - so `own_speaker`'s 0.02 is divided back
+        // out rather than a second generator being written here that
+        // could drift from it.
+        let quiet = own_speaker(far(role), base.len());
+        let loud: Vec<f32> = quiet
+            .iter()
+            .map(|s| s / IDLE_MARK_AMPLITUDE)
+            .collect();
+
+        let air = duplex_leak(&base, &loud, FIELD_SELF_JAM);
+        let ber = ber_of(role, &air);
+        println!("LOUD IDLE {role:?} ber={ber:.4}");
+        assert!(
+            ber > WORKING,
+            "{role:?} decoded cleanly at {FIELD_SELF_JAM}x with the idle mark at full \
+             amplitude (ber {ber:.4}). Either the band plan has changed or this test has \
+             stopped modelling what it claims - the whole point of IDLE_MARK_AMPLITUDE is \
+             that this case does NOT work"
         );
     }
 }

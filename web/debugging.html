@@ -168,6 +168,9 @@
       <p>The correction is that a device's own tones are <em>known</em>, not noise. They are measured and subtracted before the comparison is made.</p>
       <p>The first attempt at that inverted the bug. Subtract everything and a moment containing nothing but your own tone leaves nothing to compare against, so that tone's own faint leakage reads as an overwhelmingly strong far end. A receiver that hears itself and calls it a carrier is worse than one that hears nothing. An existing test caught it on the first run, and the fix is a floor on the comparison, set from a measurement of how much a tone actually leaks into a neighbouring band.</p>
       <p>Then both devices decoded each other, twice, across a desk.</p>
+      <p>That is where this account stopped for a day, and it was half the story. Turning the idle tone down, which had been done for the sake of anyone in the room, turned out to be carrying the other half. Measured afterwards: at the self-jam the two devices actually produced, with the idle tone back at its old level, both directions fail at ninety-nine per cent byte errors. Fixing the comparison is what lets a receiver notice a far end at all. Being quiet while listening is what leaves it something to notice.</p>
+      <p class="terminal-line">A fix you can explain is not always the whole fix.</p>
+      <p>Neither half was found by reasoning. Both were found by measuring, and the second one only because a review asked what a test was really proving.</p>
     </section>
 
     <section class="explainer section-anchor" id="lessons" aria-labelledby="lessons-heading">

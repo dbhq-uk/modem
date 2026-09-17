@@ -23,7 +23,8 @@ Its findings, as tests rather than prose:
 | Test | What it pins |
 |---|---|
 | `an_unimpaired_link_is_perfect` | The control. Without it every other number is unreadable - see below. |
-| `both_bands_clear_the_self_jam_measured_in_the_field` | Both bands survive 40x their own loudspeaker, against the 22x measured on real hardware. |
+| `both_bands_clear_the_self_jam_measured_in_the_field` | Both bands survive a 40x acoustic path gain, against the 22x measured on real hardware. |
+| `the_idle_attenuation_is_what_makes_this_work` | At that same 22x, with the idle mark at full amplitude, both bands fail at 99% byte errors. |
 | `browser_audio_processing_is_not_what_breaks_this` | Noise suppression and AGC both leave the link at zero errors. |
 | `the_room_alone_is_survivable_in_both_bands` | The rest of the channel is not the problem either. |
 | `carrier_survives_a_quiet_idle_tone` | What bounds `IDLE_MARK_AMPLITUDE` from below. |
@@ -191,7 +192,11 @@ A device's own tones are *known*, not noise, so they are now measured with two m
 
 **The inverse bug is worth knowing about**, because the first attempt had it. Clamping that subtraction at zero means a block containing nothing but the receiver's own tone leaves a zero denominator, and that tone's faint leakage into the wanted probe reads as an infinitely dominant far end. A receiver that hears itself and calls it a carrier is worse than one that hears nothing. So the denominator is floored at a fraction of the own-band energy: measured, a pure own-band tone puts 1.9% of its power into the wanted probe at worst, and against a ratio of 40 the floor only has to exceed 0.019/40.
 
-Two consequences worth recording. `IDLE_MARK_AMPLITUDE` is now free to be chosen for human comfort rather than for detection, because level and self-jam are finally independent - carrier holds to 0.01 whether the receiver's own tone is absent, 6x louder or 9x louder. And the adaptive backoff added in the round before this was removed: it turned a deaf end's own tone down, which addressed a symptom of this bug and, once the bug was fixed, could only make an end harder for the far side to hear.
+**What the 22x is, since both readings are plausible from the number.** It is the *acoustic path gain*: how much louder a device's own loudspeaker is at its own microphone than the far device is, for the same amplitude at source. It was measured with the idle mark at full amplitude, before `IDLE_MARK_AMPLITUDE` existed. What the demodulator sees today is that gain multiplied by the attenuation - 22 x 0.02, so about **0.44x**, which is the same figure the room itself now gives: (0.117 x 0.02) / 0.00525 = 0.446. The review of 16 September 2026 read the constant as an at-the-microphone ratio and reported the test as overstated; it is not, but the two readings are worth keeping apart (issue #9).
+
+**The attenuation is load-bearing, and that is the part this page used to leave out.** It is tempting to remember the fix as `ToneDominance` discounting the receiver's own band, because that is the interesting half. Measured: at the same 22x path gain with the idle mark at full amplitude, both bands fail at **99.1% byte errors**. Carrier detect does not rescue a demodulator buried that far under its own speaker. `the_idle_attenuation_is_what_makes_this_work` exists so that removing the attenuation fails a test rather than quietly halving the fix.
+
+Two further consequences worth recording. `IDLE_MARK_AMPLITUDE` is now free to be chosen for human comfort rather than for detection, because level and self-jam are finally independent - carrier holds to 0.01 whether the receiver's own tone is absent, 6x louder or 9x louder. And the adaptive backoff added in the round before this was removed: it turned a deaf end's own tone down, which addressed a symptom of this bug and, once the bug was fixed, could only make an end harder for the far side to hear.
 
 ## Related
 
