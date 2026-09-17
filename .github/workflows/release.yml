@@ -197,6 +197,14 @@ jobs:
           tag_name: ${{ needs.resolve.outputs.tag }}
           files: dist/*
           generate_release_notes: true
+          # A hyphen in the version means a pre-release, per semver -
+          # v1.2.0-rc1, v0.0.0-release-test. Without this every tag is
+          # published as a full release and takes the "Latest" badge,
+          # which is what a throwaway v0.0.0-release-test did to v0.1.0
+          # on 17 Sep 2026 while the rewritten workflow was being proved.
+          # It was visible for about two minutes; a real release
+          # candidate would have sat there until somebody noticed.
+          prerelease: ${{ contains(needs.resolve.outputs.tag, '-') }}
           body: |
             Binaries for Linux, macOS (Apple silicon and Intel) and Windows.
 
