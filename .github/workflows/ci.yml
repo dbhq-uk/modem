@@ -418,6 +418,28 @@ jobs:
             test-results/
           retention-days: 7
 
+  # actionlint over the workflows themselves.
+  #
+  # Added 17 Sep 2026 after a hand-written edit put two `with:` keys on
+  # one step, the second referencing `needs.resolve` from inside the
+  # `resolve` job. Python's yaml.safe_load accepts a duplicate key and
+  # silently keeps the last one, so a local check said the file was fine;
+  # GitHub rejected the whole workflow and reported it as a run named
+  # after the file with no jobs and no log. actionlint names the line.
+  #
+  # This is cheap and it checks the thing nothing else here checks - the
+  # workflows are the only code in the repo with no test.
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: actionlint
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/repo -w /repo \
+            rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
+            -color
+
   # THE DEPLOY IS A CI JOB, not its own workflow (issue #7, 17 Sep 2026).
   #
   # It used to be .github/workflows/deploy.yml, triggered on push to main
@@ -444,6 +466,7 @@ jobs:
     needs:
       - test
       - no_std
+      - workflows
       - worklet_artifact
       - style
       - cross_platform

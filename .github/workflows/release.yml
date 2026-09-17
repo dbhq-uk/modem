@@ -34,9 +34,10 @@ jobs:
       tag: ${{ steps.pick.outputs.tag }}
       sha: ${{ steps.pick.outputs.sha }}
     steps:
+      # No `ref` here, deliberately: this job is the one that decides
+      # what the ref should be, so it takes the default checkout and
+      # looks the tag up in it.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ needs.resolve.outputs.sha }}
         with:
           # Tags are not fetched by default, and this job exists to look
           # one up.
