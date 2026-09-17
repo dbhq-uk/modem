@@ -163,7 +163,7 @@ use crate::link::{encode_packet, Packet, PacketKind, PacketReader, MAX_PAYLOAD};
 use crate::overture::{Overture, Stage};
 use crate::rx::Rx;
 use crate::tx::Tx;
-use crate::{Config, Duplex, Role};
+use crate::{Config, Duplex, Role, BAUD};
 
 /// Alternating training preamble queued at the start of every transmit
 /// burst. Two characters, matching the convention `rx.rs` and `impair.rs`
@@ -246,6 +246,55 @@ const TRAINING_PREAMBLE: [u8; 2] = [0x55, 0x55];
 /// landed inside the tail of the `Turn` packet. The tail gap is what
 /// makes this safe; neither change is much use without the other.
 pub const IDLE_MARK_AMPLITUDE: f32 = 0.02;
+
+/// How long the end that yielded waits, hearing nothing, before sending
+/// the `Turn` packet again.
+///
+/// # The deadlock this exists to break
+///
+/// Handover is one packet. A yields, B is granted, B replies. If that
+/// `Turn` packet is corrupted in the air, A believes B holds the turn and
+/// B never learns it does - so both ends sit transmitting idle mark at
+/// each other for ever. Carrier stays up, the state stays `Connected`,
+/// and nothing moves again for the life of the call. Over a wire that is
+/// a remote possibility; over a room it is an ordinary Tuesday, which is
+/// the whole reason this crate has an acoustic test suite.
+///
+/// # Why only the yielder retries
+///
+/// The alternative is both ends running a timer and whichever fires
+/// first reclaiming the turn, with a role tiebreak for simultaneous
+/// fires. That recovers from more failure modes, including the far end
+/// vanishing, and it buys them with two timers, a tiebreak that has to
+/// be right, and a genuine window where both ends transmit at once.
+///
+/// Only the yielder retrying needs none of that. Exactly one end knows
+/// it gave the turn away, so exactly one end ever acts, and no state on
+/// the wire can make two ends transmit together. A duplicate `Turn`
+/// reaching an end that already holds the turn is harmless - see
+/// `grant_turn`, which returns early, and which had to be made
+/// idempotent for this to be true.
+///
+/// # The number
+///
+/// 600 bit periods, two seconds at 300 baud. The far end has to decode
+/// the packet, grant itself the turn and get a preamble out, which is
+/// tens of bit periods, not hundreds - so this is deliberately an order
+/// of magnitude longer than the mechanism needs. It is a deadlock
+/// breaker, not a pacing mechanism, and a caller that legitimately holds
+/// the turn while a human decides what to type must not be interrupted
+/// by it.
+const REGRANT_SILENCE_BITS: usize = 600;
+
+/// How many times the grant is re-sent before this end stops trying.
+///
+/// Three, so roughly six seconds of silence in total. After that the far
+/// end is not missing one packet, it has gone - a phone locked, a tab
+/// closed, somebody walked off with it - and re-sending for ever would
+/// put a packet on the air every two seconds until the tab closes. The
+/// link stays up and a caller can still hang up and redial; what stops
+/// is the retrying.
+const MAX_REGRANTS: usize = 3;
 
 /// Bit periods of idle mark queued behind the `Turn` packet by
 /// `yield_turn`, closing a burst the way [`GRANT_IDLE_GAP_BITS`] opens
@@ -353,6 +402,15 @@ pub struct Session {
     /// checks it on receive; `PacketReader`'s CRC is what protects a
     /// corrupt frame, not sequencing.
     seq: u8,
+    /// This end yielded the turn and has heard nothing back since. See
+    /// [`REGRANT_SILENCE_BITS`] for what happens then.
+    awaiting_turn: bool,
+    /// Input samples processed while `awaiting_turn`, reset by anything
+    /// arriving from the far end.
+    silence_samples: usize,
+    /// How many times the grant has been re-sent for this handover,
+    /// capped at [`MAX_REGRANTS`].
+    regrants: usize,
 }
 
 impl Session {
@@ -373,6 +431,9 @@ impl Session {
             has_turn: false,
             yielding: false,
             seq: 0,
+            awaiting_turn: false,
+            silence_samples: 0,
+            regrants: 0,
         }
     }
 
@@ -456,6 +517,9 @@ impl Session {
         self.inbox.clear();
         self.has_turn = false;
         self.yielding = false;
+        self.awaiting_turn = false;
+        self.silence_samples = 0;
+        self.regrants = 0;
     }
 
     /// Fills `out` with whatever this end should be transmitting right
@@ -547,6 +611,7 @@ impl Session {
     pub fn process_in(&mut self, input: &[f32]) {
         let mut turn_received = false;
         let mut carrier_now = false;
+        let mut heard_from_far_end = false;
         if let Some(rx) = self.rx.as_mut() {
             rx.write(input);
             let mut raw = [0u8; 256];
@@ -556,6 +621,7 @@ impl Session {
                     break;
                 }
                 for pkt in self.reader.push(&raw[..n]) {
+                    heard_from_far_end = true;
                     match pkt.kind {
                         PacketKind::Data => self.inbox.extend_from_slice(&pkt.payload),
                         PacketKind::Turn => turn_received = true,
@@ -571,6 +637,38 @@ impl Session {
         if self.state == SessionState::Answering && carrier_now {
             self.state = SessionState::Connected;
         }
+        self.tick_regrant(input.len(), heard_from_far_end);
+    }
+
+    /// The deadlock breaker. See [`REGRANT_SILENCE_BITS`] for why this
+    /// exists and why only the end that yielded runs it.
+    ///
+    /// `heard` is any decoded packet of any kind, not just a `Turn`: if
+    /// the far end is talking at all then it plainly received the grant,
+    /// and re-sending would only splice a packet into a burst it is
+    /// part-way through.
+    fn tick_regrant(&mut self, samples: usize, heard: bool) {
+        if heard {
+            self.awaiting_turn = false;
+            self.silence_samples = 0;
+            self.regrants = 0;
+            return;
+        }
+        if !self.awaiting_turn || self.has_turn || self.regrants >= MAX_REGRANTS {
+            return;
+        }
+        self.silence_samples += samples;
+        let limit = REGRANT_SILENCE_BITS * self.cfg.sample_rate as usize / BAUD as usize;
+        if self.silence_samples < limit {
+            return;
+        }
+        self.silence_samples = 0;
+        self.regrants += 1;
+        self.write_turn_packet();
+        // `yielding` re-opens process_out's bypass so the packet queued
+        // above actually goes out - without it this end transmits idle
+        // mark from `idle_tx` and the re-grant sits in `tx` for ever.
+        self.yielding = true;
     }
 
     /// Queues `data` for transmission, chunked to [`MAX_PAYLOAD`] bytes
@@ -616,9 +714,27 @@ impl Session {
     /// this is narrower than "transmit until `tx` is empty for any
     /// reason".
     pub fn yield_turn(&mut self) {
+        self.write_turn_packet();
+        self.has_turn = false;
+        self.yielding = true;
+        // Arm the deadlock breaker. Until something arrives from the far
+        // end, this end assumes its grant may not have landed - see
+        // REGRANT_SILENCE_BITS.
+        self.awaiting_turn = true;
+        self.silence_samples = 0;
+        self.regrants = 0;
+    }
+
+    /// The `Turn` packet and its tail gap, queued into `tx`.
+    ///
+    /// Factored out of `yield_turn` so the re-grant sends byte-for-byte
+    /// the same thing rather than a second, subtly different copy that
+    /// could drift from it - the tail gap in particular is not optional,
+    /// and a re-grant missing it would be corrupted by its own level
+    /// step exactly as the first attenuation attempt was.
+    fn write_turn_packet(&mut self) {
+        let seq = self.next_seq();
         if let Some(tx) = self.tx.as_mut() {
-            let seq = self.seq;
-            self.seq = self.seq.wrapping_add(1);
             let pkt = Packet {
                 seq,
                 kind: PacketKind::Turn,
@@ -633,8 +749,6 @@ impl Session {
             // this burst's own level - see TAIL_IDLE_GAP_BITS.
             tx.write_idle_mark(TAIL_IDLE_GAP_BITS);
         }
-        self.has_turn = false;
-        self.yielding = true;
     }
 
     /// Whether this end currently holds permission to transmit real data
@@ -695,8 +809,26 @@ impl Session {
     /// (`process_in`). See this module's doc on why every burst needs its
     /// own preamble, not just the first one.
     fn grant_turn(&mut self) {
+        // ALREADY HOLDING IT IS A NO-OP, and this guard is load-bearing
+        // rather than defensive tidiness. The body below writes a
+        // training preamble straight into `tx`. An end that is mid-burst
+        // when a second `Turn` arrives would get that preamble spliced
+        // into the middle of its own outgoing data, corrupting the burst
+        // it is part-way through sending.
+        //
+        // Nothing generated a duplicate `Turn` before the re-grant below
+        // existed, so this could not fire - but the packet is on a lossy
+        // acoustic wire, and "the far end never sends this twice" was
+        // always an assumption rather than a property. The re-grant makes
+        // duplicates ordinary, so this stops being latent (issue #15).
+        if self.has_turn {
+            return;
+        }
         self.has_turn = true;
         self.yielding = false;
+        self.awaiting_turn = false;
+        self.silence_samples = 0;
+        self.regrants = 0;
         if let Some(tx) = self.tx.as_mut() {
             tx.write(&TRAINING_PREAMBLE);
             // The gap is queued here, not left to the caller's pacing -
@@ -1265,6 +1397,135 @@ mod tests {
     /// frequency assertions specifically while leaving RMS untouched -
     /// see the task report for the actual failing output either mutation
     /// produces.
+    /// A lost grant does not wedge the link for ever (issue #15).
+    ///
+    /// Handover is one packet. Corrupt it and the yielder believes the
+    /// far end has the turn while the far end never learns it does, so
+    /// both sit transmitting idle mark at each other with carrier up and
+    /// the state still `Connected`. Nothing else in this file would
+    /// notice: every other handover test delivers the packet.
+    ///
+    /// The drop is done by feeding the answering end silence for the
+    /// whole burst carrying the `Turn`, which is what a corrupted packet
+    /// amounts to from its point of view - the CRC fails, `PacketReader`
+    /// yields nothing, and it hears only its own idle mark. Then the
+    /// channel is restored and the re-grant has to do the rest.
+    #[test]
+    fn a_lost_grant_is_re_sent_rather_than_wedging_the_link() {
+        let rate = 8000u32;
+        let mut originate = Session::new(Config {
+            sample_rate: rate,
+            ..cfg(Role::Originate)
+        });
+        let mut answer = Session::new(Config {
+            sample_rate: rate,
+            ..cfg(Role::Answer)
+        });
+        originate.dial("1");
+        answer.answer();
+        connect(&mut originate, &mut answer);
+        for _ in 0..10 {
+            pump(&mut originate, &mut answer);
+        }
+
+        originate.yield_turn();
+
+        // Swallow everything the originate end sends for long enough to
+        // lose the Turn packet and its tail outright. TAIL_IDLE_GAP_BITS
+        // plus the packet is well under this.
+        let drop_blocks = (rate as usize / BLOCK) / 2;
+        let silence = vec![0.0f32; BLOCK];
+        for _ in 0..drop_blocks {
+            let mut oa = vec![0.0f32; BLOCK];
+            let mut ob = vec![0.0f32; BLOCK];
+            originate.process_out(&mut oa);
+            answer.process_out(&mut ob);
+            originate.process_in(&ob);
+            // The answering end hears nothing of that burst at all.
+            answer.process_in(&silence);
+        }
+
+        assert!(
+            !answer.has_turn(),
+            "the harness failed to drop the grant, so this test would pass \
+             whatever the session did"
+        );
+        assert!(
+            !originate.has_turn(),
+            "the originate end still holds the turn, so nothing was yielded"
+        );
+
+        // Channel restored. Nobody holds the turn; without the re-grant
+        // this runs to MAX_ITERS and neither end ever transmits again.
+        let mut recovered = false;
+        for _ in 0..MAX_ITERS {
+            pump(&mut originate, &mut answer);
+            if answer.has_turn() {
+                recovered = true;
+                break;
+            }
+        }
+        assert!(
+            recovered,
+            "the turn was lost and never recovered - both ends are sitting on \
+             idle mark with carrier up, which is the deadlock REGRANT_SILENCE_BITS exists to break"
+        );
+
+        // And the link genuinely works afterwards, rather than merely
+        // having set a flag.
+        const CANARY: &[u8] = b"RECOVERED";
+        answer.send(CANARY);
+        let mut got = Vec::new();
+        for _ in 0..MAX_ITERS {
+            pump(&mut originate, &mut answer);
+            got.extend(originate.receive());
+            if got.windows(CANARY.len()).any(|w| w == CANARY) {
+                break;
+            }
+        }
+        assert!(
+            got.windows(CANARY.len()).any(|w| w == CANARY),
+            "the turn came back but no data followed it - got {:?}",
+            core::str::from_utf8(&got)
+        );
+    }
+
+    /// The re-grant gives up rather than transmitting for ever.
+    ///
+    /// A far end that has genuinely gone - a locked phone, a closed tab -
+    /// must not leave this end putting a packet on the air every two
+    /// seconds until somebody closes the page.
+    #[test]
+    fn the_re_grant_stops_after_max_regrants() {
+        let rate = 8000u32;
+        let mut originate = Session::new(Config {
+            sample_rate: rate,
+            ..cfg(Role::Originate)
+        });
+        let mut answer = Session::new(Config {
+            sample_rate: rate,
+            ..cfg(Role::Answer)
+        });
+        originate.dial("1");
+        answer.answer();
+        connect(&mut originate, &mut answer);
+        originate.yield_turn();
+
+        // The far end never says anything again.
+        let silence = vec![0.0f32; BLOCK];
+        let seconds = 30;
+        for _ in 0..(seconds * rate as usize / BLOCK) {
+            let mut oa = vec![0.0f32; BLOCK];
+            originate.process_out(&mut oa);
+            originate.process_in(&silence);
+        }
+
+        assert_eq!(
+            originate.regrants, MAX_REGRANTS,
+            "expected the re-grant to stop at {MAX_REGRANTS} after {seconds}s of silence"
+        );
+    }
+
     /// The exact sequence both of the site's bidirectional data checks
     /// run, at the layer where it can be tested deterministically.
     ///
@@ -1280,7 +1541,6 @@ mod tests {
     /// hand-over test stops at `answer.has_turn()`, and every data test
     /// sends one way only, so "the turn changes hands" and "data flows
     /// after it does" were each asserted and their composition never was.
-
     #[test]
     fn data_flows_back_after_the_turn_changes_hands() {
         // 8 kHz is this crate's own DSP rate, so it exercises the
