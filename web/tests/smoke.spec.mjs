@@ -300,6 +300,92 @@ test.describe('hidden means hidden', () => {
   });
 });
 
+test.describe('leaving while the microphone prompt is up', () => {
+  // Issue #8, found by the end-to-end review of 16 Sep 2026.
+  //
+  // `Modem.stop()` could only stop `this.micStream`, and that field was
+  // not assigned until getUserMedia resolved. So pressing Back during
+  // the permission prompt stopped nothing, and the track that arrived
+  // afterwards was left `live` on a page the visitor had already left.
+  //
+  // This holds getUserMedia open, presses Back, and only then resolves
+  // it - the exact ordering, driven from the page rather than described.
+  // The assertion is on the track: a page that looks right while the
+  // microphone is still running is the failure, so looking at the panel
+  // would not catch it.
+  test('the microphone is released even if permission arrives after Back', async ({ page }) => {
+    await page.addInitScript(() => {
+      // Every track this page ever hands out, so the test can ask
+      // afterwards whether any of them is still live. Kept on window
+      // rather than returned, because the stream is created inside the
+      // page long after this runs.
+      window.__tracks = [];
+      let release;
+      window.__grantMicrophone = () => release && release();
+      const pending = new Promise((resolve) => { release = resolve; });
+
+      const fakeTrack = () => ({
+        kind: 'audio',
+        readyState: 'live',
+        getSettings: () => ({}),
+        stop() { this.readyState = 'ended'; },
+        addEventListener() {},
+        removeEventListener() {},
+      });
+
+      // Counted the moment the request is made, not when it resolves.
+      // The test has to know the page is genuinely sitting on the prompt
+      // before it presses Back - going back too early would exercise
+      // nothing and still pass.
+      window.__micRequested = 0;
+      const grant = async () => {
+        window.__micRequested += 1;
+        await pending;
+        const track = fakeTrack();
+        window.__tracks.push(track);
+        return { getAudioTracks: () => [track], getTracks: () => [track] };
+      };
+      if (typeof MediaDevices !== 'undefined' && MediaDevices.prototype) {
+        MediaDevices.prototype.getUserMedia = grant;
+      }
+      if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = grant;
+    });
+
+    await page.goto('/');
+    await dismissConsent(page);
+    await page.locator('#launch-receive-btn').click();
+
+    // The panel is up and the endpoint is genuinely sitting on the
+    // prompt - the WASM fetch and the worklet load happen first and take
+    // seconds, so this waits for the request itself rather than assuming
+    // it has been made.
+    await expect(page.locator('#endpoint-panel')).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => window.__micRequested), { timeout: 30_000 })
+      .toBeGreaterThan(0);
+
+    // Leave, then grant. This is the order that used to strand the track.
+    await page.goBack();
+    await page.evaluate(() => window.__grantMicrophone());
+
+    // The stream is created inside the page after the click, so give the
+    // promise chain a turn to deliver it before asking.
+    await expect.poll(
+      () => page.evaluate(() => window.__tracks.length),
+      { message: 'the microphone was never actually requested, so this test proves nothing' },
+    ).toBeGreaterThan(0);
+
+    await expect.poll(
+      () => page.evaluate(() => window.__tracks.filter((t) => t.readyState === 'live').length),
+      { message: 'a microphone track is still live after the visitor left the page' },
+    ).toBe(0);
+
+    // And the panel the visitor closed stays closed - the catch used to
+    // reopen it on the landing page.
+    await expect(page.locator('#endpoint-panel')).toBeHidden();
+  });
+});
+
 test.describe('when starting the modem fails', () => {
   // The catch in startEndpointRoute used to write its diagnostic and
   // then call exitToLanding(), which tears the panel down, resets every

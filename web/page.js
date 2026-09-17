@@ -5,7 +5,7 @@
 // its own. Blocking this script kills the whole demo, which is exactly
 // what happened on the first deploy.
 import { Role, Duplex, SessionState, STAGE_NAMES } from './session.js';
-import { ModemEndpoint, summariseMicDiagnostics } from './modem.js';
+import { ModemEndpoint, EndpointStopped, summariseMicDiagnostics } from './modem.js';
 import { WiredEndpoint, decode as decodeWired } from './wired.js';
 import {
   ensurePlaybackAudioSession,
@@ -1308,6 +1308,11 @@ async function startEndpointRoute(role) {
   renderShareBlock(`${location.origin}${share.path}`);
 
   let dataCheckStarted = false;
+  // Declared out here, not inside the try, because the catch needs it
+  // too: it has to know whether the endpoint it is apologising for is
+  // still the one on screen. See the catch's own note.
+  let thisEndpoint = null;
+  const isCurrent = () => endpoint !== null && endpoint === thisEndpoint;
   try {
     endpoint = new ModemEndpoint();
     // Captured so every handler below can tell whether it is still the
@@ -1324,8 +1329,7 @@ async function startEndpointRoute(role) {
     // catch exists to prevent. It only ever happened where the worklet
     // really started, so it stayed invisible until CI gained an audio
     // device.
-    const thisEndpoint = endpoint;
-    const isCurrent = () => endpoint === thisEndpoint;
+    thisEndpoint = endpoint;
     await endpoint.init({ role, duplex: Duplex.HALF_PING_PONG });
 
     endpoint.addEventListener('status', (e) => {
@@ -1427,6 +1431,24 @@ async function startEndpointRoute(role) {
     // mode, showing the reason and its own Back button, which is the one
     // control that gets the visitor out deliberately rather than by
     // surprise.
+    // THE VISITOR MAY ALREADY HAVE LEFT, and if they have, none of the
+    // rest of this applies. Back and Stop both call `teardownEndpoint`,
+    // which stops the endpoint and sets the global to null - so a start
+    // still in flight rejects a moment later and arrives here with
+    // nothing on screen to explain itself to. Re-dressing the panel then
+    // reopens a panel the visitor deliberately closed, on a page that
+    // has already navigated back to the landing view.
+    //
+    // `EndpointStopped` is that case stated outright by modem.js rather
+    // than inferred: the microphone request was cancelled mid-flight.
+    // The `isCurrent` check catches the same situation arriving as some
+    // other rejection. Either way the only correct action is to stop -
+    // the teardown that cancelled us has already released everything.
+    // Found by the end-to-end review, 16 Sep 2026 (issue #8).
+    if (err instanceof EndpointStopped || !isCurrent()) {
+      if (thisEndpoint && thisEndpoint !== endpoint) await thisEndpoint.stop();
+      return;
+    }
     console.error(err);
     // Teardown first, then re-dress the panel: teardownEndpoint hides it
     // and wipes every caption on it, so anything written before this

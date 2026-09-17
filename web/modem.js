@@ -63,6 +63,20 @@ export function summariseMicDiagnostics(diagnostics) {
 }
 
 /**
+ * Thrown by anything that `stop()` cancelled while it was still in
+ * flight. A distinct type rather than a plain Error because the page has
+ * to tell it apart from a real failure: a real failure puts a message in
+ * the panel, and this one must not, because the visitor has already left
+ * and there is no panel to put it in.
+ */
+export class EndpointStopped extends Error {
+  constructor() {
+    super('the endpoint was stopped while it was still starting');
+    this.name = 'EndpointStopped';
+  }
+}
+
+/**
  * One end of a call, running in the browser. Wraps an AudioContext, an
  * AudioWorkletNode running modem-wasm's real `Session`, and (once
  * `openMicrophone` is called) a raw microphone track feeding it.
@@ -77,6 +91,10 @@ export class ModemEndpoint extends EventTarget {
     this.ctx = null;
     this.node = null;
     this.micStream = null;
+    /** Set by `stop()` and never cleared - an endpoint is not restarted,
+     * a new one is constructed. Everything that awaits must re-check it
+     * afterwards; see `_acquireMicrophone`. */
+    this.stopped = false;
     /** The most recent status the worklet posted, or null. See the
      * `status` case in the message handler for why this is retained. */
     this.lastStatus = null;
@@ -315,6 +333,33 @@ export class ModemEndpoint extends EventTarget {
   }
 
   /**
+   * `getUserMedia`, plus the check that has to follow every one of them.
+   *
+   * THE MICROPHONE OUTLIVED THE PAGE WITHOUT THIS. `stop()` can only
+   * stop `this.micStream`, and that field is not assigned until the
+   * request below has resolved - so a `stop()` during the permission
+   * prompt stopped nothing at all, and the track that arrived afterwards
+   * was assigned to an endpoint nobody was holding, connected to a
+   * context that was already closed, and left `live`. The window is
+   * however long the visitor takes to answer a system dialog they were
+   * shown the instant the panel opened, which on a first visit is
+   * seconds. Pressing Back during it was enough.
+   *
+   * A stream that arrives after `stop()` is therefore stopped here and
+   * now, because nothing downstream will ever see it, and `stop()` has
+   * already been and gone. Found by the end-to-end review, 16 Sep 2026
+   * (issue #8).
+   */
+  async _acquireMicrophone(constraints) {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    if (this.stopped) {
+      for (const track of stream.getTracks()) track.stop();
+      throw new EndpointStopped();
+    }
+    return stream;
+  }
+
+  /**
    * Asks for the microphone with every processing feature turned off as
    * a required constraint, not a hint - `{exact: false}`, not a plain
    * `false`, because a plain boolean is only a request some hardware
@@ -354,7 +399,7 @@ export class ModemEndpoint extends EventTarget {
 
     let stream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
+      stream = await this._acquireMicrophone({
         audio: {
           echoCancellation: { exact: false },
           noiseSuppression: { exact: false },
@@ -362,6 +407,10 @@ export class ModemEndpoint extends EventTarget {
         },
       });
     } catch (err) {
+      // Cancellation is not a device limitation, so it must not fall
+      // through to the retry below - that would put a second permission
+      // prompt in front of somebody who has already left the page.
+      if (err instanceof EndpointStopped) throw err;
       // A required constraint the hardware or driver cannot satisfy
       // throws OverconstrainedError rather than silently degrading -
       // that is a genuine, reportable fact about this device, not a
@@ -373,7 +422,7 @@ export class ModemEndpoint extends EventTarget {
       diagnostics.warnings.push(
         `this device would not guarantee raw audio (${err.name}: ${err.message}) - retrying as a request rather than a requirement`,
       );
-      stream = await navigator.mediaDevices.getUserMedia({
+      stream = await this._acquireMicrophone({
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
@@ -410,6 +459,11 @@ export class ModemEndpoint extends EventTarget {
    * automatic, because an open call is meant to keep running.
    */
   async stop() {
+    // Before anything else, and before the first await below: a
+    // getUserMedia still in flight resolves into `_acquireMicrophone`,
+    // which reads this to decide whether the stream it just received has
+    // an owner left to give it to.
+    this.stopped = true;
     if (this.micStream) {
       for (const track of this.micStream.getTracks()) track.stop();
       this.micStream = null;
