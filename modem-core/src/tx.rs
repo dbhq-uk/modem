@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use crate::frame::frame_byte;
 use crate::nco::Nco;
 use crate::resample::Resampler;
-use crate::{samples_per_symbol, tones, Config, DSP_RATE};
+use crate::{samples_per_symbol, tones, Config, BAUD, DSP_RATE};
 
 /// Bound on the pending output queue - device-rate samples the resampler
 /// produced in a previous `read` but that call's `out` was already full.
@@ -139,8 +139,22 @@ impl Tx {
     /// reason - a sequencer needs to either drain each `Tx` until
     /// `pending()` is false (plus one more symbol to flush the last bit)
     /// or account for the lead-in itself.
+    /// # At the device rate, not the DSP rate
+    ///
+    /// This used to compute `n * samples_per_symbol()`, which is fixed at
+    /// `DSP_RATE / BAUD` - so it returned DSP-rate samples while `read()`
+    /// twelve lines below fills its buffer at the *device* rate. At 8 kHz
+    /// the two are the same number and nothing noticed. At 48 kHz it was
+    /// out by six: `samples_for_bits(300)` returned 8000 where one second
+    /// of output is 48000 samples.
+    ///
+    /// Every caller was a test at 8 kHz, so nothing was broken - but both
+    /// of those callers use it to size a buffer they then hand to
+    /// `read()`, which is exactly the use that would have silently
+    /// under-run at any other rate. Found by the end-to-end review,
+    /// 16 September 2026 (issue #10).
     pub fn samples_for_bits(&self, n: usize) -> usize {
-        libm::round(n as f64 * samples_per_symbol()) as usize
+        libm::round(n as f64 * self.cfg.sample_rate as f64 / BAUD) as usize
     }
 
     /// Fills `out` with the next block at the device rate, holding mark when
@@ -254,6 +268,26 @@ mod tests {
     fn samples_for_bits_is_fractional() {
         let tx = Tx::new(cfg(Role::Originate));
         assert_eq!(tx.samples_for_bits(1000), 26_667);
+    }
+
+    /// The rate actually gets used. Without this the function can go back
+    /// to `samples_per_symbol()` - fixed at the DSP rate - and the test
+    /// above still passes, because at 8 kHz the two agree. That is how it
+    /// was wrong for as long as it was (issue #10).
+    #[test]
+    fn samples_for_bits_follows_the_device_rate() {
+        let at = |rate: u32| {
+            Tx::new(Config {
+                sample_rate: rate,
+                role: Role::Originate,
+                duplex: Duplex::HalfPingPong,
+            })
+            .samples_for_bits(300)
+        };
+        // 300 bits at 300 baud is one second, whatever the rate.
+        assert_eq!(at(8_000), 8_000);
+        assert_eq!(at(44_100), 44_100);
+        assert_eq!(at(48_000), 48_000);
     }
 
     /// Guards the live path. samples_for_bits has its own test above, but
