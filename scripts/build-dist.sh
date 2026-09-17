@@ -4,7 +4,7 @@
 #
 # One script, used by both the deploy workflow and the smoke tests, so the
 # thing CI exercises is the thing that ships. It was inline in
-# deploy.yml; the smoke tests need the identical tree (the route
+# ci.yml's deploy job; the smoke tests need the identical tree (the route
 # directories and their injected <base> are part of what they test), and
 # two copies of this would drift the first time one changed.
 #

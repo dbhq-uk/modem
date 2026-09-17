@@ -119,7 +119,7 @@ cd web && python3 ../spike/serve.py
 
 The symlink matters: `index.html` loads `../brand/tokens.css` relative to
 itself, which resolves correctly once deployed (`brand/` sits alongside
-the site at the deployed root - see `.github/workflows/deploy.yml`'s own
+the site at the deployed root - see the `deploy` job in `.github/workflows/ci.yml`'s own
 `dist/` assembly), but serving `web/` alone locally has no `brand/`
 sibling for that URL to resolve to, so every design token silently comes
 back undefined and the page renders with no colour, spacing or type

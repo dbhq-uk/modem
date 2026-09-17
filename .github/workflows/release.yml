@@ -13,7 +13,54 @@ permissions:
   contents: write
 
 jobs:
+  # WHICH COMMIT IS BEING RELEASED, decided once and passed to everything
+  # else (issue #5, found by the end-to-end review on 16 Sep 2026).
+  #
+  # `workflow_dispatch` takes a tag and the publish step below releases
+  # to it, but `actions/checkout` with no `ref` uses the *triggering*
+  # ref - the branch you dispatched from. So dispatching from main with
+  # `tag: v0.1.0` built current main and attached those binaries to the
+  # v0.1.0 release, with nothing in the run saying so. That is not a
+  # hypothetical for this repo: the v0.1.0 tag was deleted and re-pushed
+  # on 16 Sep after a runner problem, and a dispatch is the obvious way
+  # to retry that.
+  #
+  # This resolves the requested tag to an immutable SHA, fails if it does
+  # not exist, and every job below checks out that SHA rather than a ref
+  # that can move under them.
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      sha: ${{ steps.pick.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+        with:
+          # Tags are not fetched by default, and this job exists to look
+          # one up.
+          fetch-depth: 0
+
+      - id: pick
+        env:
+          REQUESTED: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${REQUESTED:-${GITHUB_REF_NAME}}"
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "no such tag: ${TAG}"
+            echo "a release must name a tag that exists - push the tag first"
+            exit 1
+          fi
+          # ^{} dereferences an annotated tag to the commit it points at.
+          SHA=$(git rev-parse "refs/tags/${TAG}^{}")
+          echo "releasing ${TAG} at ${SHA}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: resolve
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -54,7 +101,10 @@ jobs:
             binary: modem.exe
 
     steps:
+      # The resolved commit, not the triggering ref - see the resolve job.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
 
       - uses: dtolnay/rust-toolchain@ce678459e9fc7500d337468f904b95f1b5c10b5e # 1.98.1
         with:
@@ -109,10 +159,16 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [resolve, build]
     runs-on: ubuntu-latest
     steps:
+      # The same resolved commit the binaries were built from. This job
+      # only needs a checkout at all so the release notes are generated
+      # against the right history, but taking the default ref here while
+      # `build` took the tag would be the same inconsistency in miniature.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -137,7 +193,7 @@ jobs:
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ needs.resolve.outputs.tag }}
           files: dist/*
           generate_release_notes: true
           body: |
@@ -149,3 +205,5 @@ jobs:
             Run `modem` for the two-pane demo on one machine, or
             `modem --single --acoustic` on two machines with `ATDT<digits>`
             on one and `ATA` on the other.
+
+            Built from ${{ needs.resolve.outputs.sha }}.

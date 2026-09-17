@@ -33,7 +33,7 @@ project only adds a record to it, which is why `zone_id` is a plain variable
 rather than a resource reference.
 
 **Deployments** are not managed here either. The Pages project is
-direct-upload: `.github/workflows/deploy.yml` drives wrangler, and Cloudflare
+direct-upload: the `deploy` job in `.github/workflows/ci.yml` drives wrangler, and Cloudflare
 serves exactly what that workflow last uploaded. Terraform owns the project's
 existence and its custom domain, not its contents - hence the `ignore_changes`
 on the deploy config, which would otherwise churn on every push.
