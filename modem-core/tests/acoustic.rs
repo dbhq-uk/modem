@@ -255,10 +255,7 @@ fn the_idle_attenuation_is_what_makes_this_work() {
         // out rather than a second generator being written here that
         // could drift from it.
         let quiet = own_speaker(far(role), base.len());
-        let loud: Vec<f32> = quiet
-            .iter()
-            .map(|s| s / IDLE_MARK_AMPLITUDE)
-            .collect();
+        let loud: Vec<f32> = quiet.iter().map(|s| s / IDLE_MARK_AMPLITUDE).collect();
 
         let air = duplex_leak(&base, &loud, FIELD_SELF_JAM);
         let ber = ber_of(role, &air);
