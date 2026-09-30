@@ -27,16 +27,17 @@ import { test, expect } from '@playwright/test';
 const PAGES = ['/', '/explained', '/research',
   '/debugging', '/downloads', '/about'];
 
-/** Dismisses the consent dialog if it is showing.
+/** Answers the analytics notice if it is showing.
  *
- * It is a native `<dialog>` opened with `showModal()`, so it is in the
- * top layer and swallows every click underneath it - a test that skips
- * this fails on "dialog intercepts pointer events" rather than on
- * anything it was written to check. Declining rather than accepting so
- * the tests never turn analytics on. */
+ * The notice is non-modal since 30 Sep 2026 - it no longer swallows every
+ * click the way the old showModal() dialog did - but it is still a fixed
+ * box over the bottom of the viewport, and on a phone it can sit on top
+ * of a button a test wants to press. Opting out rather than keeping it on,
+ * so the tests never turn analytics on (off the live host it never loads
+ * anyway). */
 async function dismissConsent(page) {
-  const decline = page.locator('[data-consent-decline]');
-  if (await decline.isVisible().catch(() => false)) await decline.click();
+  const optOut = page.locator('[data-analytics-off]');
+  if (await optOut.isVisible().catch(() => false)) await optOut.click();
 }
 
 /** Fails the test on any console error or unhandled rejection.
@@ -641,5 +642,173 @@ test.describe('the shared chrome', () => {
       await expect(footer.locator(`a[href*="${host}"]`)).toHaveCount(0);
     }
     await expect(footer).not.toContainText('Also from DBHQ');
+  });
+});
+
+// The analytics notice, since 30 Sep 2026: GA4 on by default with a simple
+// opt-out, under the PECR statistical-purposes exception - the pattern every
+// DBHQ site follows (dbhq/docs/reference/analytics.md). Each test here pins
+// one of the things that exception depends on, so a change that quietly
+// turned the notice back into a gate, dropped the opt-out, or let GA4 carry
+// on after it fails here rather than on the live site.
+test.describe('the analytics notice', () => {
+  const GA_ID = 'G-3H3NFGSX85';
+
+  test('shows on a first visit and does not block the page', async ({ page }) => {
+    await page.goto('/');
+    const notice = page.locator('[data-analytics-notice]');
+    await expect(notice).toBeVisible();
+    // Not a <dialog>, and nothing on the page is modal. The prompt this
+    // replaced was showModal()'d, which is the right thing to ask with and
+    // the wrong thing to inform with.
+    const shape = await page.evaluate(() => ({
+      tag: document.querySelector('[data-analytics-notice]').tagName,
+      modal: document.querySelector(':modal') !== null,
+    }));
+    expect(shape).toEqual({ tag: 'ASIDE', modal: false });
+    // The proof that matters: the page underneath takes a click while the
+    // notice is still up and unanswered.
+    await page.locator('.site-nav a[href="/about"]').click();
+    await expect(page).toHaveURL(/\/about$/);
+    await expect(notice).toBeVisible();
+  });
+
+  test('Opt out is exactly as prominent as OK', async ({ page }) => {
+    await page.goto('/');
+    const off = page.locator('[data-analytics-off]');
+    const on = page.locator('[data-analytics-on]');
+    await expect(off).toBeVisible();
+    await expect(off).toHaveText('Opt out');
+    await expect(on).toHaveText('OK');
+    const look = (el) => el.evaluate((b) => {
+      const s = getComputedStyle(b);
+      return {
+        className: b.className, color: s.color, background: s.backgroundColor,
+        border: s.border, font: s.font, height: Math.round(b.getBoundingClientRect().height),
+      };
+    });
+    expect(await look(off)).toEqual(await look(on));
+  });
+
+  test('Opt out stops analytics on this page and is remembered', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('[data-analytics-off]').click();
+    await expect(page.locator('[data-analytics-notice]')).toBeHidden();
+    // Denied consent alone still lets GA4 send cookieless pings; this flag
+    // is what stops every hit from the page the visitor opted out on.
+    expect(await page.evaluate((id) => window[`ga-disable-${id}`], GA_ID)).toBe(true);
+    expect(await page.evaluate(() => document.cookie)).toContain('dbhq_analytics=off');
+
+    await page.goto('/about');
+    await expect(page.locator('[data-analytics-notice]')).toBeHidden();
+
+    // The footer reopens it, says where things stand, and offers the way back.
+    const settings = page.locator('footer [data-analytics-settings]');
+    await expect(settings).toBeVisible();
+    await settings.click();
+    await expect(page.locator('[data-analytics-notice]')).toBeVisible();
+    await expect(page.locator('[data-analytics-status]')).toHaveText('Analytics is off in this browser.');
+    await expect(page.locator('[data-analytics-on]')).toHaveText('Turn back on');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-analytics-notice]')).toBeHidden();
+    await expect(settings).toBeFocused();
+  });
+
+  test('the 404 page shows no Cookie settings, because it loads no analytics', async ({ page }) => {
+    await page.goto('/no-such-page');
+    await expect(page.locator('footer [data-analytics-settings]')).toBeHidden();
+  });
+
+  // Served as the real host, because off it GA4 never loads at all. The
+  // local tree is fulfilled for https://modem.dbhq.uk/, navigator.webdriver
+  // is hidden (the bot check rightly reads Playwright as a bot), and every
+  // Google request is recorded and aborted, so nothing reaches the property
+  // and no network is needed.
+  test.describe('served as modem.dbhq.uk', () => {
+    const LIVE = 'https://modem.dbhq.uk';
+    const DESKTOP = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+
+    async function liveHost(browser, baseURL, { userAgent = DESKTOP, init } = {}) {
+      const context = await browser.newContext({ userAgent });
+      await context.addInitScript(() => Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => false }));
+      if (init) await context.addInitScript(init);
+      await context.route(`${LIVE}/**`, async (route) => {
+        const url = new URL(route.request().url());
+        const response = await route.fetch({ url: baseURL + url.pathname + url.search });
+        await route.fulfill({ response });
+      });
+      const google = { tag: 0 };
+      await context.route(/googletagmanager\.com|google-analytics\.com|analytics\.google\.com/, (route) => {
+        if (route.request().url().includes('/gtag/js')) google.tag++;
+        return route.abort();
+      });
+      return { context, google };
+    }
+
+    /** Whether this page injected the GA4 tag. Read off the DOM once the
+     *  analytics module has run, so a "no" is a real no and not a race. */
+    async function tagInjected(page) {
+      await page.waitForFunction(() => window.dbhqAnalytics);
+      return page.evaluate(() => document.querySelectorAll('script[src*="googletagmanager.com/gtag/js"]').length);
+    }
+
+    test('a new visitor gets GA4 with the analytics-only config, and Opt out ends it', async ({ browser, baseURL }) => {
+      const { context, google } = await liveHost(browser, baseURL);
+      // A _ga cookie as GA4 would have set it, on the shared parent.
+      await context.addCookies([{ name: '_ga', value: 'GA1.1.1.1', domain: '.dbhq.uk', path: '/' }]);
+      const page = await context.newPage();
+      await page.goto(`${LIVE}/`);
+      await expect(page.locator('[data-analytics-notice]')).toBeVisible();
+      expect(await tagInjected(page)).toBe(1);
+      await expect.poll(() => google.tag).toBe(1);
+
+      const layer = await page.evaluate(() => window.dataLayer.map((a) => Array.from(a)));
+      expect(layer).toContainEqual(['consent', 'default', {
+        analytics_storage: 'granted', ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied',
+      }]);
+      expect(layer).toContainEqual(['config', GA_ID, {
+        allow_google_signals: false, allow_ad_personalization_signals: false,
+      }]);
+
+      await page.locator('[data-analytics-off]').click();
+      const cookies = await context.cookies(LIVE);
+      expect(cookies.filter((c) => c.name === '_ga' || c.name.startsWith('_ga_'))).toEqual([]);
+      const choice = cookies.find((c) => c.name === 'dbhq_analytics');
+      expect(choice && { value: choice.value, domain: choice.domain, secure: choice.secure })
+        .toEqual({ value: 'off', domain: '.dbhq.uk', secure: true });
+      expect(await page.evaluate((id) => window[`ga-disable-${id}`], GA_ID)).toBe(true);
+
+      await page.goto(`${LIVE}/about`);
+      expect(await tagInjected(page)).toBe(0);
+      expect(google.tag).toBe(1);
+      await context.close();
+    });
+
+    test('a decline left under the old prompt loads nothing and moves onto the cookie', async ({ browser, baseURL }) => {
+      const { context } = await liveHost(browser, baseURL, {
+        init: () => {
+          if (location.hostname === 'modem.dbhq.uk' && !sessionStorage.getItem('seeded')) {
+            localStorage.setItem('dbhq-consent', 'denied');
+            sessionStorage.setItem('seeded', '1');
+          }
+        },
+      });
+      const page = await context.newPage();
+      await page.goto(`${LIVE}/`);
+      expect(await tagInjected(page)).toBe(0);
+      await expect(page.locator('[data-analytics-notice]')).toBeHidden();
+      const choice = (await context.cookies(LIVE)).find((c) => c.name === 'dbhq_analytics');
+      expect(choice && choice.value).toBe('off');
+      expect(await page.evaluate(() => localStorage.getItem('dbhq-consent'))).toBeNull();
+      await context.close();
+    });
+
+    test('stale desktop Chrome is treated as a bot and loads nothing', async ({ browser, baseURL }) => {
+      const { context } = await liveHost(browser, baseURL, { userAgent: DESKTOP.replace('Chrome/141', 'Chrome/118') });
+      const page = await context.newPage();
+      await page.goto(`${LIVE}/`);
+      expect(await tagInjected(page)).toBe(0);
+      await context.close();
+    });
   });
 });

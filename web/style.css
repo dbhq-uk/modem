@@ -2341,69 +2341,142 @@ body.app-mode {
 }
 
 /* -------------------------------------------------------------------
- * Consent prompt
+ * Analytics notice (30 Sep 2026), replacing the modal consent prompt
  *
- * A native <dialog> opened with showModal(), which renders in the
- * browser's top layer - above the .crt-frame scanline and vignette
- * overlays without needing a z-index to beat them, since the top layer
- * sits above the whole stacking context rather than inside it.
+ * NON-MODAL. The old prompt was a <dialog> opened with showModal(), in
+ * the top layer, behind a dark backdrop, holding focus until answered.
+ * Analytics is on by default now with a simple opt-out (see
+ * web/analytics.js), so there is nothing to agree to before reading and
+ * nothing here may block the page: an ordinary fixed box in the bottom
+ * corner, no backdrop, the demo underneath fully usable.
  *
- * Styled as a terminal panel: ground behind, amber rule and heading,
- * the same dial-button the rest of the page uses for its controls.
+ * Out of the top layer, it has to beat the page's own stacking with a
+ * z-index instead: above the scanline and vignette overlays (49, 50), the
+ * sticky nav (60) and the full-screen app-mode panel (300), so a first
+ * visit straight into a live panel still gets the notice. Below
+ * .crt-warmup (999), which is transparent except during the sweep.
+ *
+ * Styled as the terminal panel the prompt was: ground behind, amber rule
+ * and label, the page's own dial-button for both choices. The two
+ * buttons are deliberately the same button - no amber on OK, no dimming
+ * on Opt out - because objecting must be exactly as prominent as
+ * carrying on.
  * ------------------------------------------------------------------- */
-.consent {
-  max-width: 52ch;
-  margin: auto;
-  padding: var(--modem-space-sm) var(--modem-space-md);
+.analytics-notice {
+  position: fixed;
+  z-index: 400;
+  left: var(--modem-space-sm);
+  bottom: var(--modem-space-sm);
+  box-sizing: border-box;
+  width: calc(100% - 2 * var(--modem-space-sm));
+  max-width: 30rem;
+  margin: 0;
+  padding: var(--modem-space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--modem-space-xs);
   background: var(--modem-ground);
   border: 1px solid var(--modem-amber-bright);
   color: var(--modem-white-bright);
   font-family: var(--modem-type-face);
-  font-size: var(--modem-type-scale-base);
+  font-size: var(--modem-type-scale-small);
   line-height: var(--modem-line-height-ratio);
 }
 
-.consent[open] {
-  display: flex;
-  flex-direction: column;
-  gap: var(--modem-space-sm);
+.analytics-notice:focus {
+  outline: none;
 }
 
-.consent::backdrop {
-  background: rgb(0 0 0 / 0.72);
+.analytics-notice:focus-visible {
+  outline: 1px solid var(--modem-green-bright);
+  outline-offset: 2px;
 }
 
-.consent h2 {
+/* The global `p` measure would narrow these inside an already narrow box. */
+.analytics-notice p {
   margin: 0;
+  max-width: none;
+}
+
+.analytics-notice__label {
   color: var(--modem-amber-bright);
-  font-size: var(--modem-type-scale-small);
   letter-spacing: 0.1em;
   text-shadow: 0 0 var(--modem-bloom-radius) currentColor;
 }
 
-.consent p {
-  margin: 0;
+.analytics-notice__text {
   color: var(--modem-white-dim);
 }
 
-.consent-actions {
+.analytics-notice__text a {
+  white-space: nowrap;
+  text-underline-offset: 3px;
+}
+
+.analytics-notice__status {
+  color: var(--modem-white-bright);
+}
+
+.analytics-notice__actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--modem-space-sm);
   justify-content: flex-end;
+  margin-top: var(--modem-space-xs);
 }
 
-/* Accept carries the amber the heading uses, so the affirmative action
-   reads first; decline stays in the page's ordinary green. Both are
-   real buttons at the same size - the decline is not made harder to
-   hit or harder to see, which is the whole point of asking. */
-.consent [data-consent-accept] {
-  color: var(--modem-amber-bright);
-  border-color: var(--modem-amber-bright);
+/* Tighter than a page-level dial-button, and never wrapping: at 375px the
+   page's 4ch padding broke "Opt out" over two lines beside a one-line OK,
+   which made the two choices look unequal. */
+.analytics-notice__actions .dial-button {
+  padding: var(--modem-space-xs) var(--modem-space-sm);
+  white-space: nowrap;
 }
 
-.consent [data-consent-accept]:hover,
-.consent [data-consent-accept]:focus-visible {
-  background: var(--modem-amber-bright);
-  color: var(--modem-ground);
+/* Footer "Cookie settings" - reopens the notice. Plain text rather than
+   a framed control like the source link beside it: it is housekeeping,
+   not a destination. A <button> does not inherit the page font, hence
+   `font: inherit` - on dbhq.uk the equivalent rendered in the UA default. */
+.endorsement__source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--modem-space-sm);
+}
+
+.endorsement__settings {
+  font: inherit;
+  color: var(--modem-white-dim);
+  background: transparent;
+  border: 0;
+  padding: var(--modem-space-xs) 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.endorsement__settings:hover,
+.endorsement__settings:focus-visible {
+  color: var(--modem-green-bright);
+}
+
+@media (max-width: 30rem) {
+  .analytics-notice {
+    bottom: max(var(--modem-space-sm), env(safe-area-inset-bottom));
+  }
+
+  /* Side by side at equal width, so neither choice is the smaller one. */
+  .analytics-notice__actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .analytics-notice__actions .dial-button {
+    justify-content: center;
+  }
+
+  .endorsement__settings {
+    min-height: 44px;
+  }
 }

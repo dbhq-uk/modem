@@ -12,7 +12,7 @@ web/_gen/frames.py already follows for the two rendered terminal frames.
 ## Why this exists
 
 Task 3n split modem.dbhq.uk from two pages into six. Six pages sharing a
-nav, a footer and a consent dialog is six hand-maintained copies unless
+nav, a footer and an analytics notice is six hand-maintained copies unless
 something splices them in from one source - the same drift risk
 frames.py already solves for the terminal frames, just for markup this
 project authors itself rather than markup pulled from another crate.
@@ -34,7 +34,7 @@ would be the opposite of "six real pages, each with its own title and
 h1". Only the chrome every page shares - the nav (four items, one of
 them a "Read" disclosure holding three more, plus the script that makes
 the disclosure well-mannered), the footer's byline and source link, and
-the consent dialog plus its two script tags - is generated.
+the analytics notice plus its script tags - is generated.
 """
 
 from pathlib import Path
@@ -175,8 +175,9 @@ NAV_MORE = (
 
 # Which page each file is, for aria-current="page" - and which of the
 # three regions each file actually carries. 404.html gets a nav and a
-# footer (so it is not a dead end) but no consent dialog: it is
-# noindexed and carries no analytics of its own to gate.
+# footer (so it is not a dead end) but no analytics notice: it is
+# noindexed and loads no analytics at all, so its footer's "Cookie
+# settings" stays hidden - nothing runs consent.js there to show it.
 PAGES = {
     "index.html": {"nav_id": "try", "regions": ("nav", "footer", "consent")},
     "explained.html": {"nav_id": "explained", "regions": ("nav", "footer", "consent")},
@@ -298,6 +299,14 @@ def render_nav(current_id: str | None) -> str:
 # sibling that is actually related to this project - bbs - is a nav item
 # now instead. Nothing in the footer needs to change with it, which is
 # why this is a constant again rather than a per-page render.
+#
+# "COOKIE SETTINGS" SITS BESIDE THE SOURCE LINK (30 Sep 2026). The opt-out
+# pattern every DBHQ site follows needs a way back to the analytics notice
+# after it has been answered, and the footer is where every site keeps it.
+# It is quieter than the source link - plain text, no frame - because it
+# is housekeeping rather than a destination. It ships `hidden` and
+# consent.js reveals it, so a visitor without JavaScript, who gets no
+# analytics either, is never shown a button that does nothing.
 FOOTER = """<footer class="endorsement">
   <p class="endorsement__byline">a <a href="https://dbhq.uk">DBHQ</a> experiment by <a href="https://dbhq.uk">Daniel Grimes</a>. MIT licensed.</p>
 
@@ -306,39 +315,61 @@ FOOTER = """<footer class="endorsement">
       <svg class="endorsement__github-mark" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
       <span>Source on GitHub</span>
     </a>
+    <button type="button" class="endorsement__settings" data-analytics-settings hidden>Cookie settings</button>
   </p>
 </footer>"""
 
-# The two dialog buttons carry their own icons rather than going through
+# The analytics notice (30 Sep 2026), replacing a modal Accept/Decline
+# <dialog>. Analytics is on by default now, under the PECR
+# statistical-purposes exception, so this informs and offers a way out
+# rather than asking - see web/analytics.js for the reasoning and
+# web/consent.js for the behaviour.
+#
+# NON-MODAL: an <aside>, not a <dialog>, so it is never in the top layer,
+# never traps focus and never swallows a click on the demo underneath.
+# It is fixed to the bottom corner instead, above the scanline overlays
+# on z-index (see .analytics-notice in style.css).
+#
+# The copy is the estate's, word for word, as on dbhq.uk: what is
+# counted, that there is no advertising, and a link to the one privacy
+# page every DBHQ site shares. It said "We would like to count..." until
+# this change, and DBHQ is never a "we" - there is no team behind it.
+#
+# "CARRIER DETECT" stays as the label, drawn as the terminal's own amber
+# heading. It is decoration and is aria-hidden: to a screen reader it
+# means nothing, so the aside is named "Analytics notice" instead.
+#
+# The two buttons carry their own icons rather than going through
 # web/_gen/icons.py: that script matches on a button's visible text, and
-# "Decline"/"Accept" are generated here, so it would never see them in a
-# source file to rewrite. A cross and a tick - the one pair on the site
-# where the two choices are opposites and the glyph says so faster than
-# the word.
+# these labels are generated here, so it would never see them in a
+# source file to rewrite. A cross and a tick. OPT OUT AND OK ARE THE SAME
+# BUTTON - same class, same colour, same size - because objecting must
+# be exactly as easy to see and to hit as carrying on. The old dialog
+# gave Accept the amber and left Decline green; do not bring that back.
 #
 # boot.js first - it decides whether the CRT power-on sweep plays at all
 # on this load (see that file), so it wants to run before anything else
 # has a chance to hold the main thread. Then analytics.js then consent.js,
-# always in that order (GA4 must exist before consent.js can call
-# window.__dbhqEnableGA on Accept), then the dialog itself. Every page
-# that carries this region carries the dialog - GA must never load
-# anywhere without it, which has already been got wrong once (see git
-# history).
+# always in that order (window.dbhqAnalytics must exist before consent.js
+# reads it), then the notice itself. Every page that carries this region
+# carries the notice - GA must never load anywhere without it, which has
+# already been got wrong once (see git history).
 CONSENT = """<script type="module" src="boot.js"></script>
 <script type="module" src="analytics.js"></script>
 <script type="module" src="consent.js"></script>
-<dialog class="consent" data-consent aria-labelledby="consent-title">
-  <h2 id="consent-title">CARRIER DETECT</h2>
-  <p>
-    We would like to count how many people come here to listen, using Google
-    Analytics. Cookies are only set if you accept, and the modem answers
-    exactly the same either way.
+<aside class="analytics-notice" data-analytics-notice aria-label="Analytics notice" tabindex="-1" hidden>
+  <p class="analytics-notice__label" aria-hidden="true">CARRIER DETECT</p>
+  <p class="analytics-notice__text">
+    DBHQ counts visits with Google Analytics to see which pages are useful.
+    No advertising, and nothing shared with advertisers.
+    <a href="https://dbhq.uk/privacy/#analytics">How it works</a>
   </p>
-  <div class="consent-actions">
-    <button type="button" class="dial-button" data-consent-decline><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg><span>Decline</span></button>
-    <button type="button" class="dial-button" data-consent-accept autofocus><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"/></svg><span>Accept</span></button>
+  <p class="analytics-notice__status" data-analytics-status hidden></p>
+  <div class="analytics-notice__actions">
+    <button type="button" class="dial-button" data-analytics-off><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg><span>Opt out</span></button>
+    <button type="button" class="dial-button" data-analytics-on><svg class="dial-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"/></svg><span>OK</span></button>
   </div>
-</dialog>"""
+</aside>"""
 
 
 def render_region(region: str, nav_id: str | None) -> str:

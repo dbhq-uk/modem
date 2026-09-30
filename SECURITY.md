@@ -31,9 +31,18 @@ does nothing with the samples except demodulate them.
 
 ## What the site stores
 
-Nothing, unless you accept the consent dialog, in which case Google Analytics sets its own
-cookies. Declining is a real decline: no analytics script is initialised. The modem behaves
-identically either way.
+Two things, both about analytics, and the modem behaves identically whichever way they go.
+
+- **Google Analytics sets its own cookies (`_ga`, `_ga_*`) by default.** Since 30 September 2026
+  the site counts visits unless you opt out, under the UK statistical-purposes exception for
+  analytics: statistics only, no advertising signals, Google Signals off. A notice says so on your
+  first visit, with "Opt out" beside "OK" at the same size, and "Cookie settings" in the footer
+  brings it back. How it works for every DBHQ site is at
+  [dbhq.uk/privacy](https://dbhq.uk/privacy/#analytics).
+- **Your answer is a cookie, `dbhq_analytics=on` or `off`, on `.dbhq.uk`.** Opting out is a real
+  opt-out: the `_ga` cookies are deleted, nothing more is sent from that page, and no later page
+  loads the analytics script at all. Because the cookie is on the parent domain, opting out here
+  opts you out on every `*.dbhq.uk` site.
 
 ## The acoustic lab
 
@@ -56,4 +65,4 @@ Every GitHub Action is pinned to a commit SHA, and Dependabot keeps those pins m
 no updater is a pin that rots. Release binaries are built from the commit the tag points at, and
 the release notes record that SHA.
 
-The page loads no third-party JavaScript except Google Analytics, gated behind consent.
+The page loads no third-party JavaScript except Google Analytics, and not that once you opt out.
