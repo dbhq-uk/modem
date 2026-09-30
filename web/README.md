@@ -26,7 +26,7 @@ as of task 3n (9 Sep 2026), not one long page. What is here:
   `index.html`'s "Two ways to try this" section - see that script's own
   doc and "The generated frames" below.
 - `_gen/pages.py` - regenerates the primary nav, the footer and the
-  consent/analytics block shared by all six pages plus `404.html` - see
+  analytics notice block shared by all six pages plus `404.html` - see
   that script's own doc and "The generated frames" below (same
   BEGIN/END-marker mechanism, applied to markup this project authors
   itself rather than markup pulled from another crate).
@@ -78,11 +78,11 @@ region cannot land unnoticed.
 
 ## The generated shared chrome
 
-Six pages sharing a nav, a footer and a consent dialog is six
+Six pages sharing a nav, a footer and an analytics notice is six
 hand-maintained copies unless something splices them in from one source.
 There is no build step for HTML in this repo, so `web/_gen/pages.py`
 follows `frames.py`'s own pattern instead: the nav, the footer and the
-consent/analytics block are generated between the same kind of
+analytics notice block are generated between the same kind of
 BEGIN/END marker comments, on all six pages plus `404.html` (nav and
 footer only there - a 404 carries no analytics of its own to gate).
 Never hand-edit inside those markers; edit `web/_gen/pages.py` and
@@ -94,6 +94,17 @@ python3 web/_gen/pages.py
 
 Needs nothing beyond the Python standard library. CI's `generated_assets`
 job runs this alongside every other generator and fails on any diff.
+
+## Analytics
+
+`analytics.js` loads GA4 by default and `consent.js` draws the non-modal
+notice with its "Opt out", since 30 Sep 2026 - the pattern every DBHQ
+site follows, set out in the dbhq repo's `docs/reference/analytics.md`.
+Both are external files because the CSP has no `'unsafe-inline'`, and
+`analytics.js` must load first: it defines `window.dbhqAnalytics`, which
+`consent.js` calls. GA4 only ever loads on `modem.dbhq.uk` itself, so a
+local preview never measures anything; the smoke tests serve the build as
+that host to check the live behaviour.
 
 ## Building the WASM module
 
